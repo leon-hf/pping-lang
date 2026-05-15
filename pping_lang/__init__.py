@@ -6,7 +6,7 @@ from pping_lang.plugin import PpingLangStatLogger
 from pping_lang.sink import LocalSink, Sink
 from pping_lang.types import Diagnosis, MetricPoint, Severity
 
-__version__ = "0.0.1.dev0"
+__version__ = "0.1.0a1"
 __all__ = [
     "PpingLangStatLogger",
     "MetricPoint",
