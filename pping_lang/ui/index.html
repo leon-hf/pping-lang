@@ -285,6 +285,10 @@
 </div>
 
 <script>
+// Chart.js instance held in closure (NOT in Alpine's reactive state) —
+// Alpine's Proxy wrapping breaks Chart.js's internal state machine.
+let _chart = null;
+
 function dashboard() {
   return {
     tab: 'live',
@@ -296,8 +300,6 @@ function dashboard() {
     padding_ratio: 0,
     mfu: 0,
     diagnoses: [],
-    chart: null,
-    refreshTimer: null,
 
     fmt(v, digits) {
       if (v == null || isNaN(v)) return '—';
@@ -305,7 +307,7 @@ function dashboard() {
     },
 
     init() {
-      this.chart = new Chart(document.getElementById('gpu-chart').getContext('2d'), {
+      _chart = new Chart(document.getElementById('gpu-chart').getContext('2d'), {
         type: 'line',
         data: {
           labels: [],
@@ -332,7 +334,7 @@ function dashboard() {
         }
       });
       this.refresh();
-      this.refreshTimer = setInterval(() => this.refresh(), 2000);
+      setInterval(() => this.refresh(), 2000);
     },
 
     async refresh() {
@@ -352,18 +354,21 @@ function dashboard() {
         this.padding_ratio = m['vllm.cudagraph.padding_ratio']?.value ?? 0;
         this.mfu           = m['vllm.perf.mfu_ratio']?.value ?? 0;
 
-        const pts = recentR.points || [];
-        this.chart.data.labels = pts.map((_, i) => i);
-        this.chart.data.datasets[0].data = pts.map(p => p.value);
-        this.chart.update('none');
-
-        // Dedup diagnoses by rule_id, keep latest
+        // Dedup diagnoses by rule_id, keep most recent (API returns newest first)
         const seen = new Set();
         this.diagnoses = (diagR.diagnoses || []).filter(d => {
           if (seen.has(d.rule_id)) return false;
           seen.add(d.rule_id);
           return true;
         });
+
+        // Chart update — guarded so a Chart.js bug never breaks data flow above
+        if (_chart) {
+          const pts = recentR.points || [];
+          _chart.data.labels = pts.map((_, i) => i);
+          _chart.data.datasets[0].data = pts.map(p => p.value);
+          _chart.update('none');
+        }
       } catch (e) {
         console.warn('[pping-lang] refresh failed:', e);
       }

@@ -37,7 +37,7 @@ os.environ["PPING_LANG_DISABLE_NVML"] = "1"            # demo 跑在无 GPU 机�
 from pping_lang.hardware import GPUPeak  # noqa: E402
 from pping_lang.plugin import PpingLangStatLogger  # noqa: E402
 
-DEMO_DURATION_S = 12
+DEMO_DURATION_S = int(os.environ.get("DEMO_DURATION_S", "12"))
 
 # H100 SXM peak — 用于 MFU 派生
 DEMO_GPU_PEAK = GPUPeak(bf16_tflops=989.0, mem_bw_gbs=3350.0)
