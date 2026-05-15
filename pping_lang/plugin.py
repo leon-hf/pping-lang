@@ -7,10 +7,15 @@ Day 3 status：完整数据流通了。
 - GPU peak 表查找成功则计算 MFU / mem_bw_util_ratio
 
 环境变量：
-- PPING_LANG_DB_PATH         默认 ~/.pping-lang/local.duckdb
-- PPING_LANG_INSTANCE_ID     默认 local-{engine_index}
-- PPING_LANG_NVML_INTERVAL_S 默认 0.1（NVML 采样间隔，秒）
-- PPING_LANG_DISABLE_NVML    设为 1 关闭 NVML 采样
+- PPING_LANG_DB_PATH              默认 ~/.pping-lang/local.duckdb
+- PPING_LANG_INSTANCE_ID          默认 local-{engine_index}
+- PPING_LANG_NVML_INTERVAL_S      默认 0.1（NVML 采样间隔，秒）
+- PPING_LANG_DISABLE_NVML         设为 1 关闭 NVML 采样
+- PPING_LANG_FLUSH_INTERVAL_S     默认 5.0（Sink → DuckDB 批量写间隔）
+- PPING_LANG_RULE_EVAL_INTERVAL_S 默认 1.0
+- PPING_LANG_DISABLE_RULES        设为 1 关闭规则引擎
+- PPING_LANG_RULES_PATH           可选 JSON 文件覆盖默认规则
+- PPING_LANG_DIAGNOSIS_PRINT      默认 1，设 0 关闭终端打印
 """
 from __future__ import annotations
 
@@ -99,11 +104,21 @@ class PpingLangStatLogger(StatLoggerBase):
         instance_id = os.environ.get(
             "PPING_LANG_INSTANCE_ID", f"local-{self.engine_index}"
         )
-        self._sink = LocalSink(db_path=db_path, instance_id=instance_id)
+        flush_interval = float(
+            os.environ.get("PPING_LANG_FLUSH_INTERVAL_S", "5.0")
+        )
+        self._sink = LocalSink(
+            db_path=db_path,
+            instance_id=instance_id,
+            flush_interval_s=flush_interval,
+        )
         atexit.register(self._sink.close)
 
-        # 2) GPU peak (best-effort)
-        gpu_peak = self._detect_gpu_peak()
+        # 2) GPU peak (best-effort) — skip if NVML disabled (no GPU expected)
+        if os.environ.get("PPING_LANG_DISABLE_NVML") == "1":
+            gpu_peak = None
+        else:
+            gpu_peak = self._detect_gpu_peak()
 
         # 3) vLLM stats collector
         self._collector = VllmStatsCollector(

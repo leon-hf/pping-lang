@@ -26,6 +26,28 @@ vllm serve <your-model>
 - [设计文档 v0.2.1](docs/pping-lang-design-v0.2.md)
 - [Pre-implementation RFC](docs/pping-lang-pre-impl-rfc.md)
 
+## 试跑（无需 GPU/vLLM）
+
+合成 stats 喂 marquee 诊断：
+
+```bash
+python examples/embedded/demo.py
+```
+
+约 7 秒后看到：
+
+```
+[pping-lang] [!] WARNING: CUDA graph padding 过高
+  CUDA graph padding 比例 70%, 约 70% 的 GPU 算力浪费在补 0
+  -> 调小 max_num_seqs 或开启更细粒度的 cudagraph capture（PIECEWISE 模式）
+
+[pping-lang] [!] WARNING: MFU 偏低（计算资源浪费）
+  MFU = 5% < 20%（理论峰值的小部分都没跑到）
+  -> 检查 padding ratio / batch 大小 / dtype（应为 bf16/fp16）
+```
+
+数据落在 `${TEMP}/pping-lang-demo.duckdb`，可直接用 duckdb CLI 查。
+
 ## 开发
 
 ```bash
