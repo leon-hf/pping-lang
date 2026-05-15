@@ -25,6 +25,8 @@ from pping_lang.collector.nvml import NvmlSampler, detect_first_gpu_name
 from pping_lang.collector.vllm_stats import VllmStatsCollector
 from pping_lang.hardware import GPUPeak, lookup_peak
 from pping_lang.metrics_catalog import M
+from pping_lang.rules.engine import RuleEngine
+from pping_lang.rules.loader import get_active_rules
 from pping_lang.sink.base import Sink
 from pping_lang.sink.local import LocalSink
 from pping_lang.types import MetricPoint
@@ -81,6 +83,7 @@ class PpingLangStatLogger(StatLoggerBase):
         self._sink: Sink | None = None
         self._nvml: NvmlSampler | None = None
         self._collector: VllmStatsCollector | None = None
+        self._rule_engine: RuleEngine | None = None
         # 重 I/O 延迟到 log_engine_initialized（pre-impl-rfc §4.2）
         logger.info(
             "[pping-lang] plugin instantiated for engine_index=%d (vllm_available=%s)",
@@ -120,11 +123,28 @@ class PpingLangStatLogger(StatLoggerBase):
             self._nvml.start()
             atexit.register(self._nvml.stop)
 
+        # 5) Rule engine (optional — disabled by env)
+        if os.environ.get("PPING_LANG_DISABLE_RULES") != "1":
+            eval_interval = float(
+                os.environ.get("PPING_LANG_RULE_EVAL_INTERVAL_S", "1.0")
+            )
+            rules = get_active_rules()
+            self._rule_engine = RuleEngine(
+                db_path=str(db_path),
+                rules=rules,
+                sink=self._sink,
+                engine_index=self.engine_index,
+                eval_interval_s=eval_interval,
+            )
+            self._rule_engine.start()
+            atexit.register(self._rule_engine.stop)
+
         logger.info(
-            "[pping-lang] ready: db=%s instance=%s engine=%d nvml=%s gpu_peak=%s",
+            "[pping-lang] ready: db=%s instance=%s engine=%d nvml=%s gpu_peak=%s rules=%d",
             db_path, instance_id, self.engine_index,
             self._nvml.enabled if self._nvml else False,
             gpu_peak,
+            self._rule_engine.num_rules if self._rule_engine else 0,
         )
 
     def record(
