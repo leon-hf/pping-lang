@@ -191,6 +191,7 @@ class RuleEngine:
 
     def _evaluate_all(self) -> int:
         self.eval_count += 1
+        t_start = time.monotonic_ns()
         try:
             conn = self._ensure_conn()
         except Exception:
@@ -205,6 +206,19 @@ class RuleEngine:
                     fires += 1
             except Exception:
                 logger.exception("[pping-lang] rule %s eval failed", rule.id)
+        # Self-observability: how long this eval pass took (Day 12)
+        from pping_lang.metrics_catalog import M as _M
+        from pping_lang.types import MetricPoint as _MP
+        elapsed_ms = (time.monotonic_ns() - t_start) / 1e6
+        try:
+            self._sink.push_metric(_MP(
+                ts_ns=time.monotonic_ns(),
+                name=_M.PPING_LANG_RULE_EVAL_MS,
+                value=elapsed_ms,
+                engine_idx=self._engine_index,
+            ))
+        except Exception:
+            pass
         return fires
 
     def _evaluate_one(self, conn: Any, rule: Rule, now_ns: int) -> bool:
