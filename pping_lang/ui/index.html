@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>pping-lang dashboard</title>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.13.7/dist/cdn.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #f7f7f8;
+    --surface: #ffffff;
+    --border: #e4e4e7;
+    --text: #18181b;
+    --muted: #71717a;
+    --accent: #0ea5e9;
+    --info: #3b82f6;
+    --warning: #f59e0b;
+    --critical: #ef4444;
+    --good: #10b981;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+                 "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 12px 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  header h1 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+  }
+  header .meta {
+    color: var(--muted);
+    font-size: 12px;
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  }
+  nav.tabs {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 0 24px;
+    display: flex;
+    gap: 4px;
+  }
+  nav.tabs button {
+    background: none;
+    border: none;
+    padding: 12px 16px;
+    cursor: pointer;
+    color: var(--muted);
+    font-size: 14px;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+  }
+  nav.tabs button.active {
+    color: var(--text);
+    border-bottom-color: var(--accent);
+  }
+  main {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 24px;
+  }
+  .kpis {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 12px;
+    margin-bottom: 24px;
+  }
+  .kpi {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+  }
+  .kpi .label {
+    color: var(--muted);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 8px;
+  }
+  .kpi .value {
+    font-size: 24px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  .kpi .value .unit {
+    font-size: 14px;
+    font-weight: 400;
+    color: var(--muted);
+    margin-left: 2px;
+  }
+  .chart-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 24px;
+  }
+  .chart-card h2 {
+    margin: 0 0 12px 0;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .chart-wrap {
+    position: relative;
+    height: 240px;
+  }
+  .section-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin: 0 0 12px 0;
+  }
+  .diagnoses {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .diag {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left-width: 4px;
+    border-radius: 6px;
+    padding: 12px 16px;
+  }
+  .diag.warning { border-left-color: var(--warning); }
+  .diag.critical { border-left-color: var(--critical); }
+  .diag.info { border-left-color: var(--info); }
+  .diag .head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 4px;
+  }
+  .diag .rule {
+    font-weight: 600;
+    font-size: 13px;
+  }
+  .diag .sev {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-weight: 600;
+  }
+  .diag.warning .sev { background: #fef3c7; color: #92400e; }
+  .diag.critical .sev { background: #fee2e2; color: #991b1b; }
+  .diag.info .sev { background: #dbeafe; color: #1e40af; }
+  .diag .msg { color: var(--text); margin-bottom: 4px; }
+  .diag .sug { color: var(--muted); font-size: 13px; }
+  .diag .sug::before { content: "→ "; }
+  .empty {
+    color: var(--muted);
+    background: var(--surface);
+    border: 1px dashed var(--border);
+    border-radius: 6px;
+    padding: 24px;
+    text-align: center;
+  }
+  .placeholder {
+    color: var(--muted);
+    background: var(--surface);
+    border: 1px dashed var(--border);
+    border-radius: 8px;
+    padding: 48px;
+    text-align: center;
+  }
+  footer {
+    text-align: center;
+    color: var(--muted);
+    font-size: 12px;
+    padding: 24px;
+  }
+</style>
+</head>
+<body>
+
+<div x-data="dashboard()" x-init="init()">
+
+  <header>
+    <h1>pping-lang <span style="color: var(--muted); font-weight: 400;">— vLLM 性能诊断</span></h1>
+    <div class="meta">
+      <span x-text="health.instance_id || '—'"></span>
+      &nbsp;·&nbsp; engine=<span x-text="health.engine_index ?? '—'"></span>
+      &nbsp;·&nbsp; rules=<span x-text="health.rules?.num ?? 0"></span>
+      &nbsp;·&nbsp; <span x-text="health.version || ''"></span>
+    </div>
+  </header>
+
+  <nav class="tabs">
+    <button :class="{ active: tab === 'live' }" @click="tab = 'live'">实时</button>
+    <button :class="{ active: tab === 'rules' }" @click="tab = 'rules'">规则</button>
+    <button :class="{ active: tab === 'report' }" @click="tab = 'report'">报告</button>
+  </nav>
+
+  <main>
+
+    <!-- 实时 tab -->
+    <div x-show="tab === 'live'">
+      <div class="kpis">
+        <div class="kpi">
+          <div class="label">GPU 利用率</div>
+          <div class="value"><span x-text="fmt(gpu_util_pct, 0)"></span><span class="unit">%</span></div>
+        </div>
+        <div class="kpi">
+          <div class="label">KV cache</div>
+          <div class="value"><span x-text="fmt(kv_cache * 100, 0)"></span><span class="unit">%</span></div>
+        </div>
+        <div class="kpi">
+          <div class="label">运行请求</div>
+          <div class="value" x-text="fmt(running_reqs, 0)"></div>
+        </div>
+        <div class="kpi">
+          <div class="label">等待队列</div>
+          <div class="value" x-text="fmt(waiting_reqs, 0)"></div>
+        </div>
+        <div class="kpi">
+          <div class="label">CUDA padding</div>
+          <div class="value"><span x-text="fmt(padding_ratio * 100, 0)"></span><span class="unit">%</span></div>
+        </div>
+        <div class="kpi">
+          <div class="label">MFU</div>
+          <div class="value"><span x-text="fmt(mfu * 100, 0)"></span><span class="unit">%</span></div>
+        </div>
+      </div>
+
+      <div class="chart-card">
+        <h2>GPU 利用率 · 最近 60s</h2>
+        <div class="chart-wrap"><canvas id="gpu-chart"></canvas></div>
+      </div>
+
+      <h3 class="section-title">当前触发的诊断</h3>
+      <div class="diagnoses">
+        <template x-if="diagnoses.length === 0">
+          <div class="empty">暂无触发的诊断</div>
+        </template>
+        <template x-for="d in diagnoses" :key="d.rule_id">
+          <div class="diag" :class="d.severity">
+            <div class="head">
+              <span class="rule" x-text="d.rule_id"></span>
+              <span class="sev" x-text="d.severity"></span>
+            </div>
+            <div class="msg" x-text="d.message"></div>
+            <div class="sug" x-text="d.suggestion"></div>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <!-- 规则 tab placeholder -->
+    <div x-show="tab === 'rules'">
+      <div class="placeholder">规则编辑 UI — Day 8 上线</div>
+    </div>
+
+    <!-- 报告 tab placeholder -->
+    <div x-show="tab === 'report'">
+      <div class="placeholder">报告生成 UI — Day 10 上线</div>
+    </div>
+
+  </main>
+
+  <footer>
+    pping-lang · 每 2s 自动刷新
+  </footer>
+</div>
+
+<script>
+function dashboard() {
+  return {
+    tab: 'live',
+    health: {},
+    gpu_util_pct: 0,
+    kv_cache: 0,
+    running_reqs: 0,
+    waiting_reqs: 0,
+    padding_ratio: 0,
+    mfu: 0,
+    diagnoses: [],
+    chart: null,
+    refreshTimer: null,
+
+    fmt(v, digits) {
+      if (v == null || isNaN(v)) return '—';
+      return Number(v).toFixed(digits);
+    },
+
+    init() {
+      this.chart = new Chart(document.getElementById('gpu-chart').getContext('2d'), {
+        type: 'line',
+        data: {
+          labels: [],
+          datasets: [{
+            label: 'GPU util %',
+            data: [],
+            borderColor: '#0ea5e9',
+            backgroundColor: 'rgba(14,165,233,0.08)',
+            borderWidth: 2,
+            tension: 0.25,
+            fill: true,
+            pointRadius: 0,
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: false,
+          plugins: { legend: { display: false } },
+          scales: {
+            y: { beginAtZero: true, max: 100, ticks: { stepSize: 25 } },
+            x: { ticks: { autoSkip: true, maxTicksLimit: 6 } },
+          }
+        }
+      });
+      this.refresh();
+      this.refreshTimer = setInterval(() => this.refresh(), 2000);
+    },
+
+    async refresh() {
+      try {
+        const [healthR, snapshotR, recentR, diagR] = await Promise.all([
+          fetch('/api/health').then(r => r.json()),
+          fetch('/api/metrics/snapshot?seconds=30').then(r => r.json()),
+          fetch('/api/metrics/recent?name=gpu.utilization_pct&seconds=60&limit=120').then(r => r.json()),
+          fetch('/api/diagnoses?seconds=300').then(r => r.json()),
+        ]);
+        this.health = healthR;
+        const m = snapshotR.metrics || {};
+        this.gpu_util_pct  = m['gpu.utilization_pct']?.value ?? 0;
+        this.kv_cache      = m['vllm.scheduler.kv_cache_usage_ratio']?.value ?? 0;
+        this.running_reqs  = m['vllm.scheduler.running_reqs']?.value ?? 0;
+        this.waiting_reqs  = m['vllm.scheduler.waiting_reqs']?.value ?? 0;
+        this.padding_ratio = m['vllm.cudagraph.padding_ratio']?.value ?? 0;
+        this.mfu           = m['vllm.perf.mfu_ratio']?.value ?? 0;
+
+        const pts = recentR.points || [];
+        this.chart.data.labels = pts.map((_, i) => i);
+        this.chart.data.datasets[0].data = pts.map(p => p.value);
+        this.chart.update('none');
+
+        // Dedup diagnoses by rule_id, keep latest
+        const seen = new Set();
+        this.diagnoses = (diagR.diagnoses || []).filter(d => {
+          if (seen.has(d.rule_id)) return false;
+          seen.add(d.rule_id);
+          return true;
+        });
+      } catch (e) {
+        console.warn('[pping-lang] refresh failed:', e);
+      }
+    },
+  };
+}
+</script>
+</body>
+</html>

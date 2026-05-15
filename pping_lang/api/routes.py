@@ -7,10 +7,12 @@ from __future__ import annotations
 import dataclasses
 import logging
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 
 from pping_lang.api.queries import (
     latest_per_metric,
@@ -20,6 +22,8 @@ from pping_lang.api.queries import (
     recent_metric_points,
 )
 from pping_lang.metrics_catalog import ALLOWED_METRICS
+
+_UI_INDEX = Path(__file__).parent.parent / "ui" / "index.html"
 
 if TYPE_CHECKING:
     from pping_lang.collector.nvml import NvmlSampler
@@ -54,6 +58,18 @@ def build_app(
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # Cache UI HTML at build time — ~10KB, fine to keep in memory
+    try:
+        ui_html = _UI_INDEX.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        ui_html = "<h1>pping-lang UI missing</h1>"
+        logger.warning("[pping-lang] UI file not found at %s", _UI_INDEX)
+
+    # === GET / — dashboard ===
+    @app.get("/", response_class=HTMLResponse)
+    def index() -> HTMLResponse:
+        return HTMLResponse(ui_html)
 
     # === GET /api/health ===
     @app.get("/api/health")
