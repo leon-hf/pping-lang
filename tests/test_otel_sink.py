@@ -110,7 +110,6 @@ def test_otel_sink_close_idempotent(in_memory_provider):
 def test_no_otlp_endpoint_disables_silently(monkeypatch):
     """If OTLP exporter import fails or endpoint unreachable, sink degrades."""
     # Don't pass meter_provider AND mock out the OTLP exporter to simulate import error
-    import sys
 
     # Simulate the OTLP package being unavailable
     monkeypatch.setattr(

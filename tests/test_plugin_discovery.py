@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import importlib.metadata
 
-
 ENTRY_POINT_GROUP = "vllm.stat_logger_plugins"
 
 

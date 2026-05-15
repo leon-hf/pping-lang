@@ -23,7 +23,7 @@ import time
 from threading import Event, Thread
 from typing import Any
 
-from pping_lang.rules.schema import Aggregation, Op, Rule, validate_rule
+from pping_lang.rules.schema import Aggregation, Condition, Op, Rule, validate_rule
 from pping_lang.rules.store import RuleStore
 from pping_lang.sink.base import Sink
 from pping_lang.types import Diagnosis
@@ -57,7 +57,7 @@ _SEVERITY_GLYPH = {"info": "i", "warning": "!", "critical": "X"}
 
 def evaluate_condition_against_db(
     conn: Any,
-    condition: "Condition",
+    condition: Condition,
     now_ns: int,
 ) -> tuple[bool | None, float | None]:
     """Evaluate a condition's SQL aggregation against the metrics table.
@@ -71,8 +71,6 @@ def evaluate_condition_against_db(
     Used by both RuleEngine._evaluate_one (for real eval) and the
     /api/rules/{id}/test endpoint (for preview).
     """
-    from pping_lang.rules.schema import Condition  # avoid circular at module top
-    assert isinstance(condition, Condition)
     agg_sql = _AGG_TO_SQL.get(condition.aggregation)
     if agg_sql is None:
         return None, None

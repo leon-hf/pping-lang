@@ -1,8 +1,6 @@
 """TeeSink — 多 Sink fan-out。"""
 from __future__ import annotations
 
-import time
-
 from pping_lang.sink.base import Sink
 from pping_lang.sink.tee import TeeSink
 from pping_lang.types import Diagnosis, MetricPoint

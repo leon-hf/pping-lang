@@ -5,8 +5,7 @@
 """
 from __future__ import annotations
 
-from pping_lang.metrics_catalog import ALLOWED_METRICS, M, OTEL_PREFIX, to_otel_name
-
+from pping_lang.metrics_catalog import ALLOWED_METRICS, OTEL_PREFIX, M, to_otel_name
 
 # 允许的单位 suffix（带量纲指标必须以下列之一结尾）
 UNIT_SUFFIXES = (

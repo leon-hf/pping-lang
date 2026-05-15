@@ -45,7 +45,6 @@ class OTelSink(Sink):
     # === SDK setup ===
 
     def _build_meter(self, custom_provider: Any, export_interval_ms: int) -> Any:
-        from opentelemetry import metrics
         from opentelemetry.sdk.metrics import MeterProvider
         from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
         from opentelemetry.sdk.resources import Resource

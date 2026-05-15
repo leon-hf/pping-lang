@@ -145,7 +145,7 @@ def test_diagnosis_pushed_to_sink(db_with_metrics):
     assert val == 15.0
     assert thr == 50.0
     assert win == 10
-    assert "15.0 vs 50.0 over 10s" == msg
+    assert msg == "15.0 vs 50.0 over 10s"
 
 
 def test_p99_aggregation(db_with_metrics):

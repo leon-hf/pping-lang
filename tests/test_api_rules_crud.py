@@ -8,7 +8,6 @@ from fastapi.testclient import TestClient
 
 from pping_lang.api.routes import build_app
 from pping_lang.metrics_catalog import M
-from pping_lang.rules.defaults import DEFAULT_RULES
 from pping_lang.rules.store import RuleStore
 from pping_lang.sink.local import LocalSink
 from pping_lang.types import MetricPoint

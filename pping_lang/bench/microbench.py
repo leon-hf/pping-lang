@@ -9,10 +9,9 @@
 """
 from __future__ import annotations
 
-import statistics
 import time
+from collections.abc import Callable
 from types import SimpleNamespace
-from typing import Callable
 
 from pping_lang.collector.vllm_stats import VllmStatsCollector
 from pping_lang.hardware import GPUPeak
