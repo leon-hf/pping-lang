@@ -141,9 +141,9 @@ def test_perf_mfu_and_mem_bw_derived():
         ),
     )
     c.collect(s, None)
-    # 第二次调用之间 sleep 一点时间让 dt 不为零
+    # 第二次调用之间 sleep 让 dt 不为零（>16ms 避开 Windows 时钟分辨率边界）
     import time as _t
-    _t.sleep(0.01)
+    _t.sleep(0.05)
     c.collect(s, None)
     sink.close()
 
