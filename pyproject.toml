@@ -1,0 +1,70 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pping-lang"
+version = "0.0.1.dev0"
+description = "vLLM 性能诊断插件——把 vLLM 指标 + GPU 物理层数据喂给规则引擎，自动告诉你为什么慢"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Leon" }]
+keywords = ["vllm", "llm", "performance", "profiling", "observability", "gpu"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "License :: OSI Approved :: Apache Software License",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: System :: Monitoring",
+]
+
+dependencies = [
+    "duckdb>=1.0.0",
+    "pynvml>=11.5.0",
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.27.0",
+    "opentelemetry-api>=1.27.0",
+    "opentelemetry-sdk>=1.27.0",
+    "opentelemetry-exporter-otlp>=1.27.0",
+    "plotly>=5.18.0",
+    "jinja2>=3.1.0",
+    "pydantic>=2.0.0",
+]
+
+[project.optional-dependencies]
+# vllm 是 runtime 依赖，但安装它需要 CUDA + 体积大，dev/test 通过 fallback 解耦
+vllm = ["vllm>=0.20.0,<0.22.0"]
+server = ["grpcio>=1.60.0", "protobuf>=4.0.0"]   # v0.2
+analyzer = ["prometheus-api-client>=0.5.0"]       # v0.3
+dev = ["pytest>=7.0", "pytest-cov>=4.0", "ruff>=0.1.0", "mypy>=1.0"]
+
+[project.entry-points."vllm.stat_logger_plugins"]
+pping_lang = "pping_lang.plugin:PpingLangStatLogger"
+
+[project.urls]
+Homepage = "https://github.com/leon/pping-lang"
+Documentation = "https://github.com/leon/pping-lang/tree/main/docs"
+
+[tool.hatch.build.targets.wheel]
+packages = ["pping_lang"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-ra --strict-markers"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.10"
+strict = false
+ignore_missing_imports = true
