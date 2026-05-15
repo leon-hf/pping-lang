@@ -158,7 +158,7 @@ class PpingLangStatLogger(StatLoggerBase):
             )
             self._rule_engine = RuleEngine(
                 db_path=str(db_path),
-                rules=self._rule_store.list(),
+                rules=self._rule_store,  # pass store for hot reload (Day 9)
                 sink=self._sink,
                 engine_index=self.engine_index,
                 eval_interval_s=eval_interval,

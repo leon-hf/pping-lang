@@ -24,6 +24,7 @@ from threading import Event, Thread
 from typing import Any
 
 from pping_lang.rules.schema import Aggregation, Op, Rule, validate_rule
+from pping_lang.rules.store import RuleStore
 from pping_lang.sink.base import Sink
 from pping_lang.types import Diagnosis
 
@@ -92,22 +93,36 @@ def evaluate_condition_against_db(
 
 
 class RuleEngine:
-    """Periodic SQL-based rule evaluator. Runs on a daemon thread."""
+    """Periodic SQL-based rule evaluator. Runs on a daemon thread.
+
+    Rules can be supplied as either:
+    - a static list (legacy / tests) — engine uses snapshot, no hot reload
+    - a RuleStore — engine queries store on every eval tick (Day 9 hot reload)
+                    so CRUD via /api/rules takes effect within ~1 eval interval
+    """
 
     def __init__(
         self,
         db_path: str,
-        rules: list[Rule],
+        rules: list[Rule] | RuleStore,
         sink: Sink,
         engine_index: int = 0,
         eval_interval_s: float = DEFAULT_EVAL_INTERVAL_S,
         suppression_window_s: float = DEFAULT_SUPPRESSION_WINDOW_S,
         print_to_terminal: bool | None = None,
     ) -> None:
-        for r in rules:
-            validate_rule(r)
+        if isinstance(rules, RuleStore):
+            self._store: RuleStore | None = rules
+            self._static_rules: list[Rule] | None = None
+            # Validate current snapshot at construction (catches bad user JSON)
+            for r in rules.list():
+                validate_rule(r)
+        else:
+            self._store = None
+            for r in rules:
+                validate_rule(r)
+            self._static_rules = list(rules)
         self._db_path = db_path
-        self._rules = [r for r in rules if r.enabled]
         self._sink = sink
         self._engine_index = engine_index
         self._eval_interval = eval_interval_s
@@ -125,9 +140,15 @@ class RuleEngine:
 
     # === public lifecycle ===
 
+    def _current_rules(self) -> list[Rule]:
+        """Return the live, enabled rule set for this eval pass."""
+        if self._store is not None:
+            return [r for r in self._store.list() if r.enabled]
+        return [r for r in (self._static_rules or []) if r.enabled]
+
     @property
     def num_rules(self) -> int:
-        return len(self._rules)
+        return len(self._current_rules())
 
     def start(self) -> None:
         if self._thread is not None:
@@ -177,7 +198,8 @@ class RuleEngine:
             return 0
         now_ns = time.monotonic_ns()
         fires = 0
-        for rule in self._rules:
+        # Snapshot rules per-tick — picks up CRUD changes (hot reload, Day 9)
+        for rule in self._current_rules():
             try:
                 if self._evaluate_one(conn, rule, now_ns):
                     fires += 1
