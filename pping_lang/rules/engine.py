@@ -54,6 +54,43 @@ _OP_TO_FN: dict[Op, Any] = {
 _SEVERITY_GLYPH = {"info": "i", "warning": "!", "critical": "X"}
 
 
+def evaluate_condition_against_db(
+    conn: Any,
+    condition: "Condition",
+    now_ns: int,
+) -> tuple[bool | None, float | None]:
+    """Evaluate a condition's SQL aggregation against the metrics table.
+
+    Returns (would_fire, actual_value):
+    - (None, None) — no data in window or unsupported aggregation
+    - (False, value) — data present but condition not met
+    - (True, value)  — would trigger
+
+    Side-effect free: doesn't push diagnoses, doesn't update suppression.
+    Used by both RuleEngine._evaluate_one (for real eval) and the
+    /api/rules/{id}/test endpoint (for preview).
+    """
+    from pping_lang.rules.schema import Condition  # avoid circular at module top
+    assert isinstance(condition, Condition)
+    agg_sql = _AGG_TO_SQL.get(condition.aggregation)
+    if agg_sql is None:
+        return None, None
+    cutoff_ns = now_ns - int(condition.window_seconds * 1e9)
+    sql = (
+        f"SELECT {agg_sql} FROM metrics "
+        f"WHERE metric_name = ? AND ts_ns >= ?"
+    )
+    try:
+        row = conn.execute(sql, [condition.metric, cutoff_ns]).fetchone()
+    except Exception:
+        return None, None
+    if row is None or row[0] is None:
+        return None, None
+    actual = float(row[0])
+    fired = _OP_TO_FN[condition.op](actual, condition.threshold)
+    return fired, actual
+
+
 class RuleEngine:
     """Periodic SQL-based rule evaluator. Runs on a daemon thread."""
 
@@ -155,25 +192,8 @@ class RuleEngine:
             return False
 
         cond = rule.condition
-        agg_sql = _AGG_TO_SQL.get(cond.aggregation)
-        if agg_sql is None:
-            return False
-        cutoff_ns = now_ns - int(cond.window_seconds * 1e9)
-
-        sql = (
-            f"SELECT {agg_sql} FROM metrics "
-            f"WHERE metric_name = ? AND ts_ns >= ?"
-        )
-        try:
-            row = conn.execute(sql, [cond.metric, cutoff_ns]).fetchone()
-        except Exception:
-            logger.exception("[pping-lang] SQL failed for rule %s", rule.id)
-            return False
-        if row is None or row[0] is None:
-            return False  # no data in window
-
-        actual = float(row[0])
-        if not _OP_TO_FN[cond.op](actual, cond.threshold):
+        fired, actual = evaluate_condition_against_db(conn, cond, now_ns)
+        if not fired or actual is None:
             return False
 
         # Trigger

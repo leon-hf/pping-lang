@@ -36,7 +36,7 @@ from pping_lang.collector.vllm_stats import VllmStatsCollector
 from pping_lang.hardware import GPUPeak, lookup_peak
 from pping_lang.metrics_catalog import M
 from pping_lang.rules.engine import RuleEngine
-from pping_lang.rules.loader import get_active_rules
+from pping_lang.rules.store import RuleStore
 from pping_lang.sink.base import Sink
 from pping_lang.sink.local import LocalSink
 from pping_lang.types import MetricPoint
@@ -95,7 +95,7 @@ class PpingLangStatLogger(StatLoggerBase):
         self._collector: VllmStatsCollector | None = None
         self._rule_engine: RuleEngine | None = None
         self._api: ApiServer | None = None
-        self._rules: list = []
+        self._rule_store: RuleStore | None = None
         # 重 I/O 延迟到 log_engine_initialized（pre-impl-rfc §4.2）
         logger.info(
             "[pping-lang] plugin instantiated for engine_index=%d (vllm_available=%s)",
@@ -145,15 +145,20 @@ class PpingLangStatLogger(StatLoggerBase):
             self._nvml.start()
             atexit.register(self._nvml.stop)
 
-        # 5) Rule engine (optional — disabled by env)
-        self._rules = get_active_rules()
+        # 5) Rule store (defaults + optional user JSON overrides)
+        rules_path = os.environ.get("PPING_LANG_RULES_PATH")
+        self._rule_store = RuleStore(
+            override_path=Path(rules_path) if rules_path else None
+        )
+
+        # 6) Rule engine (optional — disabled by env)
         if os.environ.get("PPING_LANG_DISABLE_RULES") != "1":
             eval_interval = float(
                 os.environ.get("PPING_LANG_RULE_EVAL_INTERVAL_S", "1.0")
             )
             self._rule_engine = RuleEngine(
                 db_path=str(db_path),
-                rules=self._rules,
+                rules=self._rule_store.list(),
                 sink=self._sink,
                 engine_index=self.engine_index,
                 eval_interval_s=eval_interval,
@@ -161,7 +166,7 @@ class PpingLangStatLogger(StatLoggerBase):
             self._rule_engine.start()
             atexit.register(self._rule_engine.stop)
 
-        # 6) HTTP API + dashboard (optional)
+        # 7) HTTP API + dashboard (optional)
         if os.environ.get("PPING_LANG_DISABLE_API") != "1":
             api_host = os.environ.get("PPING_LANG_API_HOST", "127.0.0.1")
             api_port = int(os.environ.get("PPING_LANG_API_PORT", "8765"))
@@ -171,7 +176,7 @@ class PpingLangStatLogger(StatLoggerBase):
                 instance_id=instance_id,
                 engine_index=self.engine_index,
                 sink=self._sink,
-                rules=self._rules,
+                rule_store=self._rule_store,
                 rule_engine=self._rule_engine,
                 nvml=self._nvml,
                 version=_version,

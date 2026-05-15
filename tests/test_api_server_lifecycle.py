@@ -7,7 +7,7 @@ import pytest
 
 from pping_lang.api.routes import build_app
 from pping_lang.api.server import ApiServer
-from pping_lang.rules.defaults import DEFAULT_RULES
+from pping_lang.rules.store import RuleStore
 from pping_lang.sink.local import LocalSink
 from pping_lang.types import MetricPoint
 
@@ -22,7 +22,7 @@ def server(tmp_path):
         instance_id="lifecycle",
         engine_index=0,
         sink=sink,
-        rules=DEFAULT_RULES,
+        rule_store=RuleStore(),
     )
     server = ApiServer(app, host="127.0.0.1", port=0)  # OS-assigned port
     server.start()

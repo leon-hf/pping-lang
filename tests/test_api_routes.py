@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 
 from pping_lang.api.routes import build_app
 from pping_lang.metrics_catalog import M
-from pping_lang.rules.defaults import DEFAULT_RULES
+from pping_lang.rules.store import RuleStore
 from pping_lang.sink.local import LocalSink
 from pping_lang.types import Diagnosis, MetricPoint
 
@@ -29,7 +29,7 @@ def empty_app(tmp_path):
         instance_id="test-inst",
         engine_index=3,
         sink=sink2,
-        rules=DEFAULT_RULES,
+        rule_store=RuleStore(),
         rule_engine=None,
         nvml=None,
     )
@@ -69,7 +69,7 @@ def app_with_data(tmp_path):
         instance_id="test-inst",
         engine_index=0,
         sink=sink2,
-        rules=DEFAULT_RULES,
+        rule_store=RuleStore(),
     )
     yield TestClient(app), db, sink2
     sink2.close()
@@ -93,7 +93,9 @@ def test_health_when_no_rule_engine(empty_app):
     client, _, _ = empty_app
     r = client.get("/api/health")
     body = r.json()
-    assert body["rules"]["num"] == 0
+    # No rule_engine but rule_store has 10 defaults — health falls back to store count
+    assert body["rules"]["num"] == 10
+    assert body["rules"]["eval_count"] == 0
     assert body["nvml"]["enabled"] is False
 
 
@@ -230,7 +232,7 @@ def test_diagnoses_empty_when_no_db_tables(tmp_path):
     sink = LocalSink(db_path=db, instance_id="x", flush_interval_s=10.0)
     app = build_app(
         db_path=str(db), instance_id="x", engine_index=0,
-        sink=sink, rules=DEFAULT_RULES,
+        sink=sink, rule_store=RuleStore(),
     )
     client = TestClient(app)
     try:

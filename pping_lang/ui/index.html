@@ -29,6 +29,7 @@
     font-size: 14px;
     line-height: 1.5;
   }
+  [x-cloak] { display: none !important; }
   header {
     background: var(--surface);
     border-bottom: 1px solid var(--border);
@@ -185,6 +186,139 @@
     padding: 48px;
     text-align: center;
   }
+  /* === Rules tab === */
+  .rules-toolbar {
+    margin-bottom: 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .btn {
+    background: var(--accent);
+    color: white;
+    border: none;
+    padding: 6px 14px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  .btn.secondary { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+  .btn.danger { background: var(--critical); }
+  .btn:hover { opacity: 0.85; }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .rules-table {
+    width: 100%;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    border-collapse: collapse;
+    overflow: hidden;
+  }
+  .rules-table th, .rules-table td {
+    padding: 10px 12px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+    vertical-align: top;
+  }
+  .rules-table th {
+    background: #fafafa;
+    font-weight: 600;
+    color: var(--muted);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+  }
+  .rules-table tr:last-child td { border-bottom: none; }
+  .rules-table .id-cell strong { font-family: ui-monospace, Consolas, monospace; }
+  .rules-table .id-cell .muted { color: var(--muted); font-size: 11px; margin-top: 2px; }
+  .rules-table code {
+    background: #f4f4f5;
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 11px;
+    font-family: ui-monospace, Consolas, monospace;
+  }
+  .badge {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-weight: 600;
+    margin-left: 4px;
+  }
+  .badge.default { background: #e0e7ff; color: #3730a3; }
+  .badge.disabled { background: #fee2e2; color: #991b1b; }
+  .test-result {
+    background: #fefce8;
+    border-left: 3px solid var(--warning);
+    padding: 8px 12px;
+    margin: 4px 0;
+    border-radius: 4px;
+    font-size: 12px;
+    font-family: ui-monospace, Consolas, monospace;
+  }
+  .test-result.ok { background: #ecfdf5; border-left-color: var(--good); }
+  .test-result.no-data { background: #f4f4f5; border-left-color: var(--muted); color: var(--muted); }
+  .edit-panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px;
+    margin-top: 16px;
+  }
+  .edit-panel h3 { margin: 0 0 16px 0; font-size: 15px; }
+  .form-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px 16px;
+  }
+  .form-grid .full { grid-column: 1 / -1; }
+  .form-grid label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 12px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+  }
+  .form-grid input, .form-grid select, .form-grid textarea {
+    font-family: inherit;
+    font-size: 13px;
+    padding: 6px 10px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: white;
+    color: var(--text);
+  }
+  .form-grid input:focus, .form-grid select:focus, .form-grid textarea:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: -1px;
+    border-color: transparent;
+  }
+  .form-grid textarea { resize: vertical; min-height: 50px; }
+  .form-grid .hint { font-size: 11px; color: var(--muted); text-transform: none; letter-spacing: 0; margin-top: 2px; }
+  .form-actions {
+    margin-top: 16px;
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+  }
+  .toast {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    background: var(--text);
+    color: white;
+    padding: 10px 16px;
+    border-radius: 6px;
+    font-size: 13px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    z-index: 100;
+  }
+  .toast.error { background: var(--critical); }
   footer {
     text-align: center;
     color: var(--muted);
@@ -267,9 +401,135 @@
       </div>
     </div>
 
-    <!-- 规则 tab placeholder -->
-    <div x-show="tab === 'rules'">
-      <div class="placeholder">规则编辑 UI — Day 8 上线</div>
+    <!-- 规则 tab -->
+    <div x-show="tab === 'rules'" x-data="rulesTab()" x-init="init()">
+      <div class="rules-toolbar">
+        <h3 class="section-title" style="margin: 0;">规则（共 <span x-text="rules.length"></span> 条）</h3>
+        <button class="btn" @click="newRule()">+ 新建规则</button>
+      </div>
+
+      <table class="rules-table">
+        <thead>
+          <tr>
+            <th>ID / 名称</th>
+            <th>类别</th>
+            <th>Severity</th>
+            <th>条件</th>
+            <th>启用</th>
+            <th style="text-align: right;">操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          <template x-for="r in rules" :key="r.id">
+            <tr>
+              <td class="id-cell">
+                <strong x-text="r.id"></strong>
+                <template x-if="r.is_default"><span class="badge default">default</span></template>
+                <template x-if="!r.enabled"><span class="badge disabled">disabled</span></template>
+                <div class="muted" x-text="r.name"></div>
+                <template x-if="testResult[r.id]">
+                  <div class="test-result"
+                       :class="testResult[r.id].data_available ? (testResult[r.id].would_fire ? '' : 'ok') : 'no-data'">
+                    <span x-text="formatTestResult(testResult[r.id])"></span>
+                  </div>
+                </template>
+              </td>
+              <td x-text="r.category"></td>
+              <td>
+                <span class="sev" :class="r.severity" x-text="r.severity"></span>
+              </td>
+              <td>
+                <code x-text="`${r.condition.metric} ${r.condition.op} ${r.condition.threshold}`"></code>
+                <div class="muted" style="font-size: 11px; margin-top: 2px;"
+                     x-text="`${r.condition.aggregation} over ${r.condition.window_seconds}s`"></div>
+              </td>
+              <td><span x-text="r.enabled ? '是' : '否'"></span></td>
+              <td style="text-align: right; white-space: nowrap;">
+                <button class="btn secondary" @click="editRule(r)">编辑</button>
+                <button class="btn secondary" @click="testRule(r.id)">测试</button>
+                <button class="btn danger" @click="deleteRule(r)">删除</button>
+              </td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+
+      <!-- Edit / new form panel -->
+      <div x-show="editing" x-cloak class="edit-panel">
+        <h3 x-text="editingExisting ? `编辑规则: ${editing.id}` : '新建规则'"></h3>
+        <form @submit.prevent="save()">
+          <div class="form-grid">
+            <label>ID
+              <input type="text" x-model="editing.id" :disabled="editingExisting" required>
+            </label>
+            <label>名称
+              <input type="text" x-model="editing.name" required>
+            </label>
+            <label>类别
+              <input type="text" x-model="editing.category" required
+                     placeholder="throughput / latency / efficiency / ...">
+            </label>
+            <label>Severity
+              <select x-model="editing.severity">
+                <option value="info">info</option>
+                <option value="warning">warning</option>
+                <option value="critical">critical</option>
+              </select>
+            </label>
+            <label class="full">Metric
+              <select x-model="editing.condition.metric">
+                <template x-for="m in availableMetrics" :key="m">
+                  <option :value="m" x-text="m"></option>
+                </template>
+              </select>
+            </label>
+            <label>操作符
+              <select x-model="editing.condition.op">
+                <option value="<">&lt;</option>
+                <option value="<=">&le;</option>
+                <option value=">">&gt;</option>
+                <option value=">=">&ge;</option>
+                <option value="==">==</option>
+                <option value="!=">!=</option>
+              </select>
+            </label>
+            <label>阈值
+              <input type="number" step="any" x-model.number="editing.condition.threshold" required>
+            </label>
+            <label>窗口秒数
+              <input type="number" x-model.number="editing.condition.window_seconds" min="1" required>
+            </label>
+            <label>聚合方式
+              <select x-model="editing.condition.aggregation">
+                <option value="avg">avg</option>
+                <option value="p50">p50</option>
+                <option value="p95">p95</option>
+                <option value="p99">p99</option>
+                <option value="max">max</option>
+                <option value="min">min</option>
+                <option value="count">count</option>
+              </select>
+            </label>
+            <label class="full">消息模板
+              <textarea x-model="editing.message" rows="2" required></textarea>
+              <span class="hint">支持占位符 {value} {threshold} {window}（如 GPU 利用率 {value:.0f}% 低于 {threshold}）</span>
+            </label>
+            <label class="full">建议
+              <textarea x-model="editing.suggestion" rows="2" required></textarea>
+            </label>
+            <label style="flex-direction: row; align-items: center; gap: 8px;">
+              <input type="checkbox" x-model="editing.enabled">
+              <span>启用</span>
+            </label>
+          </div>
+          <div class="form-actions">
+            <button type="button" class="btn secondary" @click="cancelEdit()">取消</button>
+            <button type="submit" class="btn">保存</button>
+          </div>
+        </form>
+      </div>
+
+      <div x-show="toast" x-cloak class="toast" :class="{ error: toastError }" x-text="toast"></div>
     </div>
 
     <!-- 报告 tab placeholder -->
@@ -288,6 +548,101 @@
 // Chart.js instance held in closure (NOT in Alpine's reactive state) —
 // Alpine's Proxy wrapping breaks Chart.js's internal state machine.
 let _chart = null;
+
+function rulesTab() {
+  return {
+    rules: [],
+    availableMetrics: [],
+    editing: null,           // current edit form data; null = closed
+    editingExisting: false,  // true = PUT, false = POST
+    testResult: {},          // {rule_id: {would_fire, value, ...}}
+    toast: '',
+    toastError: false,
+
+    async init() {
+      await Promise.all([this.loadRules(), this.loadMetrics()]);
+    },
+    async loadRules() {
+      const r = await fetch('/api/rules').then(r => r.json());
+      this.rules = r.rules || [];
+    },
+    async loadMetrics() {
+      const r = await fetch('/api/metrics/available').then(r => r.json());
+      this.availableMetrics = r.metrics || [];
+    },
+    blank() {
+      return {
+        id: '', name: '', severity: 'warning', category: 'throughput',
+        condition: {
+          metric: this.availableMetrics[0] || 'gpu.utilization_pct',
+          op: '<', threshold: 50, window_seconds: 30, aggregation: 'avg',
+        },
+        message: '', suggestion: '', enabled: true,
+      };
+    },
+    newRule() {
+      this.editing = this.blank();
+      this.editingExisting = false;
+    },
+    editRule(r) {
+      // Deep clone to avoid editing the live row in place
+      this.editing = JSON.parse(JSON.stringify(r));
+      this.editingExisting = true;
+    },
+    cancelEdit() { this.editing = null; },
+    async save() {
+      try {
+        const method = this.editingExisting ? 'PUT' : 'POST';
+        const url = this.editingExisting ? `/api/rules/${this.editing.id}` : '/api/rules';
+        const r = await fetch(url, {
+          method, headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(this.editing),
+        });
+        if (!r.ok) {
+          const err = await r.json().catch(() => ({detail: r.statusText}));
+          this.showToast(`保存失败: ${err.detail || r.status}`, true);
+          return;
+        }
+        this.showToast(this.editingExisting ? '已更新' : '已创建');
+        this.editing = null;
+        await this.loadRules();
+      } catch (e) {
+        this.showToast(`错误: ${e}`, true);
+      }
+    },
+    async deleteRule(r) {
+      const what = r.is_default
+        ? `禁用默认规则 ${r.id}（仍保留可重启用）`
+        : `删除规则 ${r.id}`;
+      if (!confirm(what + '？')) return;
+      const resp = await fetch(`/api/rules/${r.id}`, {method: 'DELETE'});
+      if (!resp.ok) {
+        this.showToast(`删除失败: ${resp.status}`, true);
+        return;
+      }
+      this.showToast(r.is_default ? '已禁用' : '已删除');
+      await this.loadRules();
+    },
+    async testRule(rule_id) {
+      const r = await fetch(`/api/rules/${rule_id}/test`, {method: 'POST'});
+      if (!r.ok) {
+        this.showToast(`测试失败: ${r.status}`, true);
+        return;
+      }
+      this.testResult[rule_id] = await r.json();
+    },
+    formatTestResult(t) {
+      if (!t.data_available) return `当前窗口无数据（${t.window_seconds}s, ${t.aggregation}）`;
+      const verb = t.would_fire ? '会触发' : '不触发';
+      return `${verb} — ${t.aggregation}(${t.metric}) = ${Number(t.value).toFixed(3)} (阈值 ${t.threshold})`;
+    },
+    showToast(msg, error = false) {
+      this.toast = msg;
+      this.toastError = error;
+      setTimeout(() => { this.toast = ''; }, 3000);
+    },
+  };
+}
 
 function dashboard() {
   return {

@@ -7,7 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from pping_lang.api.routes import build_app
-from pping_lang.rules.defaults import DEFAULT_RULES
+from pping_lang.rules.store import RuleStore
 from pping_lang.sink.local import LocalSink
 
 
@@ -17,7 +17,7 @@ def client(tmp_path):
     sink = LocalSink(db_path=db, instance_id="ui-test", flush_interval_s=10.0)
     app = build_app(
         db_path=str(db), instance_id="ui-test", engine_index=0,
-        sink=sink, rules=DEFAULT_RULES,
+        sink=sink, rule_store=RuleStore(),
     )
     yield TestClient(app)
     sink.close()
@@ -62,7 +62,30 @@ def test_root_references_marquee_metrics(client):
 
 
 def test_ui_file_under_size_budget():
-    """单文件 HTML 应该轻，目标 < 30KB 以保证瞬时加载。"""
+    """单文件 HTML 应该轻，目标 < 50KB 以保证瞬时加载（含规则 tab 后）。"""
     ui = Path(__file__).parent.parent / "pping_lang" / "ui" / "index.html"
     size = ui.stat().st_size
-    assert size < 30_000, f"UI file is {size} bytes, exceeds 30KB budget"
+    assert size < 50_000, f"UI file is {size} bytes, exceeds 50KB budget"
+
+
+def test_rules_tab_has_crud_endpoints_referenced(client):
+    """规则 tab 的 JS 必须引用 CRUD + test 端点。"""
+    body = client.get("/").text
+    # All four CRUD verbs + test
+    assert "/api/rules/" in body  # PUT/DELETE/test patterns use this prefix
+    assert "method: 'PUT'" in body or "method:\"PUT\"" in body or "PUT" in body
+    assert "DELETE" in body
+    assert "/test" in body
+
+
+def test_rules_tab_form_includes_all_required_fields(client):
+    """规则 form 必须能编辑所有规则字段。"""
+    body = client.get("/").text
+    for field in ["editing.id", "editing.name", "editing.severity",
+                  "editing.category", "editing.condition.metric",
+                  "editing.condition.op", "editing.condition.threshold",
+                  "editing.condition.window_seconds",
+                  "editing.condition.aggregation",
+                  "editing.message", "editing.suggestion",
+                  "editing.enabled"]:
+        assert field in body, f"rules form missing field {field}"
