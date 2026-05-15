@@ -23,7 +23,7 @@ classifiers = [
 
 dependencies = [
     "duckdb>=1.0.0",
-    "pynvml>=11.5.0",
+    "nvidia-ml-py>=12.0.0",
     "fastapi>=0.110.0",
     "uvicorn[standard]>=0.27.0",
     "opentelemetry-api>=1.27.0",

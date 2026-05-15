@@ -1,12 +1,16 @@
 """vLLM stat_logger_plugins entry point — see design §6.2 / pre-impl-rfc §4.
 
-Day 2 status：Sink 已接入，record() 推送 self-observability 心跳指标。
-Day 3 接入 Collector + NVML，从 scheduler_stats / iteration_stats 提取真实指标。
-Day 6 在 log_engine_initialized 启 FastAPI 并打印 dashboard URL。
+Day 3 status：完整数据流通了。
+- log_engine_initialized: 创建 LocalSink + NvmlSampler + VllmStatsCollector
+- record(): 提取真实 stats → push 到 sink；同时写 self-overhead 心跳
+- NVML 后台线程独立采样 GPU 物理层
+- GPU peak 表查找成功则计算 MFU / mem_bw_util_ratio
 
 环境变量：
-- PPING_LANG_DB_PATH      默认 ~/.pping-lang/local.duckdb
-- PPING_LANG_INSTANCE_ID  默认 local-{engine_index}
+- PPING_LANG_DB_PATH         默认 ~/.pping-lang/local.duckdb
+- PPING_LANG_INSTANCE_ID     默认 local-{engine_index}
+- PPING_LANG_NVML_INTERVAL_S 默认 0.1（NVML 采样间隔，秒）
+- PPING_LANG_DISABLE_NVML    设为 1 关闭 NVML 采样
 """
 from __future__ import annotations
 
@@ -17,6 +21,9 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from pping_lang.collector.nvml import NvmlSampler, detect_first_gpu_name
+from pping_lang.collector.vllm_stats import VllmStatsCollector
+from pping_lang.hardware import GPUPeak, lookup_peak
 from pping_lang.metrics_catalog import M
 from pping_lang.sink.base import Sink
 from pping_lang.sink.local import LocalSink
@@ -57,8 +64,8 @@ class PpingLangStatLogger(StatLoggerBase):
 
     生命周期：
       __init__               — 构造（不做重 I/O）
-      log_engine_initialized — 创建 LocalSink (DB + bg flush thread)
-      record(...)            — 热路径：推送 self-overhead 心跳；Day 3 加 stats 提取
+      log_engine_initialized — 创建 LocalSink + NvmlSampler + VllmStatsCollector
+      record(...)            — 热路径：collector.collect + 心跳 metric
       log()                  — v1 几乎不调用，逻辑放 record()
       record_sleep_state(..) — v0.1 no-op
     """
@@ -72,6 +79,8 @@ class PpingLangStatLogger(StatLoggerBase):
         self.engine_index = engine_index
         self.vllm_config = vllm_config
         self._sink: Sink | None = None
+        self._nvml: NvmlSampler | None = None
+        self._collector: VllmStatsCollector | None = None
         # 重 I/O 延迟到 log_engine_initialized（pre-impl-rfc §4.2）
         logger.info(
             "[pping-lang] plugin instantiated for engine_index=%d (vllm_available=%s)",
@@ -80,6 +89,7 @@ class PpingLangStatLogger(StatLoggerBase):
         )
 
     def log_engine_initialized(self) -> None:
+        # 1) Sink
         db_path_str = os.environ.get("PPING_LANG_DB_PATH")
         db_path = Path(db_path_str) if db_path_str else DEFAULT_DB_PATH
         db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -88,9 +98,33 @@ class PpingLangStatLogger(StatLoggerBase):
         )
         self._sink = LocalSink(db_path=db_path, instance_id=instance_id)
         atexit.register(self._sink.close)
+
+        # 2) GPU peak (best-effort)
+        gpu_peak = self._detect_gpu_peak()
+
+        # 3) vLLM stats collector
+        self._collector = VllmStatsCollector(
+            self._sink, engine_index=self.engine_index, gpu_peak=gpu_peak,
+        )
+
+        # 4) NVML sampler (optional — disabled by env or by absence of GPU)
+        if os.environ.get("PPING_LANG_DISABLE_NVML") != "1":
+            interval_s = float(
+                os.environ.get("PPING_LANG_NVML_INTERVAL_S", "0.1")
+            )
+            self._nvml = NvmlSampler(
+                self._sink,
+                engine_index=self.engine_index,
+                interval_s=interval_s,
+            )
+            self._nvml.start()
+            atexit.register(self._nvml.stop)
+
         logger.info(
-            "[pping-lang] LocalSink ready: db=%s instance=%s engine=%d",
+            "[pping-lang] ready: db=%s instance=%s engine=%d nvml=%s gpu_peak=%s",
             db_path, instance_id, self.engine_index,
+            self._nvml.enabled if self._nvml else False,
+            gpu_peak,
         )
 
     def record(
@@ -100,22 +134,18 @@ class PpingLangStatLogger(StatLoggerBase):
         mm_cache_stats: MultiModalCacheStats | None = None,
         engine_idx: int = 0,
     ) -> None:
-        # No-op until log_engine_initialized has wired the sink (defensive).
         if self._sink is None:
             return
         t0 = time.monotonic_ns()
-        # ── Day 3 will extract real metrics here:
-        #   self._collector.collect(scheduler_stats, iteration_stats) → push_metric() per field
-        # ── Day 2 ships only the self-observability heartbeat below.
+        if self._collector is not None:
+            self._collector.collect(scheduler_stats, iteration_stats)
         elapsed_us = (time.monotonic_ns() - t0) / 1000.0
-        self._sink.push_metric(
-            MetricPoint(
-                ts_ns=time.monotonic_ns(),
-                name=M.PPING_LANG_RECORD_OVERHEAD_US,
-                value=elapsed_us,
-                engine_idx=self.engine_index,
-            )
-        )
+        self._sink.push_metric(MetricPoint(
+            ts_ns=time.monotonic_ns(),
+            name=M.PPING_LANG_RECORD_OVERHEAD_US,
+            value=elapsed_us,
+            engine_idx=self.engine_index,
+        ))
 
     def log(self) -> None:
         # v1 中几乎不被调用 (vllm-project/vllm#20175)。逻辑放 record()。
@@ -124,3 +154,17 @@ class PpingLangStatLogger(StatLoggerBase):
     def record_sleep_state(self, is_awake: int, level: int) -> None:
         # v0.1 no-op
         pass
+
+    # === internals ===
+
+    def _detect_gpu_peak(self) -> GPUPeak | None:
+        name = detect_first_gpu_name()
+        if name is None:
+            return None
+        peak = lookup_peak(name)
+        if peak is None:
+            logger.warning(
+                "[pping-lang] unknown GPU %r — MFU / Roofline disabled. "
+                "Add to pping_lang.hardware._GPU_PEAK_TABLE if needed.", name,
+            )
+        return peak
