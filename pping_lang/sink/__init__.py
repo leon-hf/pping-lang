@@ -13,10 +13,12 @@ from pping_lang.sink.base import (
     Sink,
 )
 from pping_lang.sink.local import LocalSink
+from pping_lang.sink.tee import TeeSink
 
 __all__ = [
     "Sink",
     "LocalSink",
+    "TeeSink",
     "DEFAULT_QUEUE_SIZE",
     "DEFAULT_DIAG_QUEUE_SIZE",
     "DEFAULT_FLUSH_INTERVAL_S",

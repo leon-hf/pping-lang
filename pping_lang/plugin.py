@@ -19,6 +19,8 @@ Day 3 status：完整数据流通了。
 - PPING_LANG_API_HOST             默认 127.0.0.1（容器场景设 0.0.0.0）
 - PPING_LANG_API_PORT             默认 8765
 - PPING_LANG_DISABLE_API          设为 1 关闭 HTTP API
+- OTEL_EXPORTER_OTLP_ENDPOINT     标准 OTel env，设了即开 OTel 出口（与 LocalSink 并行）
+- PPING_LANG_DISABLE_OTEL         即使设了 OTLP endpoint 也强制关
 """
 from __future__ import annotations
 
@@ -39,6 +41,7 @@ from pping_lang.rules.engine import RuleEngine
 from pping_lang.rules.store import RuleStore
 from pping_lang.sink.base import Sink
 from pping_lang.sink.local import LocalSink
+from pping_lang.sink.tee import TeeSink
 from pping_lang.types import MetricPoint
 
 logger = logging.getLogger(__name__)
@@ -114,11 +117,29 @@ class PpingLangStatLogger(StatLoggerBase):
         flush_interval = float(
             os.environ.get("PPING_LANG_FLUSH_INTERVAL_S", "5.0")
         )
-        self._sink = LocalSink(
+        local_sink = LocalSink(
             db_path=db_path,
             instance_id=instance_id,
             flush_interval_s=flush_interval,
         )
+        # Optional OTel sink (additive, alongside LocalSink) — see Day 11
+        sinks: list[Sink] = [local_sink]
+        otel_endpoint = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT")
+        if otel_endpoint and os.environ.get("PPING_LANG_DISABLE_OTEL") != "1":
+            try:
+                from pping_lang.otel.sink import OTelSink
+                otel_sink = OTelSink(
+                    endpoint=otel_endpoint,
+                    instance_id=instance_id,
+                    flush_interval_s=flush_interval,
+                )
+                sinks.append(otel_sink)
+                logger.info("[pping-lang] OTel sink enabled → %s", otel_endpoint)
+            except Exception as e:
+                logger.warning("[pping-lang] OTel setup failed, continuing without: %s", e)
+
+        # If single sink, use directly; if multiple, wrap in TeeSink for fan-out
+        self._sink = sinks[0] if len(sinks) == 1 else TeeSink(*sinks)
         atexit.register(self._sink.close)
 
         # 2) GPU peak (best-effort) — skip if NVML disabled (no GPU expected)
