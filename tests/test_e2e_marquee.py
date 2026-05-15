@@ -23,6 +23,7 @@ def plugin(tmp_path, monkeypatch):
     monkeypatch.setenv("PPING_LANG_FLUSH_INTERVAL_S", "0.2")
     monkeypatch.setenv("PPING_LANG_RULE_EVAL_INTERVAL_S", "0.2")
     monkeypatch.setenv("PPING_LANG_DISABLE_NVML", "1")
+    monkeypatch.setenv("PPING_LANG_DISABLE_API", "1")  # avoid uvicorn port collisions
     monkeypatch.setenv("PPING_LANG_DIAGNOSIS_PRINT", "0")  # silence stderr in tests
 
     p = PpingLangStatLogger(vllm_config=None, engine_index=0)

@@ -2,9 +2,18 @@
 from __future__ import annotations
 
 import duckdb
+import pytest
 
 from pping_lang.metrics_catalog import M
 from pping_lang.plugin import PpingLangStatLogger
+
+
+@pytest.fixture(autouse=True)
+def _isolate_plugin(monkeypatch):
+    """Disable API / NVML / Rules — these tests focus on Sink wiring only."""
+    monkeypatch.setenv("PPING_LANG_DISABLE_API", "1")
+    monkeypatch.setenv("PPING_LANG_DISABLE_NVML", "1")
+    monkeypatch.setenv("PPING_LANG_DISABLE_RULES", "1")
 
 
 def test_record_pushes_overhead_metric(tmp_path, monkeypatch):
