@@ -30,8 +30,8 @@ htmlcov/
 *.swp
 .DS_Store
 
-# Claude Code local config
-.claude/
+# Claude Code local config — keep settings.json (team), ignore local overrides
+.claude/settings.local.json
 
 # pping-lang runtime data
 *.duckdb
