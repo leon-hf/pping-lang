@@ -180,6 +180,8 @@ class PpingLangStatLogger(StatLoggerBase):
                 rule_engine=self._rule_engine,
                 nvml=self._nvml,
                 version=_version,
+                vllm_config=self.vllm_config,
+                gpu_peak=gpu_peak,
             )
             self._api = ApiServer(app, host=api_host, port=api_port)
             self._api.start()

@@ -25,7 +25,9 @@ from pping_lang.api.queries import (
     recent_metric_points,
 )
 from pping_lang.api.schemas import RuleIn, RuleTestRequest
+from pping_lang.hardware import GPUPeak
 from pping_lang.metrics_catalog import ALLOWED_METRICS
+from pping_lang.report.generator import generate_report
 from pping_lang.rules.engine import evaluate_condition_against_db
 from pping_lang.rules.schema import Condition, Rule
 
@@ -50,6 +52,8 @@ def build_app(
     rule_engine: RuleEngine | None = None,
     nvml: NvmlSampler | None = None,
     version: str = "0.0.1.dev0",
+    vllm_config: Any = None,
+    gpu_peak: GPUPeak | None = None,
 ) -> FastAPI:
     """Construct the FastAPI app with deps wired via closure."""
     app = FastAPI(
@@ -259,6 +263,34 @@ def build_app(
             "window_seconds": rule.condition.window_seconds,
             "aggregation": rule.condition.aggregation,
         }
+
+    # === GET /api/report — 生成单 HTML 报告 ===
+    @app.get("/api/report", response_class=HTMLResponse)
+    def report(
+        seconds: int = Query(86400, ge=60, le=2592000),  # 1 min .. 30 days
+        plotly_mode: str = Query("cdn", pattern="^(cdn|inline)$"),
+    ) -> HTMLResponse:
+        try:
+            html = generate_report(
+                db_path=db_path,
+                instance_id=instance_id,
+                seconds=seconds,
+                version=version,
+                vllm_config=vllm_config,
+                gpu_peak=gpu_peak,
+                plotly_mode=plotly_mode,
+            )
+        except Exception as e:
+            logger.exception("report generation failed")
+            raise HTTPException(500, f"report generation failed: {e}")
+        # Set filename for download via Content-Disposition
+        return HTMLResponse(
+            html,
+            headers={
+                "Content-Disposition":
+                    f'inline; filename="pping-lang-report-{instance_id}-{seconds}s.html"',
+            },
+        )
 
     # === GET /api/instances ===
     @app.get("/api/instances")

@@ -532,9 +532,35 @@
       <div x-show="toast" x-cloak class="toast" :class="{ error: toastError }" x-text="toast"></div>
     </div>
 
-    <!-- 报告 tab placeholder -->
-    <div x-show="tab === 'report'">
-      <div class="placeholder">报告生成 UI — Day 10 上线</div>
+    <!-- 报告 tab -->
+    <div x-show="tab === 'report'" x-data="reportTab()">
+      <div style="background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 24px;">
+        <h3 style="margin-top: 0;">生成性能复盘报告</h3>
+        <p style="color: var(--muted); margin-top: 8px;">
+          Executive Summary、关键问题、趋势、配置审计、Roofline、规则触发汇总——单 HTML 文件，可邮件分享。
+        </p>
+        <div style="display: flex; gap: 16px; align-items: flex-end; margin-top: 16px;">
+          <label style="display: flex; flex-direction: column; gap: 4px; flex: 0 0 200px;">
+            <span style="font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.4px;">时间范围</span>
+            <select x-model.number="seconds" style="padding: 6px 10px; border: 1px solid var(--border); border-radius: 4px; font-size: 13px;">
+              <option value="300">最近 5 分钟</option>
+              <option value="3600">最近 1 小时</option>
+              <option value="21600">最近 6 小时</option>
+              <option value="86400">最近 24 小时</option>
+              <option value="604800">最近 7 天</option>
+            </select>
+          </label>
+          <label style="display: flex; flex-direction: column; gap: 4px; flex: 0 0 200px;">
+            <span style="font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.4px;">Plotly 加载</span>
+            <select x-model="plotlyMode" style="padding: 6px 10px; border: 1px solid var(--border); border-radius: 4px; font-size: 13px;">
+              <option value="cdn">CDN（小，需要联网）</option>
+              <option value="inline">Inline（~3.5MB，离线可看）</option>
+            </select>
+          </label>
+          <button class="btn" @click="openReport()" style="margin-left: auto;">在新窗口打开</button>
+          <button class="btn secondary" @click="downloadReport()">下载 HTML</button>
+        </div>
+      </div>
     </div>
 
   </main>
@@ -548,6 +574,29 @@
 // Chart.js instance held in closure (NOT in Alpine's reactive state) —
 // Alpine's Proxy wrapping breaks Chart.js's internal state machine.
 let _chart = null;
+
+function reportTab() {
+  return {
+    seconds: 3600,
+    plotlyMode: 'cdn',
+    url() {
+      return `/api/report?seconds=${this.seconds}&plotly_mode=${this.plotlyMode}`;
+    },
+    openReport() {
+      window.open(this.url(), '_blank');
+    },
+    async downloadReport() {
+      const r = await fetch(this.url());
+      const blob = await r.blob();
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `pping-lang-report-${this.seconds}s.html`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    },
+  };
+}
 
 function rulesTab() {
   return {
