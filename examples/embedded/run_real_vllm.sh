@@ -6,9 +6,16 @@ set -e
 
 VENV=/tmp/vllm-venv
 PROJECT=/mnt/d/GitCode/pping-lang
-MODEL=Qwen/Qwen2.5-0.5B-Instruct
+# Prefer locally cached modelscope path (avoids HF download dance); fall back to HF id
+LOCAL_QWEN=$HOME/.cache/modelscope/hub/models/Qwen/Qwen2___5-0___5B-Instruct
+if [ -d "$LOCAL_QWEN" ]; then
+    MODEL=$LOCAL_QWEN
+else
+    MODEL=Qwen/Qwen2.5-0.5B-Instruct
+fi
+SERVED_NAME=Qwen/Qwen2.5-0.5B-Instruct   # so client requests by HF id still work
 
-# Use HF mirror for China network (5-10x faster)
+# Use HF mirror for China network (5-10x faster); fall back to offline if cached
 export HF_ENDPOINT=https://hf-mirror.com
 export HF_HUB_ENABLE_HF_TRANSFER=0
 
@@ -41,12 +48,13 @@ echo "vLLM API: http://localhost:8000  |  pping-lang dashboard: http://localhost
 echo
 
 # vLLM args:
-#  --enable-cudagraph-metrics: required for padding_ratio derived metric
 #  --gpu-memory-utilization 0.85: leave headroom on 8GB laptop
 #  --max-model-len 4096: small KV cache, sufficient for tests
 #  --max-num-seqs 32: small batch
+# NOTE: --enable-cudagraph-metrics is a 0.20+ flag; 0.13.0 emits padding stats
+# unconditionally so we drop it here.
 exec $VENV/bin/vllm serve "$MODEL" \
-    --enable-cudagraph-metrics \
+    --served-model-name "$SERVED_NAME" \
     --gpu-memory-utilization 0.85 \
     --max-model-len 4096 \
     --max-num-seqs 32 \
