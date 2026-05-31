@@ -1814,12 +1814,11 @@
           </div>
           <div class="value"><span x-text="fmt(kpis.tpot_p99_ms, 0)"></span><span class="unit">ms</span></div>
           <div class="sub-line" x-show="kpis.tpot"
-               :title="kpis.tpot_source === 'itl' ? '窗口内的 iter 采样数（每次调度循环一条）' : '窗口内完成的请求数。样本越多，p99 越可信。'">
+               :title="kpis.tpot_source === 'itl' ? '注意：当前 vllm 未发 TPOT，回退到 ITL，此处数字其实是调度 iter 采样数，不是请求数。' : '窗口内完成的请求数。样本越多，p99 越可信 — <30 时建议结合 p50/avg 一起看。'">
             p50 <span x-text="fmt(kpis.tpot?.p50, 0)"></span>
             · p95 <span x-text="fmt(kpis.tpot?.p95, 0)"></span>
             · avg <span x-text="fmt(kpis.tpot?.avg, 0)"></span>
-            · <span x-text="kpis.tpot_source === 'itl' ? '采样' : '请求数'"></span>
-            <span x-text="kpis.tpot?.n ?? 0"></span>
+            · 请求数 <span x-text="kpis.tpot?.n ?? 0"></span>
           </div>
         </div>
         <div class="kpi teal">
