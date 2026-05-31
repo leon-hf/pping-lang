@@ -106,12 +106,18 @@ def test_close_idempotent(db_path):
     sink.close()  # must not raise
 
 
-def test_close_without_writes_doesnt_create_db(db_path):
-    """Empty sink that never flushes shouldn't materialize the DB."""
+def test_close_without_writes_yields_empty_tables(db_path):
+    """No metrics → DB still exists (schema bootstrapped eagerly to dodge
+    write-write conflicts with RuleEngine on first flush), but tables empty."""
     sink = LocalSink(db_path=db_path, instance_id="i", flush_interval_s=10.0)
     sink.close()
-    # No metrics pushed → no _flush call → no DB file
-    assert not db_path.exists()
+    assert db_path.exists()
+    conn = duckdb.connect(str(db_path))
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM metrics").fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM diagnoses").fetchone()[0] == 0
+    finally:
+        conn.close()
 
 
 def test_batch_insert_50_metrics(db_path):

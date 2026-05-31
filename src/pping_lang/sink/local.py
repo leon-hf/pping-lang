@@ -78,16 +78,22 @@ class LocalSink(Sink):
         instance_id: str,
         **base_kwargs,
     ) -> None:
-        super().__init__(**base_kwargs)
         self._db_path = str(db_path)
         self._instance_id = instance_id
         self._conn: duckdb.DuckDBPyConnection | None = None
+        # Bootstrap schema BEFORE super().__init__ starts the bg flush thread
+        # and BEFORE RuleEngine spins up. Without this, LocalSink and RuleEngine
+        # both race to CREATE TABLE IF NOT EXISTS on first use → DuckDB throws
+        # TransactionException (catalog write-write conflict) and leaves the
+        # writer connection in a failed-transaction state where INSERTs hit WAL
+        # but never commit, so dashboard reads see no data.
+        self._conn = duckdb.connect(self._db_path)
+        for stmt in SCHEMA_STATEMENTS:
+            self._conn.execute(stmt)
+        super().__init__(**base_kwargs)
 
     def _ensure_conn(self) -> duckdb.DuckDBPyConnection:
-        if self._conn is None:
-            self._conn = duckdb.connect(self._db_path)
-            for stmt in SCHEMA_STATEMENTS:
-                self._conn.execute(stmt)
+        assert self._conn is not None  # set in __init__
         return self._conn
 
     def _flush(

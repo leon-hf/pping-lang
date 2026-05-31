@@ -114,7 +114,7 @@ def test_suppression_blocks_duplicate_fires_within_window(db_with_metrics):
 def test_diagnosis_pushed_to_sink(db_with_metrics):
     sink, db = db_with_metrics
     _push_window(sink, M.GPU_UTIL_PCT, [10.0, 20.0])  # avg=15
-    sink.close()
+    sink._drain()  # flush metrics so the rule engine can see them
 
     engine = RuleEngine(
         db_path=str(db), rules=[_rule(rid="low-gpu")], sink=sink,
@@ -123,14 +123,9 @@ def test_diagnosis_pushed_to_sink(db_with_metrics):
     engine.evaluate_once()
     engine.stop()
 
-    # Verify diagnosis row in DB (after sink final flush, which engine.stop doesn't trigger
-    # — but sink.close() above did the final flush before this test ran, however the
-    # diagnosis was pushed AFTER close, so we need another close)
-    # Workaround: open a fresh sink to flush the diagnosis (or just inspect the queue)
-    # Actually: engine.push_diagnosis goes to sink._diag_q, not flushed yet.
-    # Easier: use an in-memory collector. But we want to test LocalSink integration too.
-    # Solution: explicitly call sink._drain to flush the new diagnosis.
+    # Engine pushed the diagnosis to sink._diag_q; flush it to DB.
     sink._drain()
+    sink.close()
 
     conn = duckdb.connect(str(db))
     rows = conn.execute(
