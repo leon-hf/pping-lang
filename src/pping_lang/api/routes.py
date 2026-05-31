@@ -20,9 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 
 from pping_lang.api.queries import (
-    aggregate_metric,
     bucketed_quantiles,
-    latest_per_metric,
     list_instances,
     open_conn,
     recent_diagnoses,
@@ -35,8 +33,6 @@ from pping_lang.bench.runner import run_static
 from pping_lang.bench.scenarios.schema import SLO, StaticScenario
 from pping_lang.hardware import GPUPeak
 from pping_lang.metrics_catalog import ALLOWED_METRICS, M
-from pping_lang.report.analysis import roofline_data
-from pping_lang.report.generator import generate_report
 from pping_lang.rules.engine import evaluate_condition_against_db
 from pping_lang.rules.schema import Condition, Rule
 
@@ -294,13 +290,26 @@ def build_app(
         }
 
     def _resolved_vllm_config(vc: Any) -> dict[str, Any] | None:
-        """Dump vllm_config's basic-typed fields per sub-config. Reuses the
-        report-side extraction so the modal stays in sync with HTML reports."""
-        from pping_lang.report.analysis import _config_to_dict
-        try:
-            return _config_to_dict(vc)
-        except Exception:
+        """Dump vllm_config's basic-typed fields per sub-config, for the
+        startup-info modal. Best-effort: skips anything that isn't a plain
+        scalar so we never spill non-serializable engine internals."""
+        if vc is None:
             return None
+        out: dict[str, dict[str, Any]] = {}
+        for sub_name in ("model_config", "scheduler_config", "cache_config", "parallel_config"):
+            sub = getattr(vc, sub_name, None)
+            if sub is None:
+                continue
+            sub_data: dict[str, Any] = {}
+            for attr in dir(sub):
+                if attr.startswith("_") or callable(getattr(sub, attr, None)):
+                    continue
+                v = getattr(sub, attr, None)
+                if isinstance(v, (str, int, float, bool)) or v is None:
+                    sub_data[attr] = v
+            if sub_data:
+                out[sub_name] = sub_data
+        return out or None
 
     # === GET /api/metrics/available ===
     @app.get("/api/metrics/available")
@@ -526,39 +535,29 @@ def build_app(
         data_source = "measured"
         formula: str | None = None
 
-        # First try the direct measured path.
-        if seconds <= 60:
-            flops_pts = sink.recent(M.VLLM_PERF_FLOPS_PER_GPU, seconds)
-            read_pts = {ts: v for v, ts in sink.recent(M.VLLM_PERF_READ_BYTES_PER_GPU, seconds)}
-            write_pts = {ts: v for v, ts in sink.recent(M.VLLM_PERF_WRITE_BYTES_PER_GPU, seconds)}
-            last_ts: int | None = None
-            for flops_v, ts in flops_pts:
-                read_b = read_pts.get(ts)
-                if read_b is None:
-                    continue
-                total_b = read_b + write_pts.get(ts, 0.0)
-                if last_ts is None:
-                    last_ts = ts
-                    continue
-                dt_s = (ts - last_ts) / 1e9
+        # Measured path: join flops + read_b + write_b from live ring buffers.
+        # Collector pushes all three at the same monotonic ts so they line up.
+        flops_pts = sink.recent(M.VLLM_PERF_FLOPS_PER_GPU, seconds)
+        read_pts = {ts: v for v, ts in sink.recent(M.VLLM_PERF_READ_BYTES_PER_GPU, seconds)}
+        write_pts = {ts: v for v, ts in sink.recent(M.VLLM_PERF_WRITE_BYTES_PER_GPU, seconds)}
+        last_ts: int | None = None
+        for flops_v, ts in flops_pts:
+            read_b = read_pts.get(ts)
+            if read_b is None:
+                continue
+            total_b = read_b + write_pts.get(ts, 0.0)
+            if last_ts is None:
                 last_ts = ts
-                if dt_s <= 0 or total_b <= 0 or flops_v <= 0:
-                    continue
-                points.append({
-                    "ai": flops_v / total_b,
-                    "throughput_tflops": flops_v / dt_s / 1e12,
-                    "ts_ns": ts,
-                })
-        else:
-            since_ns = time.monotonic_ns() - int(seconds * 1e9)
-            conn = open_conn(db_path)
-            try:
-                try:
-                    points = roofline_data(conn, since_ns)
-                except Exception:
-                    points = []
-            finally:
-                conn.close()
+                continue
+            dt_s = (ts - last_ts) / 1e9
+            last_ts = ts
+            if dt_s <= 0 or total_b <= 0 or flops_v <= 0:
+                continue
+            points.append({
+                "ai": flops_v / total_b,
+                "throughput_tflops": flops_v / dt_s / 1e12,
+                "ts_ns": ts,
+            })
 
         # Fallback: vllm <0.20 doesn't emit perf_stats. Estimate from token
         # counts + model architecture.
@@ -736,34 +735,6 @@ def build_app(
             "window_seconds": rule.condition.window_seconds,
             "aggregation": rule.condition.aggregation,
         }
-
-    # === GET /api/report — 生成单 HTML 报告 ===
-    @app.get("/api/report", response_class=HTMLResponse)
-    def report(
-        seconds: int = Query(86400, ge=60, le=2592000),  # 1 min .. 30 days
-        plotly_mode: str = Query("cdn", pattern="^(cdn|inline)$"),
-    ) -> HTMLResponse:
-        try:
-            html = generate_report(
-                db_path=db_path,
-                instance_id=instance_id,
-                seconds=seconds,
-                version=version,
-                vllm_config=vllm_config,
-                gpu_peak=gpu_peak,
-                plotly_mode=plotly_mode,
-            )
-        except Exception as e:
-            logger.exception("report generation failed")
-            raise HTTPException(500, f"report generation failed: {e}")
-        # Set filename for download via Content-Disposition
-        return HTMLResponse(
-            html,
-            headers={
-                "Content-Disposition":
-                    f'inline; filename="pping-lang-report-{instance_id}-{seconds}s.html"',
-            },
-        )
 
     # === GET /api/instances ===
     @app.get("/api/instances")

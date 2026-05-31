@@ -1168,118 +1168,6 @@
     justify-content: flex-end;
   }
 
-  /* === Report tab === */
-  .report-card {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
-    padding: 36px;
-    background-image: linear-gradient(135deg, rgba(220, 77, 62, 0.03) 0%, transparent 50%);
-  }
-  .report-card h3 {
-    margin: 0 0 8px;
-    font-size: 22px;
-    color: var(--text-strong);
-    font-weight: 700;
-    letter-spacing: -0.025em;
-  }
-  .report-card .desc {
-    color: var(--muted);
-    margin: 0 0 26px;
-    font-size: 14px;
-    max-width: 680px;
-    line-height: 1.6;
-  }
-  .report-controls {
-    display: flex;
-    gap: 18px;
-    align-items: flex-end;
-    flex-wrap: wrap;
-  }
-  .report-controls .field {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    flex: 0 0 240px;
-  }
-  .report-controls .field-label {
-    font-size: 12px;
-    color: var(--muted);
-    font-weight: 600;
-  }
-  .report-controls select {
-    padding: 9px 13px;
-    border: 1px solid var(--border-strong);
-    border-radius: 8px;
-    font-size: 13.5px;
-    font-family: inherit;
-    background: var(--surface);
-    color: var(--text);
-  }
-  .report-controls select:focus {
-    outline: none;
-    border-color: var(--coral);
-    box-shadow: 0 0 0 3px rgba(220, 77, 62, 0.12);
-  }
-  .report-controls .spacer { flex: 1; }
-
-  /* === Report inline preview === */
-  .report-preview-wrap {
-    margin-top: 28px;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
-    overflow: hidden;
-    box-shadow: var(--shadow-sm);
-  }
-  .report-preview-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 14px 22px;
-    border-bottom: 1px solid var(--border);
-    background: var(--surface-tint);
-  }
-  .report-preview-head .title {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    font-size: 13.5px;
-    font-weight: 600;
-    color: var(--text-strong);
-    letter-spacing: -0.01em;
-  }
-  .report-preview-head .title .live-dot {
-    width: 7px; height: 7px;
-    border-radius: 50%;
-    background: var(--sage);
-    animation: pulse 2s ease-in-out infinite;
-  }
-  .report-preview-head .url {
-    font-family: ui-monospace, Consolas, monospace;
-    font-size: 11px;
-    color: var(--muted-2);
-    max-width: 60%;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .report-preview-frame {
-    width: 100%;
-    height: 760px;
-    border: none;
-    background: white;
-    display: block;
-  }
-  .report-preview-loading {
-    height: 760px;
-    display: grid;
-    place-items: center;
-    color: var(--muted);
-    font-size: 13px;
-    background: var(--surface-tint);
-  }
-
   /* === SLO multi-row picker (inside bench form) === */
   .slo-section {
     display: flex;
@@ -1726,7 +1614,6 @@
             :class="{ crit: diagnoses.some(d => d.severity === 'critical') }"
             x-text="diagnoses.length"></span>
     </button>
-    <button :class="{ active: tab === 'report' }" @click="tab = 'report'">报告</button>
     <button :class="{ active: tab === 'bench' }" @click="tab = 'bench'">
       压测
       <span x-show="benchRunning > 0" class="tab-badge"
@@ -2352,51 +2239,6 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
       <div x-show="toast" x-cloak class="toast" :class="{ error: toastError }" x-text="toast"></div>
     </div>
 
-    <!-- ===== 报告 tab ===== -->
-    <div x-show="tab === 'report'" x-data="reportTab()">
-      <div class="report-card">
-        <h3>生成性能复盘报告</h3>
-        <p class="desc">
-          Executive Summary、关键问题、趋势分析、配置审计、Roofline、规则触发汇总 —— 单 HTML 文件，可邮件分享。
-        </p>
-        <div class="report-controls">
-          <div class="field">
-            <span class="field-label">时间范围</span>
-            <select x-model.number="seconds">
-              <option value="300">最近 5 分钟</option>
-              <option value="3600">最近 1 小时</option>
-              <option value="21600">最近 6 小时</option>
-              <option value="86400">最近 24 小时</option>
-              <option value="604800">最近 7 天</option>
-            </select>
-          </div>
-          <div class="field">
-            <span class="field-label">Plotly 加载</span>
-            <select x-model="plotlyMode">
-              <option value="cdn">CDN（小，需要联网）</option>
-              <option value="inline">Inline（~3.5MB，离线可看）</option>
-            </select>
-          </div>
-          <div class="spacer"></div>
-          <button class="btn secondary" @click="refreshPreview()">刷新预览</button>
-          <button class="btn secondary" @click="downloadReport()">下载 HTML</button>
-          <button class="btn primary" @click="openReport()">在新窗口打开</button>
-        </div>
-      </div>
-
-      <!-- Inline live preview — iframe loads the same /api/report endpoint -->
-      <div class="report-preview-wrap">
-        <div class="report-preview-head">
-          <div class="title">
-            <span class="live-dot"></span>
-            <span>实时预览</span>
-          </div>
-          <div class="url" x-text="url()"></div>
-        </div>
-        <iframe class="report-preview-frame" :src="url()" loading="lazy"></iframe>
-      </div>
-    </div>
-
     <!-- ===== 压测 tab ===== -->
     <div x-show="tab === 'bench'" x-data="benchTab()" x-init="init()">
 
@@ -2909,38 +2751,6 @@ function benchTab() {
       } finally {
         this.submitting = false;
       }
-    },
-  };
-}
-
-function reportTab() {
-  return {
-    seconds: 3600,
-    plotlyMode: 'cdn',
-    previewNonce: 0,  // bump → forces iframe reload even with unchanged params
-    url() {
-      // _n nonce both cache-busts and triggers Alpine :src re-render
-      return `/api/report?seconds=${this.seconds}&plotly_mode=${this.plotlyMode}&_n=${this.previewNonce}`;
-    },
-    refreshPreview() { this.previewNonce++; },
-    openReport() {
-      // Open without nonce so user gets a clean URL
-      window.open(
-        `/api/report?seconds=${this.seconds}&plotly_mode=${this.plotlyMode}`,
-        '_blank',
-      );
-    },
-    async downloadReport() {
-      const r = await fetch(
-        `/api/report?seconds=${this.seconds}&plotly_mode=${this.plotlyMode}`,
-      );
-      const blob = await r.blob();
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = `pping-lang-report-${this.seconds}s.html`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
     },
   };
 }

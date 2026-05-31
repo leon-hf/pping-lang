@@ -29,8 +29,6 @@ dependencies = [
     "opentelemetry-api>=1.27.0",
     "opentelemetry-sdk>=1.27.0",
     "opentelemetry-exporter-otlp>=1.27.0",
-    "plotly>=5.18.0",
-    "jinja2>=3.1.0",
     "pydantic>=2.0.0",
 ]
 
@@ -51,10 +49,9 @@ Documentation = "https://github.com/leon/pping-lang/tree/main/docs"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/pping_lang"]
-# Bundle non-Python resources: report templates + bench prompt datasets.
-# Hatch picks .py up automatically; everything else needs explicit include.
+# Bundle non-Python resources. Hatch picks .py up automatically; everything
+# else needs explicit include.
 include = [
-  "src/pping_lang/report/templates/*.j2",
   "src/pping_lang/bench/prompts/data/*.jsonl",
   "src/pping_lang/ui/*.html",
 ]
