@@ -8,7 +8,9 @@ Day 9: 规则热加载（store 改动让 engine 即时看到）— 见 RuleEngin
 """
 from __future__ import annotations
 
+import asyncio
 import logging
+import os
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -18,15 +20,22 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 
 from pping_lang.api.queries import (
+    aggregate_metric,
+    bucketed_quantiles,
     latest_per_metric,
     list_instances,
     open_conn,
     recent_diagnoses,
     recent_metric_points,
 )
-from pping_lang.api.schemas import RuleIn, RuleTestRequest
+from pping_lang.api.schemas import BenchStartIn, RuleIn, RuleTestRequest
+from pping_lang.bench import store as bench_store
+from pping_lang.bench.client import OpenAIStreamClient
+from pping_lang.bench.runner import run_static
+from pping_lang.bench.scenarios.schema import SLO, StaticScenario
 from pping_lang.hardware import GPUPeak
-from pping_lang.metrics_catalog import ALLOWED_METRICS
+from pping_lang.metrics_catalog import ALLOWED_METRICS, M
+from pping_lang.report.analysis import roofline_data
 from pping_lang.report.generator import generate_report
 from pping_lang.rules.engine import evaluate_condition_against_db
 from pping_lang.rules.schema import Condition, Rule
@@ -54,6 +63,7 @@ def build_app(
     version: str = "0.0.1.dev0",
     vllm_config: Any = None,
     gpu_peak: GPUPeak | None = None,
+    gpu_name: str | None = None,
 ) -> FastAPI:
     """Construct the FastAPI app with deps wired via closure."""
     app = FastAPI(
@@ -104,6 +114,61 @@ def build_app(
             },
         }
 
+    # === GET /api/system — environment / model / GPU info for dashboard hero ===
+    @app.get("/api/system")
+    def system() -> dict[str, Any]:
+        # vLLM version: real install first, then env override (demo)
+        vllm_ver: str | None = None
+        try:
+            import vllm as _v
+            vllm_ver = getattr(_v, "__version__", None)
+        except Exception:
+            vllm_ver = None
+        if not vllm_ver:
+            vllm_ver = os.environ.get("PPING_LANG_INFO_VLLM_VERSION") or None
+
+        # Model name: from vllm_config.model_config.model, then env override
+        model: str | None = None
+        if vllm_config is not None:
+            mc = getattr(vllm_config, "model_config", None)
+            if mc is not None:
+                model = getattr(mc, "model", None) or getattr(mc, "served_model_name", None)
+        if not model:
+            model = os.environ.get("PPING_LANG_INFO_MODEL") or None
+
+        # GPU: NVML-detected first, then env override
+        name = gpu_name or os.environ.get("PPING_LANG_INFO_GPU") or None
+        count = nvml.num_gpus if (nvml and nvml.num_gpus) else None
+        if count is None:
+            env_count = os.environ.get("PPING_LANG_INFO_GPU_COUNT")
+            if env_count and env_count.isdigit():
+                count = int(env_count)
+
+        peak: dict[str, float] | None = None
+        if gpu_peak is not None:
+            peak = {
+                "bf16_tflops": gpu_peak.bf16_tflops,
+                "mem_bw_gbs": gpu_peak.mem_bw_gbs,
+            }
+        else:
+            env_tflops = os.environ.get("PPING_LANG_INFO_BF16_TFLOPS")
+            env_bw = os.environ.get("PPING_LANG_INFO_MEM_BW_GBS")
+            if env_tflops and env_bw:
+                try:
+                    peak = {"bf16_tflops": float(env_tflops), "mem_bw_gbs": float(env_bw)}
+                except ValueError:
+                    peak = None
+
+        return {
+            "vllm_version": vllm_ver,
+            "model": model,
+            "gpu_name": name,
+            "gpu_count": count,
+            "gpu_peak": peak,
+            "instance_id": instance_id,
+            "engine_index": engine_index,
+        }
+
     # === GET /api/metrics/available ===
     @app.get("/api/metrics/available")
     def metrics_available() -> dict[str, list[str]]:
@@ -144,6 +209,137 @@ def build_app(
         finally:
             conn.close()
         return {"window_seconds": seconds, "metrics": latest}
+
+    # === GET /api/kpis — curated KPI bundle for dashboard (one round-trip) ===
+    @app.get("/api/kpis")
+    def kpis(
+        window: int = Query(60, ge=5, le=3600, description="Aggregation window (s)"),
+    ) -> dict[str, Any]:
+        since_ns = time.monotonic_ns() - int(window * 1e9)
+        conn = open_conn(db_path)
+        try:
+            try:
+                latest = latest_per_metric(conn, since_ns)
+            except Exception:
+                latest = {}
+
+            def latest_val(name: str) -> float | None:
+                row = latest.get(name)
+                return row["value"] if row else None
+
+            def agg(name: str, op: str) -> float | None:
+                try:
+                    return aggregate_metric(conn, name, since_ns, op)
+                except Exception:
+                    return None
+
+            # TTFT (always per-iter list, p50/p99 over window)
+            ttft_p50 = agg(M.VLLM_REQ_TTFT_MS, "p50")
+            ttft_p99 = agg(M.VLLM_REQ_TTFT_MS, "p99")
+
+            # TPOT preferred (per-finished-request), fall back to ITL (per-iter)
+            tpot_p50 = agg(M.VLLM_REQ_TPOT_MS, "p50") or agg(M.VLLM_REQ_ITL_MS, "p50")
+            tpot_p99 = agg(M.VLLM_REQ_TPOT_MS, "p99") or agg(M.VLLM_REQ_ITL_MS, "p99")
+
+            # Output throughput: sum gen tokens / window seconds
+            gen_sum = agg(M.VLLM_ITER_GEN_TOKENS, "sum")
+            output_tps = (gen_sum / window) if gen_sum is not None else None
+
+            # Preemption rate per minute
+            preempt_sum = agg(M.VLLM_ITER_PREEMPTED_REQS, "sum")
+            preempt_per_min = (
+                preempt_sum * 60.0 / window if preempt_sum is not None else None
+            )
+        finally:
+            conn.close()
+
+        return {
+            "window_seconds": window,
+            "kpis": {
+                "ttft_p50_ms": ttft_p50,
+                "ttft_p99_ms": ttft_p99,
+                "tpot_p50_ms": tpot_p50,
+                "tpot_p99_ms": tpot_p99,
+                "output_tps": output_tps,
+                "kv_cache": latest_val(M.VLLM_SCHEDULER_KV_CACHE_USAGE_RATIO),
+                "running_reqs": latest_val(M.VLLM_SCHEDULER_RUNNING_REQS),
+                "waiting_reqs": latest_val(M.VLLM_SCHEDULER_WAITING_REQS),
+                "mfu": latest_val(M.VLLM_PERF_MFU_RATIO),
+                "padding_ratio": latest_val(M.VLLM_CUDAGRAPH_PADDING_RATIO),
+                "prefix_cache_hit": latest_val(M.VLLM_SCHEDULER_PREFIX_CACHE_HIT_RATIO),
+                "preempt_per_min": preempt_per_min,
+                "gpu_util": latest_val(M.GPU_UTIL_PCT),
+            },
+        }
+
+    # === GET /api/latency_trends — TTFT / TPOT / E2E bucketed p50+p99 over time ===
+    @app.get("/api/latency_trends")
+    def latency_trends(
+        seconds: int = Query(300, ge=30, le=86400),
+        buckets: int = Query(30, ge=5, le=240),
+    ) -> dict[str, Any]:
+        now_ns = time.monotonic_ns()
+        since_ns = now_ns - int(seconds * 1e9)
+        conn = open_conn(db_path)
+        try:
+            ttft = bucketed_quantiles(conn, M.VLLM_REQ_TTFT_MS, since_ns, now_ns, buckets)
+            # TPOT prefers per-finished-request, fall back to per-iter ITL when missing
+            tpot = bucketed_quantiles(conn, M.VLLM_REQ_TPOT_MS, since_ns, now_ns, buckets)
+            tpot_source = "tpot"
+            if not tpot:
+                tpot = bucketed_quantiles(
+                    conn, M.VLLM_REQ_ITL_MS, since_ns, now_ns, buckets,
+                )
+                tpot_source = "itl"
+            e2e = bucketed_quantiles(
+                conn, M.VLLM_REQ_E2E_LATENCY_MS, since_ns, now_ns, buckets,
+            )
+        finally:
+            conn.close()
+        return {
+            "seconds": seconds,
+            "buckets": buckets,
+            "ttft_ms": ttft,
+            "tpot_ms": tpot,
+            "tpot_source": tpot_source,
+            "e2e_ms": e2e,
+        }
+
+    # === GET /api/roofline — live Roofline scatter (points + peak roofs) ===
+    @app.get("/api/roofline")
+    def roofline(
+        seconds: int = Query(60, ge=5, le=3600),
+    ) -> dict[str, Any]:
+        since_ns = time.monotonic_ns() - int(seconds * 1e9)
+        conn = open_conn(db_path)
+        try:
+            try:
+                points = roofline_data(conn, since_ns)
+            except Exception:
+                points = []
+        finally:
+            conn.close()
+
+        # Peak from gpu_peak param, or fall back to env (demo)
+        peak: dict[str, float] | None = None
+        if gpu_peak is not None:
+            peak = {
+                "compute_tflops": gpu_peak.bf16_tflops,
+                "mem_bw_tbs": gpu_peak.mem_bw_gbs / 1000.0,
+            }
+        else:
+            env_tflops = os.environ.get("PPING_LANG_INFO_BF16_TFLOPS")
+            env_bw = os.environ.get("PPING_LANG_INFO_MEM_BW_GBS")
+            if env_tflops and env_bw:
+                try:
+                    peak = {
+                        "compute_tflops": float(env_tflops),
+                        "mem_bw_tbs": float(env_bw) / 1000.0,
+                    }
+                except ValueError:
+                    peak = None
+
+        return {"seconds": seconds, "points": points, "peak": peak}
 
     # === GET /api/diagnoses ===
     @app.get("/api/diagnoses")
@@ -304,6 +500,171 @@ def build_app(
         finally:
             conn.close()
         return {"instances": ids}
+
+    # ─────────────────────────────────────────────────────────────────────
+    #  BENCH API — see docs/bench-design-v0.1.md §10
+    # ─────────────────────────────────────────────────────────────────────
+
+    # In-memory registry of currently-running bench runs (asyncio Task references).
+    # DB holds the canonical state; this dict is just for "is X live right now".
+    _bench_runs: dict[str, dict[str, Any]] = {}
+
+    # Initialize bench_runs table once. Re-init at every endpoint is also defensive
+    # (in case of race with first vLLM step on a fresh DB).
+    try:
+        _init_conn = open_conn(db_path)
+        try:
+            bench_store.init_bench_table(_init_conn)
+        finally:
+            _init_conn.close()
+    except Exception as e:
+        logger.warning("[pping-lang] bench_runs table init deferred: %s", e)
+
+    async def _execute_bench(
+        run_id: str, scenario: StaticScenario,
+    ) -> None:
+        """Run a bench in-process; finalize DB on completion or failure."""
+        try:
+            async with OpenAIStreamClient(
+                scenario.endpoint, timeout_s=scenario.timeout_s,
+            ) as client:
+                summary = await run_static(scenario, client)
+            conn = open_conn(db_path)
+            try:
+                bench_store.init_bench_table(conn)
+                slo = bench_store.evaluate_slo(summary, scenario)
+                bench_store.mark_done(
+                    conn, run_id, time.monotonic_ns(), summary, slo_status=slo,
+                )
+            finally:
+                conn.close()
+        except Exception as e:  # noqa: BLE001
+            logger.exception("[bench] run %s failed", run_id)
+            try:
+                conn = open_conn(db_path)
+                try:
+                    bench_store.mark_failed(
+                        conn, run_id, time.monotonic_ns(),
+                        f"{type(e).__name__}: {e}",
+                    )
+                finally:
+                    conn.close()
+            except Exception:
+                logger.exception("[bench] failed to record failure for %s", run_id)
+        finally:
+            _bench_runs.pop(run_id, None)
+
+    # === GET /api/bench/runs — list past + currently running ===
+    @app.get("/api/bench/runs")
+    def bench_list(
+        limit: int = Query(50, ge=1, le=500),
+    ) -> dict[str, Any]:
+        conn = open_conn(db_path)
+        try:
+            try:
+                bench_store.init_bench_table(conn)
+                runs = bench_store.list_runs(conn, limit=limit)
+            except Exception:
+                runs = []
+        finally:
+            conn.close()
+        # Mark which runs are alive in this process right now
+        for r in runs:
+            r["live"] = r["run_id"] in _bench_runs
+        # now_ns lets the UI compute "X seconds ago" against the server's
+        # monotonic clock (started_at_ns uses time.monotonic_ns, not wall clock)
+        return {"runs": runs, "now_ns": time.monotonic_ns()}
+
+    # === GET /api/bench/runs/{run_id} — single run detail ===
+    @app.get("/api/bench/runs/{run_id}")
+    def bench_detail(run_id: str) -> dict[str, Any]:
+        conn = open_conn(db_path)
+        try:
+            run = bench_store.get_run(conn, run_id)
+        finally:
+            conn.close()
+        if run is None:
+            raise HTTPException(404, f"bench run {run_id!r} not found")
+        run["live"] = run_id in _bench_runs
+        return run
+
+    # === GET /api/bench/status — currently running snapshot ===
+    @app.get("/api/bench/status")
+    def bench_status() -> dict[str, Any]:
+        return {
+            "running": [
+                {
+                    "run_id": rid,
+                    "scenario_name": meta["scenario_name"],
+                    "started_at_ns": meta["started_at_ns"],
+                }
+                for rid, meta in _bench_runs.items()
+            ],
+        }
+
+    # === POST /api/bench/start — kick off a new run, returns 202 ===
+    @app.post("/api/bench/start", status_code=202)
+    async def bench_start(body: BenchStartIn) -> dict[str, Any]:
+        # v0.1 API does single static runs only — sweep stays CLI-only.
+        if body.sweep:
+            raise HTTPException(
+                501,
+                "sweep mode not yet supported via API in v0.1; use `python -m pping_lang.bench static --sweep ...`",
+            )
+
+        # num_requests wins over duration_s if both set
+        duration_s = body.duration_s
+        num_requests = body.num_requests
+        if num_requests is not None:
+            duration_s = None
+
+        name = body.name or f"adhoc-{int(time.time())}"
+        try:
+            slo_obj = SLO.from_spec(body.slo) if body.slo else None
+            scenario = StaticScenario(
+                name=name,
+                endpoint=body.endpoint,
+                model=body.model,
+                prompt_tokens=body.prompt_tokens,
+                output_tokens=body.output_tokens,
+                concurrency=body.concurrency,
+                duration_s=duration_s,
+                num_requests=num_requests,
+                warmup_s=body.warmup_s,
+                timeout_s=body.timeout_s,
+                api=body.api,
+                slo=slo_obj,
+            )
+            scenario.validate()
+        except (ValueError, TypeError) as e:
+            raise HTTPException(422, f"invalid scenario: {e}")
+
+        # Persist initial 'running' row
+        conn = open_conn(db_path)
+        try:
+            bench_store.init_bench_table(conn)
+            run_id = bench_store.generate_run_id(conn, "static")
+            started_at_ns = time.monotonic_ns()
+            bench_store.insert_running(
+                conn, run_id, scenario, "static", started_at_ns,
+            )
+        finally:
+            conn.close()
+
+        # Fire-and-forget asyncio task; finalization is in _execute_bench
+        task = asyncio.create_task(_execute_bench(run_id, scenario))
+        _bench_runs[run_id] = {
+            "task": task,
+            "scenario_name": scenario.name,
+            "started_at_ns": started_at_ns,
+        }
+
+        return {
+            "run_id": run_id,
+            "status": "running",
+            "started_at_ns": started_at_ns,
+            "scenario_name": scenario.name,
+        }
 
     return app
 

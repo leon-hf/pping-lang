@@ -33,3 +33,24 @@ class RuleIn(BaseModel):
 class RuleTestRequest(BaseModel):
     """POST /api/rules/{id}/test 的请求体（可选——空表示用 store 中的规则）。"""
     override: RuleIn | None = None
+
+
+class BenchStartIn(BaseModel):
+    """POST /api/bench/start 的请求体——静态压测场景参数。
+
+    duration_s 与 num_requests 互斥（与 StaticScenario.validate 一致）。
+    服务端会进一步通过 StaticScenario.validate() 走全套校验。
+    """
+    name: str | None = None
+    endpoint: str = Field(min_length=1)
+    model: str = Field(min_length=1)
+    prompt_tokens: int = Field(default=500, gt=0)
+    output_tokens: int = Field(default=100, gt=0)
+    concurrency: int = Field(default=16, gt=0)
+    duration_s: int | None = 60
+    num_requests: int | None = None
+    warmup_s: int = Field(default=5, ge=0)
+    timeout_s: float = Field(default=30.0, gt=0)
+    api: Literal["chat", "completions"] = "chat"
+    sweep: str | None = None  # e.g. "concurrency=1,2,4,8"
+    slo: str | None = None    # constraint spec, e.g. "ttft:p99<500ms;tpot:p99<50ms"

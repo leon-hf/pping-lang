@@ -52,6 +52,34 @@ _OP_TO_FN: dict[Op, Any] = {
     "!=": lambda a, t: a != t,
 }
 
+
+def _agg_in_memory(values: list[float], agg: Aggregation) -> float | None:
+    """Python-side aggregation — kept for ad-hoc use; engine itself batches
+    aggregation directly into DuckDB via UNION ALL (much faster).
+    """
+    if not values:
+        return None
+    if agg == "avg":
+        return sum(values) / len(values)
+    if agg == "max":
+        return max(values)
+    if agg == "min":
+        return min(values)
+    if agg == "count":
+        return float(len(values))
+    if agg in ("p50", "p95", "p99"):
+        q = {"p50": 0.5, "p95": 0.95, "p99": 0.99}[agg]
+        s = sorted(values)
+        n = len(s)
+        if n == 1:
+            return s[0]
+        rank = q * (n - 1)
+        lo = int(rank)
+        hi = min(lo + 1, n - 1)
+        frac = rank - lo
+        return s[lo] + (s[hi] - s[lo]) * frac
+    return None
+
 _SEVERITY_GLYPH = {"info": "i", "warning": "!", "critical": "X"}
 
 
@@ -184,7 +212,19 @@ class RuleEngine:
     def _ensure_conn(self) -> Any:
         if self._conn is None:
             import duckdb
+
+            from pping_lang.sink.local import SCHEMA_STATEMENTS
             self._conn = duckdb.connect(self._db_path)
+            # Without this, the engine may have opened the conn BEFORE LocalSink
+            # created the `metrics` table — DuckDB would then keep throwing
+            # CatalogException every tick. CREATE IF NOT EXISTS is idempotent
+            # and means both writers (LocalSink) and readers (this engine) own
+            # the schema regardless of init order.
+            for stmt in SCHEMA_STATEMENTS:
+                try:
+                    self._conn.execute(stmt)
+                except Exception:
+                    logger.debug("[pping-lang] schema bootstrap stmt failed (ok if other conn already ran it)")
         return self._conn
 
     def _evaluate_all(self) -> int:
@@ -196,14 +236,27 @@ class RuleEngine:
             logger.exception("[pping-lang] could not open DuckDB for rule eval")
             return 0
         now_ns = time.monotonic_ns()
+        rules = self._current_rules()
         fires = 0
-        # Snapshot rules per-tick — picks up CRUD changes (hot reload, Day 9)
-        for rule in self._current_rules():
-            try:
-                if self._evaluate_one(conn, rule, now_ns):
-                    fires += 1
-            except Exception:
-                logger.exception("[pping-lang] rule %s eval failed", rule.id)
+        try:
+            # Batched fetch + in-memory aggregation. We tried 4 approaches and
+            # benchmarked on real-vllm with sustained load (Day 17-18):
+            #   • per-rule SQL QUANTILE_CONT          ~90 ms  (original)
+            #   • batched fetch + Python aggregation  ~25 ms  ← we use this
+            #   • numpy fetchnumpy + np.percentile    ~44 ms  (string mask overhead)
+            #   • single UNION ALL of all aggregates  ~76 ms  (DuckDB doesn't
+            #                                                  parallelize branches)
+            # Going below 25ms requires an in-memory ring buffer instead of
+            # DuckDB-backed queries — that's a v0.2 architecture change.
+            by_metric = self._fetch_metric_values(conn, rules, now_ns)
+            for rule in rules:
+                try:
+                    if self._evaluate_one_against_fetched(rule, by_metric, now_ns):
+                        fires += 1
+                except Exception:
+                    logger.exception("[pping-lang] rule %s eval failed", rule.id)
+        except Exception:
+            logger.exception("[pping-lang] batched eval failed; rules skipped this tick")
         # Self-observability: how long this eval pass took (Day 12)
         from pping_lang.metrics_catalog import M as _M
         from pping_lang.types import MetricPoint as _MP
@@ -219,8 +272,88 @@ class RuleEngine:
             pass
         return fires
 
-    def _evaluate_one(self, conn: Any, rule: Rule, now_ns: int) -> bool:
+    def _fetch_metric_values(
+        self, conn: Any, rules: list[Rule], now_ns: int,
+    ) -> dict[str, list[tuple[float, int]]]:
+        """One SQL → {metric_name: [(value, ts_ns), ...]} covering all rules.
+
+        Per metric we pull rows covering the WIDEST window any rule needs.
+        Then `_evaluate_one_against_fetched` slices each rule's narrower window
+        client-side. Result: O(rules) → O(1) DB round-trips per eval tick.
+        """
+        if not rules:
+            return {}
+        widest_window_s: dict[str, int] = {}
+        for r in rules:
+            m = r.condition.metric
+            w = int(r.condition.window_seconds)
+            if w > widest_window_s.get(m, 0):
+                widest_window_s[m] = w
+        if not widest_window_s:
+            return {}
+        metric_names = list(widest_window_s.keys())
+        max_window = max(widest_window_s.values())
+        overall_cutoff = now_ns - int(max_window * 1e9)
+        placeholders = ", ".join(["?"] * len(metric_names))
+        sql = (
+            f"SELECT metric_name, value, ts_ns FROM metrics "
+            f"WHERE metric_name IN ({placeholders}) AND ts_ns >= ?"
+        )
+        rows = conn.execute(sql, [*metric_names, overall_cutoff]).fetchall()
+        by_metric: dict[str, list[tuple[float, int]]] = {m: [] for m in metric_names}
+        for name, value, ts_ns in rows:
+            by_metric[name].append((float(value), int(ts_ns)))
+        return by_metric
+
+    def _evaluate_one_against_fetched(
+        self,
+        rule: Rule,
+        by_metric: dict[str, list[tuple[float, int]]],
+        now_ns: int,
+    ) -> bool:
         # Suppression
+        last = self._last_fire_ns.get(rule.id, 0)
+        if last and (now_ns - last) < self._suppression_window_ns:
+            return False
+
+        cond = rule.condition
+        rows = by_metric.get(cond.metric)
+        if not rows:
+            return False
+        window_cutoff = now_ns - int(cond.window_seconds * 1e9)
+        values = [v for v, ts in rows if ts >= window_cutoff]
+        if not values:
+            return False
+        actual = _agg_in_memory(values, cond.aggregation)
+        if actual is None:
+            return False
+        if not _OP_TO_FN[cond.op](actual, cond.threshold):
+            return False
+
+        # Trigger
+        self._last_fire_ns[rule.id] = now_ns
+        self.fire_count += 1
+        message = rule.message.format(
+            value=actual, threshold=cond.threshold, window=cond.window_seconds,
+        )
+        diag = Diagnosis(
+            ts_ns=now_ns,
+            rule_id=rule.id,
+            severity=rule.severity,
+            triggered_value=actual,
+            threshold=cond.threshold,
+            window_seconds=cond.window_seconds,
+            message=message,
+            suggestion=rule.suggestion,
+            engine_idx=self._engine_index,
+        )
+        self._sink.push_diagnosis(diag)
+        if self._print:
+            self._print_diag(rule, message)
+        return True
+
+    def _evaluate_one(self, conn: Any, rule: Rule, now_ns: int) -> bool:
+        """Legacy per-rule path. Kept for API `/api/rules/{id}/test` test endpoint."""
         last = self._last_fire_ns.get(rule.id, 0)
         if last and (now_ns - last) < self._suppression_window_ns:
             return False
@@ -230,7 +363,6 @@ class RuleEngine:
         if not fired or actual is None:
             return False
 
-        # Trigger
         self._last_fire_ns[rule.id] = now_ns
         self.fire_count += 1
         message = rule.message.format(

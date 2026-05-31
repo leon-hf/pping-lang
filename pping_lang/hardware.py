@@ -18,6 +18,10 @@ class GPUPeak:
 # (substring pattern, peak)
 # 列表顺序很重要：更具体的在前。lookup 用大小写不敏感子串匹配。
 _GPU_PEAK_TABLE: list[tuple[str, GPUPeak]] = [
+    # Blackwell (BF16 dense; FP8 doubles these on 5th-gen Tensor Cores)
+    ("B200",       GPUPeak(2250.0, 8000.0)),   # HBM3e 192GB, 8 TB/s
+    ("B100",       GPUPeak(1800.0, 8000.0)),   # HBM3e 192GB, 8 TB/s
+    # Hopper
     ("H200",       GPUPeak(989.0, 4800.0)),
     ("H100 PCIe",  GPUPeak(756.0, 2000.0)),
     ("H100 NVL",   GPUPeak(835.0, 3900.0)),
@@ -32,7 +36,20 @@ _GPU_PEAK_TABLE: list[tuple[str, GPUPeak]] = [
     ("A10",        GPUPeak(125.0, 600.0)),
     ("V100",       GPUPeak(125.0, 900.0)),
     ("T4",         GPUPeak(65.0, 320.0)),
-    ("RTX 4090",   GPUPeak(165.0, 1008.0)),
+    # Ada Lovelace consumer / mobile — laptop variants are dedicated entries
+    # because NVML reports the literal "RTX 4090 Laptop GPU", and laptop dies
+    # are roughly half the desktop in both FLOPS and bandwidth.
+    # IMPORTANT: laptop pattern must precede the desktop pattern (substring match).
+    ("RTX 4090 Laptop", GPUPeak(82.6, 576.0)),    # AD103 mobile
+    ("RTX 4080 Laptop", GPUPeak(48.7, 432.0)),    # AD104 mobile
+    ("RTX 4070 Laptop", GPUPeak(33.3, 256.0)),    # AD106 mobile
+    ("RTX 4060 Laptop", GPUPeak(22.6, 256.0)),    # AD107 mobile
+    ("RTX 4090",   GPUPeak(165.0, 1008.0)),       # AD102 desktop (existing)
+    ("RTX 4080",   GPUPeak(97.4, 716.8)),         # AD103 desktop
+    ("RTX 4070 Ti", GPUPeak(80.1, 504.2)),
+    ("RTX 4070",   GPUPeak(58.0, 504.2)),
+    ("RTX 4060 Ti", GPUPeak(44.0, 288.0)),
+    ("RTX 4060",   GPUPeak(31.3, 272.0)),
     ("RTX 3090",   GPUPeak(71.0, 936.0)),
 ]
 

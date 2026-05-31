@@ -9,6 +9,8 @@ from pping_lang.hardware import GPUPeak, known_gpu_patterns, lookup_peak
 @pytest.mark.parametrize(
     "nvml_name,expected_tflops",
     [
+        ("NVIDIA B200", 2250.0),                 # Blackwell flagship
+        ("NVIDIA B100", 1800.0),
         ("NVIDIA H100 80GB HBM3", 989.0),       # SXM 默认
         ("NVIDIA H100 PCIe", 756.0),
         ("NVIDIA H100 NVL", 835.0),
@@ -22,6 +24,13 @@ from pping_lang.hardware import GPUPeak, known_gpu_patterns, lookup_peak
         ("Tesla T4", 65.0),
         ("Tesla V100-SXM2-32GB", 125.0),
         ("NVIDIA GeForce RTX 4090", 165.0),
+        ("NVIDIA GeForce RTX 4090 Laptop GPU", 82.6),
+        ("NVIDIA GeForce RTX 4080", 97.4),
+        ("NVIDIA GeForce RTX 4080 Laptop GPU", 48.7),
+        ("NVIDIA GeForce RTX 4070 Ti", 80.1),
+        ("NVIDIA GeForce RTX 4070", 58.0),
+        ("NVIDIA GeForce RTX 4070 Laptop GPU", 33.3),  # 本次 WSL 实测命中
+        ("NVIDIA GeForce RTX 4060", 31.3),
         ("NVIDIA GeForce RTX 3090", 71.0),
     ],
 )

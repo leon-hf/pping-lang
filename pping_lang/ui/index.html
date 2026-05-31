@@ -8,322 +8,1411 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <style>
   :root {
-    --bg: #f7f7f8;
+    /* White base + warm coral accents (Vercel / Stripe / Linear lineage) */
+    --bg: #ffffff;
     --surface: #ffffff;
-    --border: #e4e4e7;
-    --text: #18181b;
-    --muted: #71717a;
-    --accent: #0ea5e9;
-    --info: #3b82f6;
-    --warning: #f59e0b;
-    --critical: #ef4444;
-    --good: #10b981;
+    --surface-alt: #faf6ef;
+    --surface-tint: #fdfaf4;
+    --border: #ece7df;
+    --border-strong: #d6cfc3;
+    --text-strong: #1c1410;
+    --text: #3d342c;
+    --muted: #7a6e63;
+    --muted-2: #a8998a;
+
+    /* Diverse accent palette */
+    --coral: #dc4d3e;
+    --coral-soft: #fdeae5;
+    --coral-strong: #a8311f;
+    --amber: #c2660d;
+    --amber-soft: #fdf1d8;
+    --rose: #be1556;
+    --rose-soft: #ffe3ec;
+    --teal: #0d8b80;
+    --teal-soft: #d5f1ec;
+    --indigo: #5147c8;
+    --indigo-soft: #e8e5fb;
+    --sage: #5a8f1f;
+    --sage-soft: #e9f4d3;
+
+    --shadow-sm: 0 1px 2px rgba(28, 20, 16, 0.04);
+    --shadow-md: 0 1px 3px rgba(28, 20, 16, 0.05), 0 6px 16px -4px rgba(28, 20, 16, 0.06);
+    --shadow-lg: 0 1px 3px rgba(28, 20, 16, 0.06), 0 12px 32px -8px rgba(28, 20, 16, 0.1);
+    --radius-sm: 6px;
+    --radius: 10px;
+    --radius-lg: 16px;
   }
   * { box-sizing: border-box; }
+  html, body { height: 100%; }
   body {
     margin: 0;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
-                 "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI",
+                 "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
     background: var(--bg);
+    background-image:
+      radial-gradient(ellipse 70% 35% at 50% 0%, rgba(220, 77, 62, 0.025), transparent 70%);
+    background-attachment: fixed;
     color: var(--text);
     font-size: 14px;
-    line-height: 1.5;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11", "ss01";
   }
   [x-cloak] { display: none !important; }
+
+  /* === Header === */
   header {
-    background: var(--surface);
+    background: rgba(255, 255, 255, 0.88);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
     border-bottom: 1px solid var(--border);
-    padding: 12px 24px;
+    padding: 16px 36px;
     display: flex;
     align-items: center;
     justify-content: space-between;
+    gap: 16px;
+    position: sticky;
+    top: 0;
+    z-index: 10;
   }
-  header h1 {
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .brand-mark {
+    width: 32px;
+    height: 32px;
+    border-radius: 9px;
+    background: linear-gradient(135deg, var(--coral) 0%, var(--amber) 100%);
+    display: grid;
+    place-items: center;
+    box-shadow: 0 2px 8px -2px rgba(220, 77, 62, 0.35);
+  }
+  .brand-mark svg { width: 17px; height: 17px; color: white; }
+  .brand h1 {
     margin: 0;
-    font-size: 16px;
-    font-weight: 600;
+    font-size: 17px;
+    font-weight: 700;
+    letter-spacing: -0.025em;
+    color: var(--text-strong);
   }
-  header .meta {
+  .brand h1 .sub {
     color: var(--muted);
-    font-size: 12px;
+    font-weight: 400;
+    margin-left: 8px;
+    font-size: 13.5px;
+    letter-spacing: -0.005em;
+  }
+  .meta {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    color: var(--muted);
+    font-size: 12.5px;
     font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   }
+  .status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 11px;
+    border-radius: 999px;
+    background: var(--sage-soft);
+    color: var(--sage);
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0;
+  }
+  .status-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--sage);
+    animation: pulse 2s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.45; transform: scale(0.8); }
+  }
+  .meta-sep { width: 1px; height: 13px; background: var(--border-strong); }
+
+  /* === Tabs === */
   nav.tabs {
-    background: var(--surface);
-    border-bottom: 1px solid var(--border);
-    padding: 0 24px;
+    padding: 0 36px;
     display: flex;
     gap: 4px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
   }
   nav.tabs button {
     background: none;
     border: none;
-    padding: 12px 16px;
+    padding: 14px 18px;
     cursor: pointer;
     color: var(--muted);
     font-size: 14px;
+    font-weight: 500;
+    font-family: inherit;
     border-bottom: 2px solid transparent;
     margin-bottom: -1px;
+    transition: color 0.15s;
+    letter-spacing: -0.01em;
   }
+  nav.tabs button:hover { color: var(--text); }
   nav.tabs button.active {
-    color: var(--text);
-    border-bottom-color: var(--accent);
+    color: var(--text-strong);
+    border-bottom-color: var(--coral);
+    font-weight: 600;
   }
+  nav.tabs button .tab-badge {
+    display: inline-block;
+    margin-left: 8px;
+    padding: 1px 7px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    background: var(--amber-soft);
+    color: var(--amber);
+    border: 1px solid rgba(194, 102, 13, 0.2);
+    vertical-align: 1px;
+  }
+  nav.tabs button .tab-badge.crit {
+    background: var(--rose-soft);
+    color: var(--rose);
+    border-color: rgba(190, 21, 86, 0.25);
+  }
+
+  /* === Main === */
   main {
-    max-width: 1200px;
+    max-width: 1480px;
     margin: 0 auto;
-    padding: 24px;
+    padding: 32px 36px 56px;
   }
+
+  /* === Hero / System info card === */
+  .hero {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 26px 30px;
+    margin-bottom: 28px;
+    display: grid;
+    grid-template-columns: 56px 1fr auto;
+    gap: 22px;
+    align-items: center;
+    box-shadow: var(--shadow-sm);
+    background-image: linear-gradient(135deg, rgba(220, 77, 62, 0.03) 0%, transparent 40%);
+  }
+  .hero-icon {
+    width: 56px; height: 56px;
+    border-radius: 14px;
+    background: linear-gradient(135deg, var(--coral) 0%, var(--rose) 100%);
+    display: grid;
+    place-items: center;
+    color: white;
+    box-shadow: 0 6px 16px -6px rgba(220, 77, 62, 0.4);
+  }
+  .hero-icon svg { width: 26px; height: 26px; }
+  .hero-body { min-width: 0; }
+  .hero-eyebrow {
+    color: var(--coral);
+    font-size: 11.5px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 4px;
+  }
+  .hero-title {
+    margin: 0 0 10px;
+    font-size: 26px;
+    font-weight: 700;
+    color: var(--text-strong);
+    letter-spacing: -0.03em;
+    line-height: 1.15;
+    word-break: break-all;
+    font-family: "Inter", -apple-system, sans-serif;
+  }
+  .hero-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 11px;
+    background: var(--surface-alt);
+    border-radius: 999px;
+    font-size: 12.5px;
+    color: var(--text);
+    font-weight: 500;
+    border: 1px solid var(--border);
+  }
+  .chip .chip-label {
+    color: var(--muted);
+    font-size: 11.5px;
+    font-weight: 400;
+  }
+  .chip .chip-val {
+    font-family: ui-monospace, Consolas, monospace;
+    color: var(--text-strong);
+    font-weight: 600;
+    font-size: 12px;
+  }
+  .chip.coral { background: var(--coral-soft); border-color: rgba(220, 77, 62, 0.18); }
+  .chip.coral .chip-val { color: var(--coral-strong); }
+  .chip.amber { background: var(--amber-soft); border-color: rgba(194, 102, 13, 0.18); }
+  .chip.amber .chip-val { color: var(--amber); }
+  .chip.indigo { background: var(--indigo-soft); border-color: rgba(81, 71, 200, 0.18); }
+  .chip.indigo .chip-val { color: var(--indigo); }
+  .chip.teal { background: var(--teal-soft); border-color: rgba(13, 139, 128, 0.18); }
+  .chip.teal .chip-val { color: var(--teal); }
+  .hero-pulse {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 6px;
+  }
+  .hero-pulse .label {
+    font-size: 11px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 500;
+  }
+  .hero-pulse .val {
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--text-strong);
+    letter-spacing: -0.025em;
+    font-variant-numeric: tabular-nums;
+  }
+  .hero-pulse .val .unit { font-size: 13px; font-weight: 500; color: var(--muted); margin-left: 2px; }
+
+  /* === Section head === */
+  .section-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin: 32px 0 18px;
+  }
+  .section-head:first-child { margin-top: 0; }
+  .section-head h2 {
+    margin: 0;
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--text-strong);
+    letter-spacing: -0.025em;
+  }
+  .section-head h2 .count {
+    color: var(--muted);
+    font-weight: 500;
+    margin-left: 8px;
+    font-size: 15px;
+    letter-spacing: -0.01em;
+  }
+  .section-head .hint {
+    font-size: 12.5px;
+    color: var(--muted);
+  }
+
+  /* === KPI Cards === */
   .kpis {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-    gap: 12px;
-    margin-bottom: 24px;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 14px;
+    margin-bottom: 8px;
   }
   .kpi {
     background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 16px;
+    border-radius: var(--radius);
+    padding: 20px 22px;
+    transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
+    position: relative;
+    overflow: hidden;
   }
+  .kpi::before {
+    content: "";
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    background: var(--accent-color, var(--coral));
+    opacity: 0.85;
+  }
+  .kpi:hover {
+    border-color: var(--border-strong);
+    box-shadow: var(--shadow-sm);
+    transform: translateY(-1px);
+  }
+  .kpi.coral { --accent-color: var(--coral); }
+  .kpi.amber { --accent-color: var(--amber); }
+  .kpi.indigo { --accent-color: var(--indigo); }
+  .kpi.rose { --accent-color: var(--rose); }
+  .kpi.teal { --accent-color: var(--teal); }
+  .kpi.sage { --accent-color: var(--sage); }
   .kpi .label {
     color: var(--muted);
-    font-size: 12px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    margin-bottom: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    margin-bottom: 14px;
+    letter-spacing: -0.005em;
   }
   .kpi .value {
-    font-size: 24px;
-    font-weight: 600;
+    font-size: 40px;
+    font-weight: 700;
     font-variant-numeric: tabular-nums;
+    letter-spacing: -0.035em;
+    color: var(--text-strong);
+    line-height: 1;
   }
   .kpi .value .unit {
-    font-size: 14px;
-    font-weight: 400;
-    color: var(--muted);
-    margin-left: 2px;
-  }
-  .chart-card {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 16px;
-    margin-bottom: 24px;
-  }
-  .chart-card h2 {
-    margin: 0 0 12px 0;
-    font-size: 13px;
+    font-size: 18px;
     font-weight: 600;
     color: var(--muted);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
+    margin-left: 3px;
+    letter-spacing: -0.01em;
   }
-  .chart-wrap {
-    position: relative;
-    height: 240px;
-  }
-  .section-title {
-    font-size: 13px;
-    font-weight: 600;
+  .kpi.warn .value { color: var(--amber); }
+  .kpi.crit .value { color: var(--rose); }
+  .kpi .sub-line {
+    margin-top: 8px;
+    font-size: 11.5px;
     color: var(--muted);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    margin: 0 0 12px 0;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.005em;
   }
-  .diagnoses {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
+  .kpi .sub-line span { color: var(--text); font-weight: 600; }
+
+  /* === Latency trends (mini charts) === */
+  .latency-trends {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 14px;
   }
-  .diag {
+  .lat-card {
     background: var(--surface);
     border: 1px solid var(--border);
-    border-left-width: 4px;
-    border-radius: 6px;
-    padding: 12px 16px;
+    border-radius: var(--radius);
+    padding: 18px 20px;
+    transition: border-color 0.15s, box-shadow 0.15s;
   }
-  .diag.warning { border-left-color: var(--warning); }
-  .diag.critical { border-left-color: var(--critical); }
-  .diag.info { border-left-color: var(--info); }
-  .diag .head {
+  .lat-card:hover { border-color: var(--border-strong); box-shadow: var(--shadow-sm); }
+  .lat-card .lat-head {
     display: flex;
     justify-content: space-between;
     align-items: baseline;
     margin-bottom: 4px;
   }
-  .diag .rule {
+  .lat-card .lat-title {
+    font-size: 13.5px;
     font-weight: 600;
-    font-size: 13px;
+    color: var(--text-strong);
+    letter-spacing: -0.01em;
   }
-  .diag .sev {
+  .lat-card .lat-now {
+    font-size: 18px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.025em;
+    color: var(--text-strong);
+  }
+  .lat-card .lat-now .label-p {
     font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    padding: 2px 6px;
-    border-radius: 3px;
-    font-weight: 600;
+    color: var(--muted);
+    font-weight: 500;
+    margin-right: 2px;
+    letter-spacing: 0;
   }
-  .diag.warning .sev { background: #fef3c7; color: #92400e; }
-  .diag.critical .sev { background: #fee2e2; color: #991b1b; }
-  .diag.info .sev { background: #dbeafe; color: #1e40af; }
-  .diag .msg { color: var(--text); margin-bottom: 4px; }
-  .diag .sug { color: var(--muted); font-size: 13px; }
-  .diag .sug::before { content: "→ "; }
+  .lat-card .lat-now .unit {
+    font-size: 11.5px;
+    color: var(--muted);
+    margin-left: 2px;
+    font-weight: 500;
+  }
+  .lat-card .lat-source {
+    font-size: 10.5px;
+    color: var(--muted-2);
+    margin-bottom: 4px;
+    font-style: italic;
+  }
+  .lat-card .lat-chart {
+    height: 110px;
+    position: relative;
+    margin-top: 6px;
+  }
+  .lat-card .lat-empty {
+    height: 110px;
+    display: grid;
+    place-items: center;
+    color: var(--muted-2);
+    font-size: 12px;
+    background: var(--surface-tint);
+    border-radius: var(--radius-sm);
+    text-align: center;
+    padding: 0 18px;
+    margin-top: 6px;
+    line-height: 1.5;
+  }
+
+  /* === Chart card === */
+  .chart-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 24px 28px;
+    margin-top: 14px;
+  }
+  .chart-card .head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 18px;
+  }
+  .chart-card h3 {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-strong);
+    letter-spacing: -0.015em;
+  }
+  .chart-card .sub {
+    font-size: 12.5px;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .chart-wrap {
+    position: relative;
+    height: 260px;
+  }
+
+  /* === Diagnoses === */
+  .diagnoses {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .diag {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 22px 26px;
+    display: grid;
+    grid-template-columns: 44px 1fr;
+    gap: 18px;
+    transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
+    position: relative;
+    overflow: hidden;
+  }
+  .diag::before {
+    content: "";
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 3px;
+  }
+  .diag.warning::before { background: var(--amber); }
+  .diag.critical::before { background: var(--rose); }
+  .diag.info::before { background: var(--indigo); }
+  .diag:hover { box-shadow: var(--shadow-md); border-color: var(--border-strong); transform: translateY(-1px); }
+  .diag .icon {
+    width: 44px; height: 44px;
+    border-radius: 12px;
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+  }
+  .diag .icon svg { width: 22px; height: 22px; }
+  .diag.warning .icon { background: var(--amber-soft); color: var(--amber); }
+  .diag.critical .icon { background: var(--rose-soft); color: var(--rose); }
+  .diag.info .icon { background: var(--indigo-soft); color: var(--indigo); }
+  .diag-body { min-width: 0; }
+  .diag-title-row {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 4px;
+  }
+  .diag-title h3 {
+    margin: 0;
+    font-size: 17px;
+    font-weight: 700;
+    color: var(--text-strong);
+    letter-spacing: -0.025em;
+    line-height: 1.25;
+  }
+  .diag-meta {
+    margin-top: 6px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    font-size: 11.5px;
+    color: var(--muted);
+  }
+  .diag-meta code {
+    background: var(--surface-alt);
+    padding: 2px 8px;
+    border-radius: 5px;
+    font-family: ui-monospace, Consolas, monospace;
+    color: var(--muted);
+    font-size: 11.5px;
+    border: 1px solid var(--border);
+    font-weight: 500;
+    letter-spacing: 0;
+  }
+  .diag-meta .meta-sep {
+    width: 3px; height: 3px;
+    border-radius: 50%;
+    background: var(--muted-2);
+  }
+  .diag-meta .diag-cat {
+    font-weight: 500;
+    color: var(--muted);
+  }
+  .sev-pill {
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+  .sev-pill.warning { background: var(--amber-soft); color: var(--amber); }
+  .sev-pill.critical { background: var(--rose-soft); color: var(--rose); }
+  .sev-pill.info { background: var(--indigo-soft); color: var(--indigo); }
+  .diag-msg {
+    color: var(--text);
+    margin: 16px 0 14px;
+    font-size: 14.5px;
+    line-height: 1.6;
+  }
+  .diag-sug {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 14px;
+    padding: 12px 16px;
+    background: var(--surface-tint);
+    border-radius: var(--radius-sm);
+    border-left: 3px solid var(--coral);
+    align-items: baseline;
+  }
+  .diag-sug-label {
+    font-size: 10.5px;
+    color: var(--coral);
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+  .diag-sug-text {
+    color: var(--text);
+    font-size: 13.5px;
+    line-height: 1.6;
+  }
+
   .empty {
     color: var(--muted);
     background: var(--surface);
-    border: 1px dashed var(--border);
-    border-radius: 6px;
-    padding: 24px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 56px 24px;
     text-align: center;
+    font-size: 14px;
   }
-  .placeholder {
-    color: var(--muted);
-    background: var(--surface);
-    border: 1px dashed var(--border);
-    border-radius: 8px;
-    padding: 48px;
-    text-align: center;
+  .empty .check {
+    width: 44px; height: 44px;
+    background: var(--sage-soft);
+    color: var(--sage);
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    margin: 0 auto 16px;
   }
+  .empty .check svg { width: 22px; height: 22px; }
+  .empty .title {
+    color: var(--text-strong);
+    font-weight: 600;
+    font-size: 15px;
+    margin-bottom: 6px;
+    letter-spacing: -0.01em;
+  }
+
   /* === Rules tab === */
   .rules-toolbar {
-    margin-bottom: 12px;
+    margin-bottom: 22px;
     display: flex;
     justify-content: space-between;
     align-items: center;
   }
   .btn {
-    background: var(--accent);
+    background: var(--text-strong);
     color: white;
     border: none;
-    padding: 6px 14px;
-    border-radius: 4px;
+    padding: 8px 16px;
+    border-radius: 8px;
     cursor: pointer;
-    font-size: 13px;
+    font-size: 13.5px;
+    font-weight: 600;
+    font-family: inherit;
+    transition: opacity 0.15s, transform 0.06s;
+    letter-spacing: -0.01em;
   }
-  .btn.secondary { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
-  .btn.danger { background: var(--critical); }
-  .btn:hover { opacity: 0.85; }
+  .btn:hover { opacity: 0.88; }
+  .btn:active { transform: translateY(0.5px); }
+  .btn.primary {
+    background: linear-gradient(135deg, var(--coral) 0%, var(--rose) 100%);
+    box-shadow: 0 4px 12px -4px rgba(220, 77, 62, 0.4);
+  }
+  .btn.secondary {
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border-strong);
+  }
+  .btn.secondary:hover { background: var(--surface-tint); }
+  .btn.danger {
+    background: var(--surface);
+    color: var(--rose);
+    border: 1px solid var(--border);
+  }
+  .btn.danger:hover { background: var(--rose-soft); border-color: rgba(190, 21, 86, 0.25); }
   .btn:disabled { opacity: 0.4; cursor: not-allowed; }
-  .rules-table {
-    width: 100%;
+  .btn-sm { padding: 6px 12px; font-size: 12.5px; font-weight: 500; }
+
+  /* === Rules list (card-style rows) === */
+  .rules-list {
     background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: 8px;
-    border-collapse: collapse;
+    border-radius: var(--radius);
     overflow: hidden;
   }
-  .rules-table th, .rules-table td {
-    padding: 10px 12px;
-    text-align: left;
+  .rule-row {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    gap: 24px;
+    align-items: center;
+    padding: 18px 24px;
     border-bottom: 1px solid var(--border);
-    font-size: 13px;
-    vertical-align: top;
+    transition: background 0.12s;
   }
-  .rules-table th {
-    background: #fafafa;
-    font-weight: 600;
+  .rule-row:last-child { border-bottom: none; }
+  .rule-row:hover { background: var(--surface-tint); }
+  .rule-row.disabled { opacity: 0.55; }
+  .rule-row-main { min-width: 0; }
+  .rule-row-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 6px;
+  }
+  .rule-row-name {
+    color: var(--text-strong);
+    font-weight: 700;
+    font-size: 15.5px;
+    letter-spacing: -0.02em;
+    line-height: 1.25;
+    margin: 0;
+  }
+  .rule-row-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    font-size: 11.5px;
     color: var(--muted);
-    font-size: 12px;
-    text-transform: uppercase;
-    letter-spacing: 0.4px;
+    margin-bottom: 8px;
   }
-  .rules-table tr:last-child td { border-bottom: none; }
-  .rules-table .id-cell strong { font-family: ui-monospace, Consolas, monospace; }
-  .rules-table .id-cell .muted { color: var(--muted); font-size: 11px; margin-top: 2px; }
-  .rules-table code {
-    background: #f4f4f5;
-    padding: 1px 5px;
-    border-radius: 3px;
-    font-size: 11px;
+  .rule-row-meta code {
+    background: var(--surface-alt);
+    padding: 2px 8px;
+    border-radius: 5px;
     font-family: ui-monospace, Consolas, monospace;
+    color: var(--muted);
+    font-size: 11.5px;
+    border: 1px solid var(--border);
+    letter-spacing: 0;
+    font-weight: 500;
   }
+  .rule-row-meta .meta-sep {
+    width: 3px; height: 3px;
+    border-radius: 50%;
+    background: var(--muted-2);
+  }
+  .rule-row-meta .cat {
+    color: var(--muted);
+    font-weight: 500;
+    text-transform: lowercase;
+  }
+  .rule-row-cond {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    font-size: 12.5px;
+  }
+  .rule-row-cond .cond-pill {
+    background: var(--surface-alt);
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-family: ui-monospace, Consolas, monospace;
+    color: var(--text-strong);
+    border: 1px solid var(--border);
+    font-weight: 500;
+    font-size: 12px;
+    letter-spacing: -0.005em;
+  }
+  .rule-row-cond .cond-pill .op {
+    color: var(--coral);
+    font-weight: 700;
+    margin: 0 4px;
+  }
+  .rule-row-cond .cond-agg {
+    color: var(--muted-2);
+    font-size: 11.5px;
+    font-style: italic;
+  }
+  .rule-row-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .rule-row-actions button {
+    background: none;
+    border: 1px solid transparent;
+    width: 32px;
+    height: 32px;
+    border-radius: 7px;
+    cursor: pointer;
+    color: var(--muted);
+    transition: background 0.12s, color 0.12s, border-color 0.12s;
+    display: grid;
+    place-items: center;
+  }
+  .rule-row-actions button:hover {
+    background: var(--surface-alt);
+    color: var(--text-strong);
+    border-color: var(--border);
+  }
+  .rule-row-actions button.danger:hover {
+    color: var(--rose);
+    background: var(--rose-soft);
+    border-color: rgba(190, 21, 86, 0.2);
+  }
+  .rule-row-actions button svg { width: 15px; height: 15px; }
   .badge {
     font-size: 10px;
     text-transform: uppercase;
-    letter-spacing: 0.4px;
-    padding: 1px 5px;
-    border-radius: 3px;
-    font-weight: 600;
-    margin-left: 4px;
+    letter-spacing: 0.06em;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-weight: 700;
+    margin-left: 8px;
+    display: inline-block;
   }
-  .badge.default { background: #e0e7ff; color: #3730a3; }
-  .badge.disabled { background: #fee2e2; color: #991b1b; }
+  .badge.default { background: var(--indigo-soft); color: var(--indigo); }
+  .badge.disabled { background: var(--rose-soft); color: var(--rose); }
   .test-result {
-    background: #fefce8;
-    border-left: 3px solid var(--warning);
-    padding: 8px 12px;
-    margin: 4px 0;
-    border-radius: 4px;
+    background: var(--amber-soft);
+    border-left: 3px solid var(--amber);
+    padding: 9px 13px;
+    margin: 10px 0 0;
+    border-radius: 6px;
     font-size: 12px;
     font-family: ui-monospace, Consolas, monospace;
+    color: var(--text);
   }
-  .test-result.ok { background: #ecfdf5; border-left-color: var(--good); }
-  .test-result.no-data { background: #f4f4f5; border-left-color: var(--muted); color: var(--muted); }
+  .test-result.ok { background: var(--sage-soft); border-left-color: var(--sage); }
+  .test-result.no-data {
+    background: var(--surface-alt);
+    border-left-color: var(--border-strong);
+    color: var(--muted);
+  }
+
+  /* === Edit form === */
   .edit-panel {
     background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 20px;
-    margin-top: 16px;
+    border-radius: var(--radius);
+    padding: 28px;
+    margin-top: 22px;
+    box-shadow: var(--shadow-md);
   }
-  .edit-panel h3 { margin: 0 0 16px 0; font-size: 15px; }
+  .edit-panel h3 {
+    margin: 0 0 22px 0;
+    font-size: 18px;
+    color: var(--text-strong);
+    font-weight: 700;
+    letter-spacing: -0.025em;
+  }
   .form-grid {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
-    gap: 12px 16px;
+    gap: 16px 22px;
   }
   .form-grid .full { grid-column: 1 / -1; }
   .form-grid label {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 6px;
     font-size: 12px;
     color: var(--muted);
-    text-transform: uppercase;
-    letter-spacing: 0.4px;
+    font-weight: 600;
   }
   .form-grid input, .form-grid select, .form-grid textarea {
     font-family: inherit;
-    font-size: 13px;
-    padding: 6px 10px;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    background: white;
+    font-size: 13.5px;
+    padding: 9px 13px;
+    border: 1px solid var(--border-strong);
+    border-radius: 8px;
+    background: var(--surface);
     color: var(--text);
+    font-weight: 400;
+    transition: border-color 0.15s, box-shadow 0.15s;
   }
   .form-grid input:focus, .form-grid select:focus, .form-grid textarea:focus {
-    outline: 2px solid var(--accent);
-    outline-offset: -1px;
-    border-color: transparent;
+    outline: none;
+    border-color: var(--coral);
+    box-shadow: 0 0 0 3px rgba(220, 77, 62, 0.12);
   }
-  .form-grid textarea { resize: vertical; min-height: 50px; }
-  .form-grid .hint { font-size: 11px; color: var(--muted); text-transform: none; letter-spacing: 0; margin-top: 2px; }
+  .form-grid textarea { resize: vertical; min-height: 64px; }
+  .form-grid .hint {
+    font-size: 11.5px;
+    color: var(--muted-2);
+    margin-top: 2px;
+    font-weight: 400;
+  }
   .form-actions {
-    margin-top: 16px;
+    margin-top: 24px;
     display: flex;
-    gap: 8px;
+    gap: 10px;
     justify-content: flex-end;
   }
-  .toast {
-    position: fixed;
-    bottom: 24px;
-    right: 24px;
-    background: var(--text);
-    color: white;
-    padding: 10px 16px;
-    border-radius: 6px;
-    font-size: 13px;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-    z-index: 100;
+
+  /* === Report tab === */
+  .report-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 36px;
+    background-image: linear-gradient(135deg, rgba(220, 77, 62, 0.03) 0%, transparent 50%);
   }
-  .toast.error { background: var(--critical); }
-  footer {
-    text-align: center;
+  .report-card h3 {
+    margin: 0 0 8px;
+    font-size: 22px;
+    color: var(--text-strong);
+    font-weight: 700;
+    letter-spacing: -0.025em;
+  }
+  .report-card .desc {
+    color: var(--muted);
+    margin: 0 0 26px;
+    font-size: 14px;
+    max-width: 680px;
+    line-height: 1.6;
+  }
+  .report-controls {
+    display: flex;
+    gap: 18px;
+    align-items: flex-end;
+    flex-wrap: wrap;
+  }
+  .report-controls .field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    flex: 0 0 240px;
+  }
+  .report-controls .field-label {
+    font-size: 12px;
+    color: var(--muted);
+    font-weight: 600;
+  }
+  .report-controls select {
+    padding: 9px 13px;
+    border: 1px solid var(--border-strong);
+    border-radius: 8px;
+    font-size: 13.5px;
+    font-family: inherit;
+    background: var(--surface);
+    color: var(--text);
+  }
+  .report-controls select:focus {
+    outline: none;
+    border-color: var(--coral);
+    box-shadow: 0 0 0 3px rgba(220, 77, 62, 0.12);
+  }
+  .report-controls .spacer { flex: 1; }
+
+  /* === Report inline preview === */
+  .report-preview-wrap {
+    margin-top: 28px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    box-shadow: var(--shadow-sm);
+  }
+  .report-preview-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 22px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface-tint);
+  }
+  .report-preview-head .title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--text-strong);
+    letter-spacing: -0.01em;
+  }
+  .report-preview-head .title .live-dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--sage);
+    animation: pulse 2s ease-in-out infinite;
+  }
+  .report-preview-head .url {
+    font-family: ui-monospace, Consolas, monospace;
+    font-size: 11px;
+    color: var(--muted-2);
+    max-width: 60%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .report-preview-frame {
+    width: 100%;
+    height: 760px;
+    border: none;
+    background: white;
+    display: block;
+  }
+  .report-preview-loading {
+    height: 760px;
+    display: grid;
+    place-items: center;
+    color: var(--muted);
+    font-size: 13px;
+    background: var(--surface-tint);
+  }
+
+  /* === SLO multi-row picker (inside bench form) === */
+  .slo-section {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .slo-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .slo-label {
+    font-size: 12px;
+    color: var(--muted);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .slo-add-btn {
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 500;
+    padding: 5px 12px;
+    border-radius: 7px;
+    cursor: pointer;
+    letter-spacing: -0.005em;
+    transition: background 0.12s, border-color 0.12s;
+  }
+  .slo-add-btn:hover {
+    background: var(--surface-tint);
+    border-color: var(--coral);
+    color: var(--coral);
+  }
+  .slo-empty {
+    padding: 10px 14px;
+    background: var(--surface-tint);
+    border: 1px dashed var(--border);
+    border-radius: 7px;
     color: var(--muted);
     font-size: 12px;
-    padding: 24px;
+    text-align: center;
+  }
+  .slo-row {
+    display: grid;
+    grid-template-columns: 1.4fr 0.7fr 0.5fr 1fr 0.6fr auto;
+    gap: 8px;
+    align-items: stretch;
+  }
+  .slo-field {
+    font-family: inherit;
+    font-size: 13px;
+    padding: 7px 10px;
+    border: 1px solid var(--border-strong);
+    border-radius: 7px;
+    background: var(--surface);
+    color: var(--text);
+    text-transform: none;
+    letter-spacing: 0;
+    font-weight: 400;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  .slo-field:focus {
+    outline: none;
+    border-color: var(--coral);
+    box-shadow: 0 0 0 3px rgba(220, 77, 62, 0.12);
+  }
+  .slo-field:disabled {
+    background: var(--surface-alt);
+    color: var(--muted-2);
+    cursor: not-allowed;
+  }
+  .slo-field.op { text-align: center; font-weight: 600; }
+  .slo-field.value { font-variant-numeric: tabular-nums; }
+  .slo-remove-btn {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    width: 32px;
+    border-radius: 7px;
+    cursor: pointer;
+    font-size: 18px;
+    line-height: 1;
+    font-weight: 400;
+    transition: background 0.12s, color 0.12s, border-color 0.12s;
+  }
+  .slo-remove-btn:hover {
+    background: var(--rose-soft);
+    color: var(--rose);
+    border-color: rgba(190, 21, 86, 0.2);
+  }
+  .slo-preview {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background: var(--surface-alt);
+    border-radius: 6px;
+    font-size: 11.5px;
+    color: var(--muted);
+  }
+  .slo-preview-label {
+    font-weight: 500;
+    letter-spacing: 0.02em;
+  }
+  .slo-preview code {
+    background: transparent;
+    border: none;
+    padding: 0;
+    font-family: ui-monospace, Consolas, monospace;
+    color: var(--coral-strong);
+    font-size: 11.5px;
+    word-break: break-all;
+  }
+  @media (max-width: 720px) {
+    .slo-row {
+      grid-template-columns: 1fr 1fr;
+    }
+    .slo-field.value { grid-column: 1 / -1; }
+    .slo-remove-btn { grid-column: 1 / -1; }
+  }
+
+  /* === Bench tab === */
+  .bench-form-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 24px 26px;
+    margin-bottom: 24px;
+  }
+  .bench-running-card {
+    background: var(--surface);
+    border: 1px solid rgba(194, 102, 13, 0.25);
+    border-radius: var(--radius);
+    padding: 16px 20px;
+    margin-top: 20px;
+    background-image: linear-gradient(135deg, rgba(245, 158, 11, 0.04) 0%, transparent 50%);
+  }
+  .bench-running-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+  .bench-running-head .live-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--amber);
+    animation: pulse 2s ease-in-out infinite;
+  }
+  .bench-running-head .title {
+    font-weight: 700;
+    color: var(--text-strong);
+    font-size: 13.5px;
+    letter-spacing: -0.01em;
+  }
+  .bench-running-head .count {
+    background: var(--amber-soft);
+    color: var(--amber);
+    padding: 1px 8px;
+    border-radius: 999px;
+    font-size: 11.5px;
+    font-weight: 700;
+  }
+  .bench-running-row {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: 14px;
+    align-items: center;
+    padding: 8px 0;
+    border-top: 1px solid var(--border);
+    font-size: 13px;
+  }
+  .bench-running-row .rid {
+    background: var(--surface-alt);
+    padding: 2px 8px;
+    border-radius: 5px;
+    font-family: ui-monospace, Consolas, monospace;
+    font-size: 11.5px;
+    color: var(--muted);
+    border: 1px solid var(--border);
+  }
+  .bench-running-row .name {
+    color: var(--text-strong);
+    font-weight: 500;
+  }
+  .bench-running-row .ago {
+    color: var(--muted);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .bench-runs-list {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+  .bench-run-row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 24px;
+    align-items: center;
+    padding: 18px 24px;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    transition: background 0.12s;
+  }
+  .bench-run-row:last-child { border-bottom: none; }
+  .bench-run-row:hover { background: var(--surface-tint); }
+  .bench-run-row.expanded { background: var(--surface-tint); }
+  .bench-run-row.expanded .bench-run-detail { display: block; }
+  .bench-run-main { min-width: 0; }
+  .bench-run-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 6px;
+  }
+  .bench-run-head .rule-row-name {
+    font-size: 14.5px;
+  }
+  .bench-run-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    font-size: 11.5px;
+    color: var(--muted);
+  }
+  .bench-run-meta code {
+    background: var(--surface-alt);
+    padding: 2px 8px;
+    border-radius: 5px;
+    font-family: ui-monospace, Consolas, monospace;
+    color: var(--muted);
+    font-size: 11.5px;
+    border: 1px solid var(--border);
+  }
+  .bench-run-meta .meta-sep {
+    width: 3px; height: 3px;
+    border-radius: 50%;
+    background: var(--muted-2);
+  }
+  .bench-run-metrics {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(80px, auto));
+    gap: 24px;
+    align-items: center;
+  }
+  .bench-run-metrics .metric {
+    text-align: right;
+  }
+  .bench-run-metrics .m-label {
+    font-size: 10.5px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 4px;
+    font-weight: 500;
+  }
+  .bench-run-metrics .m-value {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--text-strong);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
+  }
+  .bench-run-metrics .m-value .sep {
+    color: var(--muted-2);
+    font-weight: 400;
+    margin: 0 4px;
+  }
+  .bench-run-detail {
+    grid-column: 1 / -1;
+    margin-top: 18px;
+    padding-top: 18px;
+    border-top: 1px solid var(--border);
+  }
+  .bench-detail-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 28px;
+  }
+  .bench-detail-grid h4 {
+    margin: 0 0 10px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .bench-detail-tab {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12.5px;
+  }
+  .bench-detail-tab td {
+    padding: 5px 0;
+    vertical-align: top;
+  }
+  .bench-detail-tab td:first-child {
+    color: var(--muted);
+    width: 100px;
+    font-weight: 500;
+  }
+  .bench-detail-tab code {
+    background: var(--surface-alt);
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-family: ui-monospace, Consolas, monospace;
+    font-size: 11.5px;
+    color: var(--text);
+    border: 1px solid var(--border);
+  }
+  .bench-error {
+    background: var(--rose-soft);
+    border-left: 3px solid var(--rose);
+    color: var(--text);
+    padding: 10px 14px;
+    margin-bottom: 14px;
+    border-radius: 6px;
+    font-size: 12.5px;
+    font-family: ui-monospace, Consolas, monospace;
+  }
+
+  /* Status / SLO chips */
+  .status-chip {
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding: 3px 9px;
+    border-radius: 999px;
+    font-weight: 700;
+    display: inline-block;
+  }
+  .status-chip.running {
+    background: var(--amber-soft); color: var(--amber);
+    border: 1px solid rgba(194, 102, 13, 0.2);
+  }
+  .status-chip.done {
+    background: var(--sage-soft); color: var(--sage);
+    border: 1px solid rgba(90, 143, 31, 0.2);
+  }
+  .status-chip.failed {
+    background: var(--rose-soft); color: var(--rose);
+    border: 1px solid rgba(190, 21, 86, 0.25);
+  }
+  .slo-chip {
+    font-size: 10.5px;
+    letter-spacing: 0.02em;
+    padding: 3px 9px;
+    border-radius: 999px;
+    font-weight: 700;
+    display: inline-block;
+  }
+  .slo-chip.pass { background: var(--sage-soft); color: var(--sage); }
+  .slo-chip.fail { background: var(--rose-soft); color: var(--rose); }
+  .slo-chip.na { background: var(--surface-alt); color: var(--muted); }
+
+  /* === Toast === */
+  .toast {
+    position: fixed;
+    bottom: 28px;
+    right: 28px;
+    background: var(--text-strong);
+    color: white;
+    padding: 12px 18px;
+    border-radius: 10px;
+    font-size: 13.5px;
+    box-shadow: var(--shadow-lg);
+    z-index: 100;
+    animation: slideIn 0.18s ease-out;
+    font-weight: 500;
+  }
+  .toast.error { background: var(--rose); }
+  @keyframes slideIn {
+    from { transform: translateY(8px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+  }
+
+  footer {
+    text-align: center;
+    color: var(--muted-2);
+    font-size: 12.5px;
+    padding: 40px 24px 24px;
+    margin-top: 40px;
+  }
+  footer .live-dot {
+    display: inline-block;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--sage);
+    margin-right: 6px;
+    vertical-align: middle;
+    animation: pulse 2s ease-in-out infinite;
+  }
+
+  @media (max-width: 900px) {
+    header { padding: 14px 20px; flex-wrap: wrap; gap: 10px; }
+    nav.tabs { padding: 0 20px; overflow-x: auto; }
+    main { padding: 24px 20px 40px; }
+    .hero { grid-template-columns: 48px 1fr; padding: 22px; }
+    .hero-pulse { grid-column: 1 / -1; flex-direction: row; align-items: baseline; justify-content: space-between; }
+    .hero-title { font-size: 22px; }
+    .form-grid { grid-template-columns: 1fr; }
+    .kpi .value { font-size: 32px; }
+    .section-head h2 { font-size: 18px; }
   }
 </style>
 </head>
@@ -332,127 +1421,331 @@
 <div x-data="dashboard()" x-init="init()">
 
   <header>
-    <h1>pping-lang <span style="color: var(--muted); font-weight: 400;">— vLLM 性能诊断</span></h1>
+    <div class="brand">
+      <div class="brand-mark">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+      </div>
+      <h1>pping-lang<span class="sub">vLLM 性能诊断</span></h1>
+    </div>
     <div class="meta">
+      <span class="status-pill"><span class="status-dot"></span>healthy</span>
+      <span class="meta-sep"></span>
       <span x-text="health.instance_id || '—'"></span>
-      &nbsp;·&nbsp; engine=<span x-text="health.engine_index ?? '—'"></span>
-      &nbsp;·&nbsp; rules=<span x-text="health.rules?.num ?? 0"></span>
-      &nbsp;·&nbsp; <span x-text="health.version || ''"></span>
+      <span class="meta-sep"></span>
+      <span>engine <span x-text="health.engine_index ?? '—'"></span></span>
+      <span class="meta-sep"></span>
+      <span><span x-text="health.rules?.num ?? 0"></span> rules</span>
+      <span class="meta-sep"></span>
+      <span style="color: var(--muted-2);" x-text="`v${health.version || ''}`"></span>
     </div>
   </header>
 
   <nav class="tabs">
     <button :class="{ active: tab === 'live' }" @click="tab = 'live'">实时</button>
-    <button :class="{ active: tab === 'rules' }" @click="tab = 'rules'">规则</button>
+    <button :class="{ active: tab === 'rules' }" @click="tab = 'rules'">
+      规则
+      <span x-show="diagnoses.length > 0" class="tab-badge"
+            :class="{ crit: diagnoses.some(d => d.severity === 'critical') }"
+            x-text="diagnoses.length"></span>
+    </button>
     <button :class="{ active: tab === 'report' }" @click="tab = 'report'">报告</button>
+    <button :class="{ active: tab === 'bench' }" @click="tab = 'bench'">
+      压测
+      <span x-show="benchRunning > 0" class="tab-badge"
+            x-text="benchRunning"></span>
+    </button>
   </nav>
 
   <main>
 
-    <!-- 实时 tab -->
+    <!-- ===== 实时 tab ===== -->
     <div x-show="tab === 'live'">
+
+      <!-- Hero / System info -->
+      <div class="hero">
+        <div class="hero-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="3"/>
+            <path d="M9 9h6v6H9z"/>
+            <path d="M9 1v2M15 1v2M9 21v2M15 21v2M1 9h2M1 15h2M21 9h2M21 15h2"/>
+          </svg>
+        </div>
+        <div class="hero-body">
+          <div class="hero-eyebrow">currently serving</div>
+          <h2 class="hero-title" x-text="system.model || '—'"></h2>
+          <div class="hero-meta">
+            <span class="chip coral" x-show="system.vllm_version">
+              <span class="chip-label">vLLM</span>
+              <span class="chip-val" x-text="system.vllm_version"></span>
+            </span>
+            <span class="chip amber" x-show="system.gpu_name">
+              <span class="chip-label">GPU</span>
+              <span class="chip-val" x-text="system.gpu_name"></span>
+            </span>
+            <span class="chip indigo" x-show="system.gpu_count">
+              <span class="chip-label">Count</span>
+              <span class="chip-val" x-text="`× ${system.gpu_count}`"></span>
+            </span>
+            <span class="chip teal" x-show="system.gpu_peak">
+              <span class="chip-label">BF16 Peak</span>
+              <span class="chip-val" x-text="system.gpu_peak ? `${system.gpu_peak.bf16_tflops.toFixed(0)} TFLOPS` : ''"></span>
+            </span>
+            <span class="chip teal" x-show="system.gpu_peak">
+              <span class="chip-label">Mem BW</span>
+              <span class="chip-val" x-text="system.gpu_peak ? `${(system.gpu_peak.mem_bw_gbs/1000).toFixed(2)} TB/s` : ''"></span>
+            </span>
+          </div>
+        </div>
+        <div class="hero-pulse">
+          <div class="label">TTFT p99</div>
+          <div class="val"><span x-text="fmt(kpis.ttft_p99_ms, 0)"></span><span class="unit">ms</span></div>
+        </div>
+      </div>
+
+      <!-- KPI grid — Tier 1: user-facing latency & capacity -->
+      <div class="section-head">
+        <h2>用户感知指标</h2>
+        <span class="hint">最近 60 秒 · 每 2s 刷新</span>
+      </div>
+
       <div class="kpis">
-        <div class="kpi">
-          <div class="label">GPU 利用率</div>
-          <div class="value"><span x-text="fmt(gpu_util_pct, 0)"></span><span class="unit">%</span></div>
+        <div class="kpi coral" :class="{ warn: kpis.ttft_p99_ms > 1000 && kpis.ttft_p99_ms <= 2000, crit: kpis.ttft_p99_ms > 2000 }">
+          <div class="label">TTFT p99</div>
+          <div class="value"><span x-text="fmt(kpis.ttft_p99_ms, 0)"></span><span class="unit">ms</span></div>
+          <div class="sub-line">p50 <span x-text="fmt(kpis.ttft_p50_ms, 0)"></span>ms</div>
         </div>
-        <div class="kpi">
+        <div class="kpi rose" :class="{ warn: kpis.tpot_p99_ms > 50 && kpis.tpot_p99_ms <= 100, crit: kpis.tpot_p99_ms > 100 }">
+          <div class="label">TPOT p99</div>
+          <div class="value"><span x-text="fmt(kpis.tpot_p99_ms, 0)"></span><span class="unit">ms</span></div>
+          <div class="sub-line">p50 <span x-text="fmt(kpis.tpot_p50_ms, 0)"></span>ms</div>
+        </div>
+        <div class="kpi teal">
+          <div class="label">Output 吞吐</div>
+          <div class="value"><span x-text="fmt(kpis.output_tps, 0)"></span><span class="unit">tok/s</span></div>
+        </div>
+        <div class="kpi amber" :class="{ warn: kpis.kv_cache > 0.8 && kpis.kv_cache <= 0.9, crit: kpis.kv_cache > 0.9 }">
           <div class="label">KV cache</div>
-          <div class="value"><span x-text="fmt(kv_cache * 100, 0)"></span><span class="unit">%</span></div>
+          <div class="value"><span x-text="fmt(kpis.kv_cache * 100, 0)"></span><span class="unit">%</span></div>
         </div>
-        <div class="kpi">
+        <div class="kpi indigo">
           <div class="label">运行请求</div>
-          <div class="value" x-text="fmt(running_reqs, 0)"></div>
+          <div class="value" x-text="fmt(kpis.running_reqs, 0)"></div>
         </div>
-        <div class="kpi">
+        <div class="kpi sage" :class="{ warn: kpis.waiting_reqs > 20 }">
           <div class="label">等待队列</div>
-          <div class="value" x-text="fmt(waiting_reqs, 0)"></div>
+          <div class="value" x-text="fmt(kpis.waiting_reqs, 0)"></div>
         </div>
-        <div class="kpi">
-          <div class="label">CUDA padding</div>
-          <div class="value"><span x-text="fmt(padding_ratio * 100, 0)"></span><span class="unit">%</span></div>
-        </div>
-        <div class="kpi">
+      </div>
+
+      <!-- KPI grid — Tier 2: efficiency & diagnostics -->
+      <div class="section-head" style="margin-top: 28px;">
+        <h2 style="font-size: 16px;">效率与诊断</h2>
+      </div>
+
+      <div class="kpis">
+        <div class="kpi teal" :class="{ warn: kpis.mfu > 0 && kpis.mfu < 0.2 }">
           <div class="label">MFU</div>
-          <div class="value"><span x-text="fmt(mfu * 100, 0)"></span><span class="unit">%</span></div>
+          <div class="value"><span x-text="fmt(kpis.mfu * 100, 0)"></span><span class="unit">%</span></div>
+        </div>
+        <div class="kpi sage" :class="{ warn: kpis.prefix_cache_hit !== null && kpis.prefix_cache_hit < 0.1 }">
+          <div class="label">Prefix cache 命中</div>
+          <div class="value"><span x-text="fmt(kpis.prefix_cache_hit * 100, 0)"></span><span class="unit">%</span></div>
+        </div>
+        <div class="kpi amber" :class="{ warn: kpis.padding_ratio > 0.3 }">
+          <div class="label">CUDA padding</div>
+          <div class="value"><span x-text="fmt(kpis.padding_ratio * 100, 0)"></span><span class="unit">%</span></div>
+        </div>
+        <div class="kpi rose" :class="{ warn: kpis.preempt_per_min > 0 && kpis.preempt_per_min <= 5, crit: kpis.preempt_per_min > 5 }">
+          <div class="label">抢占 / 分钟</div>
+          <div class="value" x-text="fmt(kpis.preempt_per_min, 1)"></div>
         </div>
       </div>
 
-      <div class="chart-card">
-        <h2>GPU 利用率 · 最近 60s</h2>
-        <div class="chart-wrap"><canvas id="gpu-chart"></canvas></div>
+      <!-- Latency trends (TTFT / TPOT / E2E) -->
+      <div class="section-head" style="margin-top: 28px;">
+        <h2 style="font-size: 16px;">用户延迟趋势</h2>
+        <span class="hint">最近 5 分钟 · 浅线 p50 / 实线 p99</span>
       </div>
 
-      <h3 class="section-title">当前触发的诊断</h3>
-      <div class="diagnoses">
+      <div class="latency-trends">
+        <div class="lat-card">
+          <div class="lat-head">
+            <span class="lat-title">TTFT · 首 token 延迟</span>
+            <span class="lat-now">
+              <span class="label-p">p99</span>
+              <span x-text="fmt(kpis.ttft_p99_ms, 0)"></span><span class="unit">ms</span>
+            </span>
+          </div>
+          <div class="lat-chart" x-show="ttftHasData"><canvas id="ttft-chart"></canvas></div>
+          <div class="lat-empty" x-show="!ttftHasData">暂无 TTFT 数据</div>
+        </div>
+
+        <div class="lat-card">
+          <div class="lat-head">
+            <span class="lat-title">TPOT · 单 token 生成时间</span>
+            <span class="lat-now">
+              <span class="label-p">p99</span>
+              <span x-text="fmt(kpis.tpot_p99_ms, 0)"></span><span class="unit">ms</span>
+            </span>
+          </div>
+          <div class="lat-source" x-show="tpotSource === 'itl'">数据源：ITL（无 finished_requests 时 fallback，语义近似）</div>
+          <div class="lat-chart" x-show="tpotHasData"><canvas id="tpot-chart"></canvas></div>
+          <div class="lat-empty" x-show="!tpotHasData">暂无 TPOT / ITL 数据</div>
+        </div>
+
+        <div class="lat-card">
+          <div class="lat-head">
+            <span class="lat-title">E2E · 端到端延迟</span>
+            <span class="lat-now" x-show="e2eHasData">
+              <span class="label-p">p99</span>
+              <span x-text="fmt(e2eP99, 0)"></span><span class="unit">ms</span>
+            </span>
+            <span class="lat-now" x-show="!e2eHasData" style="color: var(--muted-2);">—</span>
+          </div>
+          <div class="lat-chart" x-show="e2eHasData"><canvas id="e2e-chart"></canvas></div>
+          <div class="lat-empty" x-show="!e2eHasData">暂无 finished_requests<br/>（demo 不模拟请求完成事件）</div>
+        </div>
+      </div>
+
+      <!-- Chart: Roofline (compute / memory bound diagnosis) -->
+      <div class="chart-card">
+        <div class="head">
+          <div>
+            <h3>Roofline 实时诊断</h3>
+            <div style="margin-top: 4px; font-size: 11.5px; color: var(--muted-2);">
+              每个点 = 一个 step · 看离上界还有多远，判断 compute-bound 还是 memory-bound
+            </div>
+          </div>
+          <div style="display: flex; gap: 14px; align-items: center; flex-wrap: wrap;">
+            <span style="display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--muted);">
+              <span style="width: 14px; height: 2.5px; background: var(--coral); border-radius: 2px;"></span>
+              Compute roof
+            </span>
+            <span style="display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--muted);">
+              <span style="width: 14px; height: 2.5px; background: var(--indigo); border-radius: 2px;"></span>
+              Memory roof
+            </span>
+            <span style="display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--muted);">
+              <span style="width: 8px; height: 8px; background: var(--teal); border-radius: 50%;"></span>
+              当前样本
+            </span>
+          </div>
+        </div>
+        <div class="chart-wrap" style="height: 300px;"><canvas id="gpu-chart"></canvas></div>
+      </div>
+
+    </div>
+
+    <!-- ===== 规则 tab ===== -->
+    <div x-show="tab === 'rules'" x-data="rulesTab()" x-init="init()">
+
+      <!-- Currently triggered diagnoses (parent dashboard() scope) -->
+      <div class="section-head" style="margin-top: 0;">
+        <h2>当前触发的诊断<span class="count" x-text="`(${diagnoses.length})`"></span></h2>
+        <span class="hint" x-show="diagnoses.length > 0">最近 5 分钟去重后</span>
+      </div>
+      <div class="diagnoses" style="margin-bottom: 32px;">
         <template x-if="diagnoses.length === 0">
-          <div class="empty">暂无触发的诊断</div>
+          <div class="empty">
+            <div class="check">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+            </div>
+            <div class="title">一切看起来都不错</div>
+            <div>当前窗口内没有规则被触发</div>
+          </div>
         </template>
         <template x-for="d in diagnoses" :key="d.rule_id">
           <div class="diag" :class="d.severity">
-            <div class="head">
-              <span class="rule" x-text="d.rule_id"></span>
-              <span class="sev" x-text="d.severity"></span>
+            <div class="icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                <line x1="12" y1="9" x2="12" y2="13"/>
+                <line x1="12" y1="17" x2="12.01" y2="17"/>
+              </svg>
             </div>
-            <div class="msg" x-text="d.message"></div>
-            <div class="sug" x-text="d.suggestion"></div>
+            <div class="diag-body">
+              <div class="diag-title-row">
+                <div class="diag-title">
+                  <h3 x-text="ruleName(d.rule_id)"></h3>
+                  <div class="diag-meta">
+                    <code x-text="d.rule_id"></code>
+                    <span class="meta-sep"></span>
+                    <span class="diag-cat" x-text="ruleCategory(d.rule_id) || '—'"></span>
+                  </div>
+                </div>
+                <span class="sev-pill" :class="d.severity" x-text="d.severity"></span>
+              </div>
+              <div class="diag-msg" x-text="d.message"></div>
+              <div class="diag-sug">
+                <div class="diag-sug-label">建议</div>
+                <div class="diag-sug-text" x-text="d.suggestion"></div>
+              </div>
+            </div>
           </div>
         </template>
       </div>
-    </div>
 
-    <!-- 规则 tab -->
-    <div x-show="tab === 'rules'" x-data="rulesTab()" x-init="init()">
       <div class="rules-toolbar">
-        <h3 class="section-title" style="margin: 0;">规则（共 <span x-text="rules.length"></span> 条）</h3>
-        <button class="btn" @click="newRule()">+ 新建规则</button>
+        <div class="section-head" style="margin: 0;">
+          <h2>规则<span class="count" x-text="`(${rules.length})`"></span></h2>
+        </div>
+        <button class="btn primary" @click="newRule()">+ 新建规则</button>
       </div>
 
-      <table class="rules-table">
-        <thead>
-          <tr>
-            <th>ID / 名称</th>
-            <th>类别</th>
-            <th>Severity</th>
-            <th>条件</th>
-            <th>启用</th>
-            <th style="text-align: right;">操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          <template x-for="r in rules" :key="r.id">
-            <tr>
-              <td class="id-cell">
-                <strong x-text="r.id"></strong>
+      <div class="rules-list">
+        <template x-for="r in rules" :key="r.id">
+          <div class="rule-row" :class="{ disabled: !r.enabled }">
+            <div class="rule-row-main">
+              <div class="rule-row-head">
+                <h3 class="rule-row-name" x-text="r.name"></h3>
+                <span class="sev-pill" :class="r.severity" x-text="r.severity"></span>
                 <template x-if="r.is_default"><span class="badge default">default</span></template>
                 <template x-if="!r.enabled"><span class="badge disabled">disabled</span></template>
-                <div class="muted" x-text="r.name"></div>
-                <template x-if="testResult[r.id]">
-                  <div class="test-result"
-                       :class="testResult[r.id].data_available ? (testResult[r.id].would_fire ? '' : 'ok') : 'no-data'">
-                    <span x-text="formatTestResult(testResult[r.id])"></span>
-                  </div>
-                </template>
-              </td>
-              <td x-text="r.category"></td>
-              <td>
-                <span class="sev" :class="r.severity" x-text="r.severity"></span>
-              </td>
-              <td>
-                <code x-text="`${r.condition.metric} ${r.condition.op} ${r.condition.threshold}`"></code>
-                <div class="muted" style="font-size: 11px; margin-top: 2px;"
-                     x-text="`${r.condition.aggregation} over ${r.condition.window_seconds}s`"></div>
-              </td>
-              <td><span x-text="r.enabled ? '是' : '否'"></span></td>
-              <td style="text-align: right; white-space: nowrap;">
-                <button class="btn secondary" @click="editRule(r)">编辑</button>
-                <button class="btn secondary" @click="testRule(r.id)">测试</button>
-                <button class="btn danger" @click="deleteRule(r)">删除</button>
-              </td>
-            </tr>
-          </template>
-        </tbody>
-      </table>
+              </div>
+              <div class="rule-row-meta">
+                <code x-text="r.id"></code>
+                <span class="meta-sep"></span>
+                <span class="cat" x-text="r.category"></span>
+              </div>
+              <div class="rule-row-cond">
+                <span class="cond-pill">
+                  <span x-text="r.condition.metric"></span>
+                  <span class="op" x-text="r.condition.op"></span>
+                  <span x-text="r.condition.threshold"></span>
+                </span>
+                <span class="cond-agg" x-text="`${r.condition.aggregation} over ${r.condition.window_seconds}s`"></span>
+              </div>
+              <template x-if="testResult[r.id]">
+                <div class="test-result"
+                     :class="testResult[r.id].data_available ? (testResult[r.id].would_fire ? '' : 'ok') : 'no-data'"
+                     style="margin-top: 12px;">
+                  <span x-text="formatTestResult(testResult[r.id])"></span>
+                </div>
+              </template>
+            </div>
+            <div class="rule-row-actions">
+              <button title="测试当前数据" @click="testRule(r.id)">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <polygon points="5 3 19 12 5 21 5 3"/>
+                </svg>
+              </button>
+              <button title="编辑" @click="editRule(r)">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>
+                </svg>
+              </button>
+              <button title="删除" class="danger" @click="deleteRule(r)">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="3 6 5 6 21 6"/>
+                  <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+                  <path d="M10 11v6M14 11v6"/>
+                  <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+        </template>
+      </div>
 
       <!-- Edit / new form panel -->
       <div x-show="editing" x-cloak class="edit-panel">
@@ -519,12 +1812,12 @@
             </label>
             <label style="flex-direction: row; align-items: center; gap: 8px;">
               <input type="checkbox" x-model="editing.enabled">
-              <span>启用</span>
+              <span style="color: var(--text); font-size: 13.5px; font-weight: 500;">启用</span>
             </label>
           </div>
           <div class="form-actions">
             <button type="button" class="btn secondary" @click="cancelEdit()">取消</button>
-            <button type="submit" class="btn">保存</button>
+            <button type="submit" class="btn primary">保存</button>
           </div>
         </form>
       </div>
@@ -532,61 +1825,528 @@
       <div x-show="toast" x-cloak class="toast" :class="{ error: toastError }" x-text="toast"></div>
     </div>
 
-    <!-- 报告 tab -->
+    <!-- ===== 报告 tab ===== -->
     <div x-show="tab === 'report'" x-data="reportTab()">
-      <div style="background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 24px;">
-        <h3 style="margin-top: 0;">生成性能复盘报告</h3>
-        <p style="color: var(--muted); margin-top: 8px;">
-          Executive Summary、关键问题、趋势、配置审计、Roofline、规则触发汇总——单 HTML 文件，可邮件分享。
+      <div class="report-card">
+        <h3>生成性能复盘报告</h3>
+        <p class="desc">
+          Executive Summary、关键问题、趋势分析、配置审计、Roofline、规则触发汇总 —— 单 HTML 文件，可邮件分享。
         </p>
-        <div style="display: flex; gap: 16px; align-items: flex-end; margin-top: 16px;">
-          <label style="display: flex; flex-direction: column; gap: 4px; flex: 0 0 200px;">
-            <span style="font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.4px;">时间范围</span>
-            <select x-model.number="seconds" style="padding: 6px 10px; border: 1px solid var(--border); border-radius: 4px; font-size: 13px;">
+        <div class="report-controls">
+          <div class="field">
+            <span class="field-label">时间范围</span>
+            <select x-model.number="seconds">
               <option value="300">最近 5 分钟</option>
               <option value="3600">最近 1 小时</option>
               <option value="21600">最近 6 小时</option>
               <option value="86400">最近 24 小时</option>
               <option value="604800">最近 7 天</option>
             </select>
-          </label>
-          <label style="display: flex; flex-direction: column; gap: 4px; flex: 0 0 200px;">
-            <span style="font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.4px;">Plotly 加载</span>
-            <select x-model="plotlyMode" style="padding: 6px 10px; border: 1px solid var(--border); border-radius: 4px; font-size: 13px;">
+          </div>
+          <div class="field">
+            <span class="field-label">Plotly 加载</span>
+            <select x-model="plotlyMode">
               <option value="cdn">CDN（小，需要联网）</option>
               <option value="inline">Inline（~3.5MB，离线可看）</option>
             </select>
-          </label>
-          <button class="btn" @click="openReport()" style="margin-left: auto;">在新窗口打开</button>
+          </div>
+          <div class="spacer"></div>
+          <button class="btn secondary" @click="refreshPreview()">刷新预览</button>
           <button class="btn secondary" @click="downloadReport()">下载 HTML</button>
+          <button class="btn primary" @click="openReport()">在新窗口打开</button>
         </div>
+      </div>
+
+      <!-- Inline live preview — iframe loads the same /api/report endpoint -->
+      <div class="report-preview-wrap">
+        <div class="report-preview-head">
+          <div class="title">
+            <span class="live-dot"></span>
+            <span>实时预览</span>
+          </div>
+          <div class="url" x-text="url()"></div>
+        </div>
+        <iframe class="report-preview-frame" :src="url()" loading="lazy"></iframe>
+      </div>
+    </div>
+
+    <!-- ===== 压测 tab ===== -->
+    <div x-show="tab === 'bench'" x-data="benchTab()" x-init="init()">
+
+      <div class="section-head" style="margin-top: 0;">
+        <h2>新建压测</h2>
+        <span class="hint">提交后异步执行，结果落库后出现在下方历史</span>
+      </div>
+
+      <div class="bench-form-card">
+        <div class="form-grid">
+          <label>名称（可选）
+            <input type="text" x-model="form.name" placeholder="adhoc-时间戳">
+          </label>
+          <label>API
+            <select x-model="form.api">
+              <option value="chat">chat completions</option>
+              <option value="completions">completions</option>
+            </select>
+          </label>
+          <label class="full">Endpoint
+            <input type="text" x-model="form.endpoint" placeholder="http://localhost:8000" required>
+            <span class="hint">vLLM 服务的 base URL，自动追加 /v1/...</span>
+          </label>
+          <label class="full">Model
+            <input type="text" x-model="form.model" placeholder="Qwen2.5-32B-Instruct" required>
+          </label>
+          <label>Prompt tokens
+            <input type="number" x-model.number="form.prompt_tokens" min="1">
+          </label>
+          <label>Output tokens
+            <input type="number" x-model.number="form.output_tokens" min="1">
+          </label>
+          <label>Concurrency
+            <input type="number" x-model.number="form.concurrency" min="1">
+          </label>
+          <label>测量模式
+            <select x-model="form.boundedBy">
+              <option value="duration">按时长</option>
+              <option value="requests">按请求数</option>
+            </select>
+          </label>
+          <label x-show="form.boundedBy === 'duration'">Duration（秒）
+            <input type="number" x-model.number="form.duration_s" min="1">
+          </label>
+          <label x-show="form.boundedBy === 'requests'">Num requests
+            <input type="number" x-model.number="form.num_requests" min="1">
+          </label>
+          <label>Warmup（秒）
+            <input type="number" x-model.number="form.warmup_s" min="0">
+          </label>
+          <label>Timeout（秒）
+            <input type="number" step="any" x-model.number="form.timeout_s" min="1">
+          </label>
+          <div class="full slo-section">
+            <div class="slo-head">
+              <span class="slo-label">SLO 约束（可选）</span>
+              <button type="button" class="slo-add-btn" @click="addSloRow()">+ 添加约束</button>
+            </div>
+            <div class="slo-empty" x-show="form.sloRows.length === 0">
+              未设约束 · 提交后 SLO 状态会标记为 n/a
+            </div>
+            <template x-for="(row, i) in form.sloRows" :key="i">
+              <div class="slo-row">
+                <select x-model="row.metric" class="slo-field metric"
+                        @change="onSloMetricChange(i)">
+                  <option value="ttft">TTFT · 首 token</option>
+                  <option value="tpot">TPOT · token 间</option>
+                  <option value="e2e">E2E · 端到端</option>
+                  <option value="error_rate">错误率</option>
+                </select>
+                <select x-model="row.percentile" class="slo-field pct"
+                        :disabled="row.metric === 'error_rate'">
+                  <option value="p50">p50</option>
+                  <option value="p90">p90</option>
+                  <option value="p95">p95</option>
+                  <option value="p99">p99</option>
+                  <option value="mean">mean</option>
+                </select>
+                <select x-model="row.op" class="slo-field op">
+                  <option value="<">&lt;</option>
+                  <option value="<=">≤</option>
+                  <option value=">">&gt;</option>
+                  <option value=">=">≥</option>
+                </select>
+                <input type="number" step="any" x-model.number="row.value"
+                       class="slo-field value">
+                <select x-model="row.unit" class="slo-field unit"
+                        :disabled="row.metric === 'error_rate'">
+                  <option value="ms">ms</option>
+                  <option value="s">s</option>
+                </select>
+                <button type="button" class="slo-remove-btn"
+                        @click="removeSloRow(i)" title="删除这条约束">×</button>
+              </div>
+            </template>
+            <div class="slo-preview" x-show="form.sloRows.length > 0">
+              <span class="slo-preview-label">提交时生成：</span>
+              <code x-text="buildSloSpec() || '(空)'"></code>
+            </div>
+          </div>
+        </div>
+        <div class="form-actions">
+          <button class="btn primary" :disabled="submitting || !form.endpoint || !form.model" @click="submit()">
+            <span x-show="!submitting">开始运行</span>
+            <span x-show="submitting" x-cloak>提交中…</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Currently running -->
+      <div x-show="status.running && status.running.length > 0" x-cloak
+           class="bench-running-card">
+        <div class="bench-running-head">
+          <span class="live-dot"></span>
+          <span class="title">正在运行</span>
+          <span class="count" x-text="status.running.length"></span>
+        </div>
+        <template x-for="r in status.running" :key="r.run_id">
+          <div class="bench-running-row">
+            <code class="rid" x-text="r.run_id"></code>
+            <span class="name" x-text="r.scenario_name"></span>
+            <span class="ago" x-text="agoText(r.started_at_ns)"></span>
+          </div>
+        </template>
+      </div>
+
+      <div class="section-head" style="margin-top: 28px;">
+        <h2>历史记录<span class="count" x-text="`(${runs.length})`"></span></h2>
+        <span class="hint">最近 50 条</span>
+      </div>
+
+      <template x-if="runs.length === 0">
+        <div class="empty">
+          <div class="title">暂无压测记录</div>
+          <div>填上方表单点「开始运行」即可</div>
+        </div>
+      </template>
+
+      <div class="bench-runs-list" x-show="runs.length > 0">
+        <template x-for="r in runs" :key="r.run_id">
+          <div class="bench-run-row" :class="{ expanded: selectedId === r.run_id }"
+               @click="toggle(r.run_id)">
+            <div class="bench-run-main">
+              <div class="bench-run-head">
+                <span class="rule-row-name" x-text="r.scenario_name"></span>
+                <span class="status-chip" :class="r.status">
+                  <span x-show="r.status === 'running'">运行中</span>
+                  <span x-show="r.status === 'done'">已完成</span>
+                  <span x-show="r.status === 'failed'">失败</span>
+                </span>
+                <span class="slo-chip" :class="r.slo_status || 'na'"
+                      x-show="r.slo_status && r.slo_status !== 'n/a'"
+                      x-text="r.slo_status === 'pass' ? 'SLO 通过' : 'SLO 失败'"></span>
+              </div>
+              <div class="bench-run-meta">
+                <code x-text="r.run_id"></code>
+                <span class="meta-sep"></span>
+                <span x-text="agoText(r.started_at_ns)"></span>
+                <span class="meta-sep" x-show="r.scenario"></span>
+                <span x-show="r.scenario" x-text="`concurrency=${r.scenario?.concurrency}, ${r.scenario?.prompt_tokens}/${r.scenario?.output_tokens} tok`"></span>
+              </div>
+            </div>
+            <div class="bench-run-metrics">
+              <div class="metric">
+                <div class="m-label">TTFT p99</div>
+                <div class="m-value" x-text="fmtMs(r.client_metrics?.ttft_ms?.p99)"></div>
+              </div>
+              <div class="metric">
+                <div class="m-label">TPOT p99</div>
+                <div class="m-value" x-text="fmtMs(r.client_metrics?.tpot_ms?.p99)"></div>
+              </div>
+              <div class="metric">
+                <div class="m-label">tok/s</div>
+                <div class="m-value" x-text="fmtTps(r.client_metrics?.output_throughput_tps)"></div>
+              </div>
+              <div class="metric">
+                <div class="m-label">ok / err</div>
+                <div class="m-value">
+                  <span x-text="r.client_metrics?.ok ?? '—'"></span>
+                  <span class="sep">/</span>
+                  <span :style="(r.client_metrics?.errors||0) > 0 ? 'color:var(--rose)' : ''"
+                        x-text="r.client_metrics?.errors ?? '—'"></span>
+                </div>
+              </div>
+            </div>
+            <div class="bench-run-detail" x-show="selectedId === r.run_id" x-cloak>
+              <div x-show="r.error" class="bench-error">
+                <strong>错误：</strong><span x-text="r.error"></span>
+              </div>
+              <div class="bench-detail-grid">
+                <div>
+                  <h4>客户端指标</h4>
+                  <table class="bench-detail-tab">
+                    <tr><td>TTFT</td><td>p50 <span x-text="fmtMs(r.client_metrics?.ttft_ms?.p50)"></span> / p99 <span x-text="fmtMs(r.client_metrics?.ttft_ms?.p99)"></span></td></tr>
+                    <tr><td>TPOT</td><td>p50 <span x-text="fmtMs(r.client_metrics?.tpot_ms?.p50)"></span> / p99 <span x-text="fmtMs(r.client_metrics?.tpot_ms?.p99)"></span></td></tr>
+                    <tr><td>E2E</td><td>p50 <span x-text="fmtMs(r.client_metrics?.e2e_ms?.p50)"></span> / p99 <span x-text="fmtMs(r.client_metrics?.e2e_ms?.p99)"></span></td></tr>
+                    <tr><td>Output</td><td><span x-text="fmtTps(r.client_metrics?.output_throughput_tps)"></span></td></tr>
+                    <tr><td>Input</td><td><span x-text="fmtTps(r.client_metrics?.input_throughput_tps)"></span></td></tr>
+                    <tr><td>Tokens</td><td>out <span x-text="r.client_metrics?.output_tokens_total ?? '—'"></span> · in <span x-text="r.client_metrics?.input_tokens_total ?? '—'"></span></td></tr>
+                  </table>
+                </div>
+                <div>
+                  <h4>场景</h4>
+                  <table class="bench-detail-tab">
+                    <tr><td>Endpoint</td><td><code x-text="r.scenario?.endpoint"></code></td></tr>
+                    <tr><td>Model</td><td><code x-text="r.scenario?.model"></code></td></tr>
+                    <tr><td>API</td><td x-text="r.scenario?.api"></td></tr>
+                    <tr><td>Prompt / Output</td><td><span x-text="r.scenario?.prompt_tokens"></span> / <span x-text="r.scenario?.output_tokens"></span> tok</td></tr>
+                    <tr><td>Concurrency</td><td x-text="r.scenario?.concurrency"></td></tr>
+                    <tr><td>Bounded by</td><td>
+                      <span x-show="r.scenario?.duration_s" x-text="`duration=${r.scenario?.duration_s}s`"></span>
+                      <span x-show="r.scenario?.num_requests" x-text="`requests=${r.scenario?.num_requests}`"></span>
+                    </td></tr>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        </template>
       </div>
     </div>
 
   </main>
 
   <footer>
-    pping-lang · 每 2s 自动刷新
+    <span class="live-dot"></span>pping-lang · 每 2s 自动刷新
   </footer>
 </div>
 
 <script>
-// Chart.js instance held in closure (NOT in Alpine's reactive state) —
-// Alpine's Proxy wrapping breaks Chart.js's internal state machine.
 let _chart = null;
+let _ttftChart = null;
+let _tpotChart = null;
+let _e2eChart = null;
+
+function _createMiniLatencyChart(canvasId, color) {
+  const ctx = document.getElementById(canvasId);
+  if (!ctx) return null;
+  return new Chart(ctx.getContext('2d'), {
+    type: 'line',
+    data: {
+      labels: [],
+      datasets: [
+        {
+          label: 'p50',
+          data: [],
+          borderColor: color + '55',
+          backgroundColor: 'transparent',
+          borderWidth: 1.5,
+          tension: 0.35,
+          fill: false,
+          pointRadius: 0,
+        },
+        {
+          label: 'p99',
+          data: [],
+          borderColor: color,
+          backgroundColor: color + '1a',
+          borderWidth: 2,
+          tension: 0.35,
+          fill: true,
+          pointRadius: 0,
+          pointHoverRadius: 4,
+          pointHoverBackgroundColor: color,
+          pointHoverBorderColor: '#fff',
+          pointHoverBorderWidth: 2,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: '#1c1410',
+          titleColor: '#fff',
+          bodyColor: '#fdf9f2',
+          padding: 9,
+          cornerRadius: 6,
+          displayColors: true,
+          borderWidth: 0,
+          titleFont: { weight: '600', size: 11 },
+          bodyFont: { size: 11 },
+          callbacks: {
+            label: (c) => `${c.dataset.label}: ${c.parsed.y == null ? '—' : c.parsed.y.toFixed(0) + ' ms'}`,
+          },
+        },
+      },
+      scales: {
+        y: {
+          beginAtZero: true,
+          ticks: {
+            color: '#a8998a',
+            font: { size: 10 },
+            maxTicksLimit: 4,
+            callback: (v) => v + 'ms',
+          },
+          grid: { color: '#f3ebdb', drawBorder: false },
+        },
+        x: { display: false, grid: { display: false } },
+      },
+    },
+  });
+}
+
+function _updateMiniLatencyChart(chart, buckets) {
+  if (!chart) return;
+  chart.data.labels = buckets.map(b => Math.round(b.t) + 's');
+  chart.data.datasets[0].data = buckets.map(b => b.p50);
+  chart.data.datasets[1].data = buckets.map(b => b.p99);
+  chart.update('none');
+}
+
+function benchTab() {
+  return {
+    form: {
+      name: '',
+      endpoint: 'http://localhost:8000',
+      model: '',
+      prompt_tokens: 500,
+      output_tokens: 100,
+      concurrency: 16,
+      boundedBy: 'duration',
+      duration_s: 60,
+      num_requests: 100,
+      warmup_s: 5,
+      timeout_s: 30,
+      api: 'chat',
+      sloRows: [],   // array of {metric, percentile, op, value, unit}
+    },
+    runs: [],
+    status: { running: [] },
+    nowNs: 0,
+    submitting: false,
+    selectedId: null,
+    _timer: null,
+
+    async init() {
+      await this.refresh();
+      this._timer = setInterval(() => this.refresh(), 3000);
+    },
+
+    async refresh() {
+      try {
+        const [runsR, statusR] = await Promise.all([
+          fetch('/api/bench/runs?limit=50').then(r => r.json()),
+          fetch('/api/bench/status').then(r => r.json()),
+        ]);
+        this.runs = runsR.runs || [];
+        this.nowNs = runsR.now_ns || 0;
+        this.status = statusR;
+      } catch (e) {
+        console.warn('[bench] refresh failed:', e);
+      }
+    },
+
+    agoText(ns) {
+      if (!ns || !this.nowNs) return '—';
+      const sec = Math.max(0, (this.nowNs - ns) / 1e9);
+      if (sec < 60) return `${sec.toFixed(0)} 秒前`;
+      if (sec < 3600) return `${(sec / 60).toFixed(0)} 分钟前`;
+      if (sec < 86400) return `${(sec / 3600).toFixed(1)} 小时前`;
+      return `${(sec / 86400).toFixed(1)} 天前`;
+    },
+
+    fmtMs(v) {
+      if (v == null || isNaN(v)) return '—';
+      return `${Number(v).toFixed(0)} ms`;
+    },
+
+    fmtTps(v) {
+      if (v == null || isNaN(v)) return '—';
+      return `${Number(v).toFixed(0)} tok/s`;
+    },
+
+    toggle(id) {
+      this.selectedId = (this.selectedId === id) ? null : id;
+    },
+
+    // ===== SLO row builder =====
+    addSloRow() {
+      this.form.sloRows.push({
+        metric: 'ttft', percentile: 'p99', op: '<', value: 500, unit: 'ms',
+      });
+    },
+    removeSloRow(i) {
+      this.form.sloRows.splice(i, 1);
+    },
+    onSloMetricChange(i) {
+      // error_rate has no percentile / unit; clamp sensible defaults
+      const row = this.form.sloRows[i];
+      if (row.metric === 'error_rate') {
+        if (row.value > 1) row.value = 0.01;
+      } else if (row.unit !== 'ms' && row.unit !== 's') {
+        row.unit = 'ms';
+      }
+    },
+    buildSloSpec() {
+      const parts = [];
+      for (const r of this.form.sloRows) {
+        if (r.value == null || r.value === '' || isNaN(r.value)) continue;
+        if (r.metric === 'error_rate') {
+          parts.push(`${r.metric}${r.op}${r.value}`);
+        } else {
+          parts.push(`${r.metric}:${r.percentile}${r.op}${r.value}${r.unit}`);
+        }
+      }
+      return parts.join(';');
+    },
+
+    async submit() {
+      if (this.submitting) return;
+      if (!this.form.endpoint || !this.form.model) return;
+      this.submitting = true;
+      try {
+        const payload = {
+          name: this.form.name || null,
+          endpoint: this.form.endpoint,
+          model: this.form.model,
+          prompt_tokens: this.form.prompt_tokens,
+          output_tokens: this.form.output_tokens,
+          concurrency: this.form.concurrency,
+          warmup_s: this.form.warmup_s,
+          timeout_s: this.form.timeout_s,
+          api: this.form.api,
+          slo: this.form.sloRows.length > 0 ? this.buildSloSpec() : null,
+        };
+        if (this.form.boundedBy === 'duration') {
+          payload.duration_s = this.form.duration_s;
+          payload.num_requests = null;
+        } else {
+          payload.num_requests = this.form.num_requests;
+          payload.duration_s = null;
+        }
+        const r = await fetch('/api/bench/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        if (!r.ok) {
+          const err = await r.json().catch(() => ({ detail: r.statusText }));
+          alert(`提交失败: ${err.detail || r.status}`);
+          return;
+        }
+        await this.refresh();
+      } catch (e) {
+        alert(`错误: ${e}`);
+      } finally {
+        this.submitting = false;
+      }
+    },
+  };
+}
 
 function reportTab() {
   return {
     seconds: 3600,
     plotlyMode: 'cdn',
+    previewNonce: 0,  // bump → forces iframe reload even with unchanged params
     url() {
-      return `/api/report?seconds=${this.seconds}&plotly_mode=${this.plotlyMode}`;
+      // _n nonce both cache-busts and triggers Alpine :src re-render
+      return `/api/report?seconds=${this.seconds}&plotly_mode=${this.plotlyMode}&_n=${this.previewNonce}`;
     },
+    refreshPreview() { this.previewNonce++; },
     openReport() {
-      window.open(this.url(), '_blank');
+      // Open without nonce so user gets a clean URL
+      window.open(
+        `/api/report?seconds=${this.seconds}&plotly_mode=${this.plotlyMode}`,
+        '_blank',
+      );
     },
     async downloadReport() {
-      const r = await fetch(this.url());
+      const r = await fetch(
+        `/api/report?seconds=${this.seconds}&plotly_mode=${this.plotlyMode}`,
+      );
       const blob = await r.blob();
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
@@ -602,14 +2362,22 @@ function rulesTab() {
   return {
     rules: [],
     availableMetrics: [],
-    editing: null,           // current edit form data; null = closed
-    editingExisting: false,  // true = PUT, false = POST
-    testResult: {},          // {rule_id: {would_fire, value, ...}}
+    editing: null,
+    editingExisting: false,
+    testResult: {},
     toast: '',
     toastError: false,
 
     async init() {
       await Promise.all([this.loadRules(), this.loadMetrics()]);
+    },
+    ruleName(rule_id) {
+      const r = this.rules.find(x => x.id === rule_id);
+      return r ? r.name : rule_id;
+    },
+    ruleCategory(rule_id) {
+      const r = this.rules.find(x => x.id === rule_id);
+      return r ? r.category : '';
     },
     async loadRules() {
       const r = await fetch('/api/rules').then(r => r.json());
@@ -629,15 +2397,8 @@ function rulesTab() {
         message: '', suggestion: '', enabled: true,
       };
     },
-    newRule() {
-      this.editing = this.blank();
-      this.editingExisting = false;
-    },
-    editRule(r) {
-      // Deep clone to avoid editing the live row in place
-      this.editing = JSON.parse(JSON.stringify(r));
-      this.editingExisting = true;
-    },
+    newRule() { this.editing = this.blank(); this.editingExisting = false; },
+    editRule(r) { this.editing = JSON.parse(JSON.stringify(r)); this.editingExisting = true; },
     cancelEdit() { this.editing = null; },
     async save() {
       try {
@@ -660,24 +2421,16 @@ function rulesTab() {
       }
     },
     async deleteRule(r) {
-      const what = r.is_default
-        ? `禁用默认规则 ${r.id}（仍保留可重启用）`
-        : `删除规则 ${r.id}`;
+      const what = r.is_default ? `禁用默认规则 ${r.id}（仍保留可重启用）` : `删除规则 ${r.id}`;
       if (!confirm(what + '？')) return;
       const resp = await fetch(`/api/rules/${r.id}`, {method: 'DELETE'});
-      if (!resp.ok) {
-        this.showToast(`删除失败: ${resp.status}`, true);
-        return;
-      }
+      if (!resp.ok) { this.showToast(`删除失败: ${resp.status}`, true); return; }
       this.showToast(r.is_default ? '已禁用' : '已删除');
       await this.loadRules();
     },
     async testRule(rule_id) {
       const r = await fetch(`/api/rules/${rule_id}/test`, {method: 'POST'});
-      if (!r.ok) {
-        this.showToast(`测试失败: ${r.status}`, true);
-        return;
-      }
+      if (!r.ok) { this.showToast(`测试失败: ${r.status}`, true); return; }
       this.testResult[rule_id] = await r.json();
     },
     formatTestResult(t) {
@@ -686,8 +2439,7 @@ function rulesTab() {
       return `${verb} — ${t.aggregation}(${t.metric}) = ${Number(t.value).toFixed(3)} (阈值 ${t.threshold})`;
     },
     showToast(msg, error = false) {
-      this.toast = msg;
-      this.toastError = error;
+      this.toast = msg; this.toastError = error;
       setTimeout(() => { this.toast = ''; }, 3000);
     },
   };
@@ -697,13 +2449,24 @@ function dashboard() {
   return {
     tab: 'live',
     health: {},
+    system: {},
+    kpis: {
+      ttft_p50_ms: null, ttft_p99_ms: null,
+      tpot_p50_ms: null, tpot_p99_ms: null,
+      output_tps: null, kv_cache: null,
+      running_reqs: null, waiting_reqs: null,
+      mfu: null, prefix_cache_hit: null,
+      padding_ratio: null, preempt_per_min: null,
+      gpu_util: null,
+    },
     gpu_util_pct: 0,
-    kv_cache: 0,
-    running_reqs: 0,
-    waiting_reqs: 0,
-    padding_ratio: 0,
-    mfu: 0,
+    tpotSource: 'tpot',
+    ttftHasData: false,
+    tpotHasData: false,
+    e2eHasData: false,
+    e2eP99: null,
     diagnoses: [],
+    benchRunning: 0,
 
     fmt(v, digits) {
       if (v == null || isNaN(v)) return '—';
@@ -711,54 +2474,172 @@ function dashboard() {
     },
 
     init() {
-      _chart = new Chart(document.getElementById('gpu-chart').getContext('2d'), {
-        type: 'line',
+      const ctx = document.getElementById('gpu-chart').getContext('2d');
+
+      _chart = new Chart(ctx, {
+        type: 'scatter',
         data: {
-          labels: [],
-          datasets: [{
-            label: 'GPU util %',
-            data: [],
-            borderColor: '#0ea5e9',
-            backgroundColor: 'rgba(14,165,233,0.08)',
-            borderWidth: 2,
-            tension: 0.25,
-            fill: true,
-            pointRadius: 0,
-          }]
+          datasets: [
+            {
+              label: '当前样本',
+              data: [],
+              backgroundColor: 'rgba(13, 139, 128, 0.55)',
+              borderColor: '#0d8b80',
+              borderWidth: 1,
+              pointRadius: 4,
+              pointHoverRadius: 7,
+              pointHoverBackgroundColor: '#0d8b80',
+              pointHoverBorderColor: '#fff',
+              pointHoverBorderWidth: 2,
+              showLine: false,
+              order: 3,
+            },
+            {
+              label: 'Compute roof',
+              data: [],
+              showLine: true,
+              borderColor: '#dc4d3e',
+              borderWidth: 2.5,
+              pointRadius: 0,
+              fill: false,
+              tension: 0,
+              order: 1,
+            },
+            {
+              label: 'Memory roof',
+              data: [],
+              showLine: true,
+              borderColor: '#5147c8',
+              borderWidth: 2.5,
+              pointRadius: 0,
+              fill: false,
+              tension: 0,
+              order: 2,
+            },
+          ],
         },
         options: {
           responsive: true,
           maintainAspectRatio: false,
           animation: false,
-          plugins: { legend: { display: false } },
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              backgroundColor: '#1c1410',
+              titleColor: '#fff',
+              bodyColor: '#fdf9f2',
+              padding: 11,
+              cornerRadius: 8,
+              displayColors: false,
+              borderWidth: 0,
+              titleFont: { weight: '600' },
+              callbacks: {
+                title: () => '',
+                label: (ctx) => {
+                  const ds = ctx.dataset.label;
+                  if (ds === '当前样本') {
+                    return [
+                      `AI:  ${ctx.parsed.x.toFixed(2)} FLOPs/byte`,
+                      `TPut: ${ctx.parsed.y.toFixed(1)} TFLOPs/s`,
+                    ];
+                  }
+                  return `${ds}: ${ctx.parsed.y.toFixed(1)} TFLOPs/s`;
+                },
+              },
+            },
+          },
           scales: {
-            y: { beginAtZero: true, max: 100, ticks: { stepSize: 25 } },
-            x: { ticks: { autoSkip: true, maxTicksLimit: 6 } },
-          }
-        }
+            x: {
+              type: 'logarithmic',
+              title: {
+                display: true,
+                text: 'Arithmetic Intensity (FLOPs / byte)',
+                color: '#7a6e63',
+                font: { size: 11.5, weight: '600' },
+              },
+              ticks: { color: '#a8998a', font: { size: 11 } },
+              grid: { color: '#f3ebdb', drawBorder: false },
+            },
+            y: {
+              type: 'logarithmic',
+              title: {
+                display: true,
+                text: 'Achieved Throughput (TFLOPs/s)',
+                color: '#7a6e63',
+                font: { size: 11.5, weight: '600' },
+              },
+              ticks: { color: '#a8998a', font: { size: 11 } },
+              grid: { color: '#f3ebdb', drawBorder: false },
+            },
+          },
+        },
       });
+      // Mini latency-trend charts (TTFT / TPOT / E2E)
+      _ttftChart = _createMiniLatencyChart('ttft-chart', '#dc4d3e');
+      _tpotChart = _createMiniLatencyChart('tpot-chart', '#5147c8');
+      _e2eChart  = _createMiniLatencyChart('e2e-chart',  '#0d8b80');
+
+      this.fetchSystem();
       this.refresh();
       setInterval(() => this.refresh(), 2000);
     },
 
+    updateRoofline(data) {
+      if (!_chart) return;
+      // Sample points
+      const points = (data.points || []).map(p => ({
+        x: p.ai,
+        y: p.throughput_tflops,
+      }));
+      _chart.data.datasets[0].data = points;
+
+      // Roof lines from peak info
+      if (data.peak && data.peak.compute_tflops && data.peak.mem_bw_tbs) {
+        const peakC = data.peak.compute_tflops;
+        const peakBW = data.peak.mem_bw_tbs;
+        const knee = peakC / peakBW;
+        const xMin = 0.1;
+        const xMax = Math.max(1000, knee * 3);
+        // Compute roof: horizontal from knee to xMax
+        _chart.data.datasets[1].data = [
+          { x: knee, y: peakC },
+          { x: xMax, y: peakC },
+        ];
+        // Memory roof: diagonal from (xMin, bw*xMin) to knee
+        _chart.data.datasets[2].data = [
+          { x: xMin, y: peakBW * xMin },
+          { x: knee, y: peakC },
+        ];
+      } else {
+        _chart.data.datasets[1].data = [];
+        _chart.data.datasets[2].data = [];
+      }
+      _chart.update('none');
+    },
+
+    async fetchSystem() {
+      try {
+        this.system = await fetch('/api/system').then(r => r.json());
+      } catch (e) {
+        console.warn('[pping-lang] system info fetch failed:', e);
+      }
+    },
+
     async refresh() {
       try {
-        const [healthR, snapshotR, recentR, diagR] = await Promise.all([
+        const [healthR, kpisR, rooflineR, trendsR, diagR, benchStatusR] = await Promise.all([
           fetch('/api/health').then(r => r.json()),
-          fetch('/api/metrics/snapshot?seconds=30').then(r => r.json()),
-          fetch('/api/metrics/recent?name=gpu.utilization_pct&seconds=60&limit=120').then(r => r.json()),
+          fetch('/api/kpis?window=60').then(r => r.json()),
+          fetch('/api/roofline?seconds=60').then(r => r.json()),
+          fetch('/api/latency_trends?seconds=300&buckets=30').then(r => r.json()),
           fetch('/api/diagnoses?seconds=300').then(r => r.json()),
+          fetch('/api/bench/status').then(r => r.json()).catch(() => ({running: []})),
         ]);
+        this.benchRunning = (benchStatusR.running || []).length;
         this.health = healthR;
-        const m = snapshotR.metrics || {};
-        this.gpu_util_pct  = m['gpu.utilization_pct']?.value ?? 0;
-        this.kv_cache      = m['vllm.scheduler.kv_cache_usage_ratio']?.value ?? 0;
-        this.running_reqs  = m['vllm.scheduler.running_reqs']?.value ?? 0;
-        this.waiting_reqs  = m['vllm.scheduler.waiting_reqs']?.value ?? 0;
-        this.padding_ratio = m['vllm.cudagraph.padding_ratio']?.value ?? 0;
-        this.mfu           = m['vllm.perf.mfu_ratio']?.value ?? 0;
+        this.kpis = kpisR.kpis || this.kpis;
+        this.gpu_util_pct = this.kpis.gpu_util ?? 0;
 
-        // Dedup diagnoses by rule_id, keep most recent (API returns newest first)
         const seen = new Set();
         this.diagnoses = (diagR.diagnoses || []).filter(d => {
           if (seen.has(d.rule_id)) return false;
@@ -766,16 +2647,25 @@ function dashboard() {
           return true;
         });
 
-        // Chart update — guarded so a Chart.js bug never breaks data flow above
-        if (_chart) {
-          const pts = recentR.points || [];
-          _chart.data.labels = pts.map((_, i) => i);
-          _chart.data.datasets[0].data = pts.map(p => p.value);
-          _chart.update('none');
-        }
+        this.updateRoofline(rooflineR);
+        this.updateLatencyTrends(trendsR);
       } catch (e) {
         console.warn('[pping-lang] refresh failed:', e);
       }
+    },
+
+    updateLatencyTrends(data) {
+      const ttft = data.ttft_ms || [];
+      const tpot = data.tpot_ms || [];
+      const e2e  = data.e2e_ms || [];
+      this.ttftHasData = ttft.length > 0;
+      this.tpotHasData = tpot.length > 0;
+      this.e2eHasData  = e2e.length > 0;
+      this.tpotSource  = data.tpot_source || 'tpot';
+      this.e2eP99 = this.e2eHasData ? e2e[e2e.length - 1].p99 : null;
+      _updateMiniLatencyChart(_ttftChart, ttft);
+      _updateMiniLatencyChart(_tpotChart, tpot);
+      _updateMiniLatencyChart(_e2eChart, e2e);
     },
   };
 }

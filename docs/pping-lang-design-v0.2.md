@@ -893,7 +893,53 @@ CI 跑标准 workload，吞吐下降 > 3% 阻塞合并。每个 release tag 在 
 
 ### 18.4 兼容性矩阵
 
-vLLM 0.20.x、0.21.x（未来），Python 3.10/3.11/3.12，Kubernetes 1.25+（v0.2）。
+**Python**：3.10 / 3.11 / 3.12
+**Kubernetes**：1.25+（v0.2）
+
+#### vLLM 字段可用性 — 实测列
+
+WSL2 + Ubuntu 22.04 + RTX 4070 Laptop GPU 上跑 Qwen2.5-0.5B-Instruct，每个版本至少 100 个 chat completion 请求 + 持续 NVML 采样。
+
+| vLLM | `SchedulerStats` | `IterationStats` | `cudagraph_stats` | `perf_stats` | `FinishedRequestStats` | plugin entry-point | 备注 |
+|:--|:--|:--|:--|:--|:--|:--|:--|
+| **0.20.2** | ✓ | ✓ | ✓ 字段对齐 | ✓ | ✓ | ✓ | 推荐版本；所有 marquee 指标可用 |
+| **0.13.0** | ✓ | ✓ | ✓ 但字段重命名（`num_padded_tokens` 等不匹配） | ✗ 整字段不存在 | ✓ | ✓ | 降级可用；MFU/Roofline/padding_ratio 不会派生但不崩 |
+| < 0.13 | n/a | n/a | n/a | n/a | n/a | n/a | v1 架构 + `vllm.stat_logger_plugins` 入口不存在，不支持 |
+
+**关键 metric 的版本可用性**：
+
+| pping-lang metric | 数据源 | 0.20.x | 0.13.0 |
+|:--|:--|:--|:--|
+| `gpu.utilization_pct` | NVML | ✓ | ✓ |
+| `gpu.mem_used_bytes` / power / temp / clocks | NVML | ✓ | ✓ |
+| `vllm.scheduler.running_reqs` / waiting / kv_cache_usage | SchedulerStats | ✓ | ✓ |
+| `vllm.scheduler.prefix_cache_hit_ratio` | SchedulerStats.prefix_cache_stats | ✓ | ✓ |
+| `vllm.iter.gen_tokens` / preempted_reqs | IterationStats | ✓ | ✓ |
+| `vllm.req.ttft_ms` / tpot_ms / itl_ms / e2e_latency_ms | IterationStats lists + FinishedRequestStats | ✓ | ✓ |
+| `vllm.cudagraph.padding_ratio`（派生） | cudagraph_stats | ✓ | ⚠ 0 ratio（字段名漂移） |
+| `vllm.perf.mfu_ratio`（派生） | perf_stats × GPU peak 表 | ✓ | ✗ |
+| `vllm.perf.mem_bw_util_ratio`（派生） | perf_stats × GPU peak 表 | ✓ | ✗ |
+| Roofline 散点 | perf_stats | ✓ | ✗ |
+
+**实测的 Sink 容量瓶颈**（v0.2 修复目标）：
+
+| 配置 | 单进程负载 | dropped/min | 状态 |
+|:--|:--|:--|:--|
+| 默认（NVML 100ms、queue 16384、flush 5s） | 32 concurrent chat × 60s sustained | ~10k+ | 队列爆 |
+| 推荐（NVML 1s、queue 65536、flush 0.5s） | 同上 | < 100 | 稳态 |
+
+**规则评估实现迭代实测**（v0.1 Day 17-18 真负载验证）：
+
+| 实现 | 真 vLLM + 32 并发 sustained 时 median eval | 备注 |
+|:--|:--|:--|
+| 原始：10 条规则各 1 次 DuckDB QUANTILE_CONT | ~90 ms | baseline，每条独立 round-trip |
+| 当前：1 次 SQL 拉数据 + Python 内存聚合 | ~25 ms | 采用 |
+| 备选 A：fetchnumpy + np.percentile | ~44 ms | string 列 mask 拉慢 |
+| 备选 B：UNION ALL 让 DuckDB 在 C 层算 | ~76 ms | DuckDB 不并行各分支，跟 #A 同速但多一层语法成本 |
+
+**真要继续压到 < 5 ms 必须改架构**——用内存环形缓冲（per-metric 滑动窗口 deque）替代每 tick 查 DuckDB。这是 v0.2 工作，因为：
+1. 环形缓冲需要规则引擎直接订阅 sink 流（而非读 DuckDB），跨进程的 Centralized 模式下要重新设计
+2. 25 ms 占 1s 评估间隔的 2.5%，**v0.1 实际可接受**——没人会因此关掉规则引擎
 
 ---
 

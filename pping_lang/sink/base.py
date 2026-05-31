@@ -6,9 +6,16 @@ Hot-path contract:
     serialization, no allocation beyond the deque slot. Overflow drops
     oldest (deque maxlen) and increments self._dropped_*.
 
+Backpressure (Day 17 / real-vllm WSL实测):
+    NVML 100ms × 7 fields + per-iter vllm stats can push >100 metrics/s.
+    Default queue 16384 + flush 5s overflows under sustained load.
+    Solution: backpressure signal — push side sets a wake Event when queue
+    reaches `flush_wakeup_threshold`; flush thread waits on either timeout
+    OR signal. Drains more responsively without raising hot-path cost.
+
 All flushing happens on a daemon background thread that wakes every
-flush_interval_s seconds and calls _flush(metrics, diags). Subclasses
-implement _flush only.
+flush_interval_s seconds OR on backpressure signal, and calls
+_flush(metrics, diags). Subclasses implement _flush only.
 
 Exceptions in _flush are caught, counted, and logged — never propagated
 to vLLM (design §3.1: any bug must not bring down vLLM).
@@ -25,9 +32,14 @@ from pping_lang.types import Diagnosis, MetricPoint
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_QUEUE_SIZE: Final = 16384
+# Default queue sized to absorb ~10 min of NVML 100ms × 7 fields + bursts.
+# Memory cost: 65536 × ~64 bytes/point ≈ 4 MB; trivial.
+DEFAULT_QUEUE_SIZE: Final = 65536
 DEFAULT_DIAG_QUEUE_SIZE: Final = 1024
 DEFAULT_FLUSH_INTERVAL_S: Final = 5.0
+# When queue is at this fraction of capacity, push side wakes the flush thread
+# early (don't wait for the interval). Lower → more responsive but more wakeups.
+DEFAULT_BACKPRESSURE_THRESHOLD: Final = 0.5
 
 
 class Sink(ABC):
@@ -38,10 +50,14 @@ class Sink(ABC):
         queue_size: int = DEFAULT_QUEUE_SIZE,
         diag_queue_size: int = DEFAULT_DIAG_QUEUE_SIZE,
         flush_interval_s: float = DEFAULT_FLUSH_INTERVAL_S,
+        backpressure_threshold: float = DEFAULT_BACKPRESSURE_THRESHOLD,
     ) -> None:
         self._metric_q: deque[MetricPoint] = deque(maxlen=queue_size)
         self._diag_q: deque[Diagnosis] = deque(maxlen=diag_queue_size)
         self._flush_interval = flush_interval_s
+        # Backpressure: wake the flush thread early when queue passes this mark
+        self._flush_wakeup_threshold = max(1, int(queue_size * backpressure_threshold))
+        self._wake = Event()
         self._stop = Event()
         self._dropped_metrics = 0
         self._dropped_diags = 0
@@ -57,9 +73,14 @@ class Sink(ABC):
     # === Hot path: must stay <5μs ===
 
     def push_metric(self, p: MetricPoint) -> None:
-        if len(self._metric_q) == self._metric_q.maxlen:
+        q = self._metric_q
+        if len(q) == q.maxlen:
             self._dropped_metrics += 1
-        self._metric_q.append(p)
+        q.append(p)
+        # Backpressure: nudge flush thread early when queue is filling up.
+        # Event.set() is O(1) and idempotent — safe to call every push.
+        if len(q) >= self._flush_wakeup_threshold:
+            self._wake.set()
 
     def push_diagnosis(self, d: Diagnosis) -> None:
         if len(self._diag_q) == self._diag_q.maxlen:
@@ -92,13 +113,23 @@ class Sink(ABC):
             return
         self._closed = True
         self._stop.set()
+        # Wake the flush thread immediately — it's blocked on _wake.wait(timeout)
+        # and would otherwise sit for the full interval before noticing _stop.
+        self._wake.set()
         self._thread.join(timeout=self._flush_interval * 2)
         self._drain()  # final flush in caller's thread
 
     # === Bg thread internals ===
 
     def _run(self) -> None:
-        while not self._stop.wait(self._flush_interval):
+        # Wake on either timer OR backpressure signal from push side.
+        # We use _wake.wait() rather than _stop.wait() so the flush thread can
+        # be nudged early. Stop is checked after wait returns.
+        while not self._stop.is_set():
+            self._wake.wait(timeout=self._flush_interval)
+            self._wake.clear()
+            if self._stop.is_set():
+                break
             self._drain()
 
     def _drain(self) -> None:

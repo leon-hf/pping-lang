@@ -117,10 +117,14 @@ class PpingLangStatLogger(StatLoggerBase):
         flush_interval = float(
             os.environ.get("PPING_LANG_FLUSH_INTERVAL_S", "5.0")
         )
+        queue_size = int(
+            os.environ.get("PPING_LANG_SINK_QUEUE_SIZE", "65536")
+        )
         local_sink = LocalSink(
             db_path=db_path,
             instance_id=instance_id,
             flush_interval_s=flush_interval,
+            queue_size=queue_size,
         )
         # Optional OTel sink (additive, alongside LocalSink) — see Day 11
         sinks: list[Sink] = [local_sink]
@@ -142,11 +146,19 @@ class PpingLangStatLogger(StatLoggerBase):
         self._sink = sinks[0] if len(sinks) == 1 else TeeSink(*sinks)
         atexit.register(self._sink.close)
 
-        # 2) GPU peak (best-effort) — skip if NVML disabled (no GPU expected)
-        if os.environ.get("PPING_LANG_DISABLE_NVML") == "1":
-            gpu_peak = None
-        else:
-            gpu_peak = self._detect_gpu_peak()
+        # 2) GPU peak + name (best-effort) — skip if NVML disabled (no GPU expected)
+        gpu_name: str | None = None
+        gpu_peak = None
+        if os.environ.get("PPING_LANG_DISABLE_NVML") != "1":
+            gpu_name = detect_first_gpu_name()
+            if gpu_name is not None:
+                gpu_peak = lookup_peak(gpu_name)
+                if gpu_peak is None:
+                    logger.warning(
+                        "[pping-lang] unknown GPU %r — MFU / Roofline disabled. "
+                        "Add to pping_lang.hardware._GPU_PEAK_TABLE if needed.",
+                        gpu_name,
+                    )
 
         # 3) vLLM stats collector
         self._collector = VllmStatsCollector(
@@ -203,6 +215,7 @@ class PpingLangStatLogger(StatLoggerBase):
                 version=_version,
                 vllm_config=self.vllm_config,
                 gpu_peak=gpu_peak,
+                gpu_name=gpu_name,
             )
             self._api = ApiServer(app, host=api_host, port=api_port)
             self._api.start()

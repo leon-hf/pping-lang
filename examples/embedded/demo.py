@@ -34,6 +34,14 @@ os.environ["PPING_LANG_FLUSH_INTERVAL_S"] = "1.0"      # default 5s → 1s
 os.environ["PPING_LANG_RULE_EVAL_INTERVAL_S"] = "1.0"
 os.environ["PPING_LANG_DISABLE_NVML"] = "1"            # demo 跑在无 GPU 机器上
 
+# Demo: populate /api/system so the dashboard hero card has something to show
+os.environ.setdefault("PPING_LANG_INFO_VLLM_VERSION", "0.20.2")
+os.environ.setdefault("PPING_LANG_INFO_MODEL", "Qwen/Qwen2.5-32B-Instruct")
+os.environ.setdefault("PPING_LANG_INFO_GPU", "NVIDIA H100 80GB HBM3")
+os.environ.setdefault("PPING_LANG_INFO_GPU_COUNT", "8")
+os.environ.setdefault("PPING_LANG_INFO_BF16_TFLOPS", "989")
+os.environ.setdefault("PPING_LANG_INFO_MEM_BW_GBS", "3350")
+
 from pping_lang.hardware import GPUPeak  # noqa: E402
 from pping_lang.plugin import PpingLangStatLogger  # noqa: E402
 
@@ -91,6 +99,96 @@ def make_iteration_stats(step: int) -> SimpleNamespace:
     )
 
 
+def _seed_demo_bench_runs(db_path: Path) -> None:
+    """Insert 3 synthetic bench_runs so the dashboard 压测 tab isn't empty.
+
+    Demo has no real vLLM to hit; this just shows what a populated history
+    looks like. Real bench writes go through the 压测 tab → POST /api/bench/start.
+    """
+    import time as _t
+
+    import duckdb as _ddb
+
+    from pping_lang.bench import store as _bs
+    from pping_lang.bench.measurement import LatencyStats, RunSummary
+    from pping_lang.bench.scenarios.schema import SLO, StaticScenario
+
+    _baseline_slo = SLO.from_spec("ttft:p99<500ms;tpot:p99<50ms")
+
+    conn = _ddb.connect(str(db_path))
+    try:
+        _bs.init_bench_table(conn)
+        now_ns = _t.monotonic_ns()
+        seeds = [
+            dict(
+                offset_min=45, name="baseline-128-100",
+                concurrency=16, duration=60,
+                summary=RunSummary(
+                    total=247, ok=247, errors=0, duration_s=60.2,
+                    ttft_ms=LatencyStats(n=247, p50=142, p90=305, p95=350, p99=387, mean=178),
+                    tpot_ms=LatencyStats(n=247, p50=28, p99=41, mean=30),
+                    e2e_ms=LatencyStats(n=247, p50=1850, p99=4220, mean=2100),
+                    output_tokens_total=24700, input_tokens_total=128000,
+                    output_throughput_tps=410.4, input_throughput_tps=2127.0,
+                ),
+                slo=_baseline_slo,
+                status="pass",
+            ),
+            dict(
+                offset_min=22, name="stress-concurrency-64",
+                concurrency=64, duration=60,
+                summary=RunSummary(
+                    total=1024, ok=1019, errors=5, duration_s=60.5,
+                    ttft_ms=LatencyStats(n=1019, p50=384, p90=820, p95=940, p99=1180, mean=435),
+                    tpot_ms=LatencyStats(n=1019, p50=42, p99=83, mean=49),
+                    e2e_ms=LatencyStats(n=1019, p50=4500, p99=8700, mean=5100),
+                    output_tokens_total=101900, input_tokens_total=512000,
+                    output_throughput_tps=1684.3, input_throughput_tps=8460.8,
+                    error_samples=["http_503: kv cache exhausted"],
+                ),
+                slo=_baseline_slo,
+                status="fail",
+            ),
+            dict(
+                offset_min=5, name="quick-smoke-8",
+                concurrency=8, duration=30,
+                summary=RunSummary(
+                    total=124, ok=124, errors=0, duration_s=30.1,
+                    ttft_ms=LatencyStats(n=124, p50=98, p90=180, p95=210, p99=265, mean=115),
+                    tpot_ms=LatencyStats(n=124, p99=32, p50=22, mean=24),
+                    e2e_ms=LatencyStats(n=124, p50=1480, p99=3200, mean=1620),
+                    output_tokens_total=12400, input_tokens_total=64000,
+                    output_throughput_tps=411.9, input_throughput_tps=2126.2,
+                ),
+                slo=None,
+                status="n/a",
+            ),
+        ]
+
+        for i, s in enumerate(seeds, start=1):
+            scenario = StaticScenario(
+                name=s["name"],
+                endpoint="http://localhost:8000",
+                model="Qwen/Qwen2.5-32B-Instruct",
+                prompt_tokens=500, output_tokens=100,
+                concurrency=s["concurrency"],
+                duration_s=s["duration"], num_requests=None,
+                warmup_s=5, timeout_s=30.0,
+                slo=s["slo"],
+            )
+            started_at = now_ns - int(s["offset_min"] * 60 * 1e9)
+            finished_at = started_at + int(s["summary"].duration_s * 1e9)
+            run_id = f"static-demo-{i:03d}"
+            try:
+                _bs.insert_running(conn, run_id, scenario, "static", started_at)
+                _bs.mark_done(conn, run_id, finished_at, s["summary"], slo_status=s["status"])
+            except _ddb.ConstraintException:
+                # Already seeded on a previous demo run (DB persists)
+                pass
+    finally:
+        conn.close()
+
+
 def main() -> int:
     print("=" * 70)
     print("pping-lang demo — synthetic vLLM stats with high padding + low MFU")
@@ -105,6 +203,10 @@ def main() -> int:
     # Inject demo GPU peak for MFU derivation (since NVML disabled)
     if plugin._collector is not None:
         plugin._collector._gpu_peak = DEMO_GPU_PEAK
+
+    # Pre-populate a sample bench run so the 压测 tab has something to show
+    # (real bench needs an actual vLLM endpoint to hit; demo just shows the UI).
+    _seed_demo_bench_runs(DEMO_DB)
 
     start = time.monotonic()
     step = 0
