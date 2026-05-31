@@ -1,0 +1,35 @@
+{"prompt": "Write a Python function that returns the n-th Fibonacci number using memoization."}
+{"prompt": "Write a JavaScript function to debounce a callback by N milliseconds, with leading-edge option."}
+{"prompt": "Explain what this code does:\n\n```python\nfrom functools import reduce\nprint(reduce(lambda a, b: a if a > b else b, [3, 1, 4, 1, 5, 9, 2, 6]))\n```"}
+{"prompt": "Convert this Python code to idiomatic Rust:\n\n```python\ndef count_words(text):\n    counts = {}\n    for word in text.lower().split():\n        counts[word] = counts.get(word, 0) + 1\n    return counts\n```"}
+{"prompt": "Find the bug in this code and explain why it's wrong:\n\n```python\ndef average(nums):\n    return sum(nums) / len(nums) if nums else 0\n\nresult = average([1, 2, 3, 4, 5.0])\nprint(f\"Average: {result:.2}\")  # Expecting 3.00 but getting 3.0\n```"}
+{"prompt": "Write a SQL query that returns the top 3 highest-earning departments along with the average salary in each, given tables `employees(id, department_id, salary)` and `departments(id, name)`."}
+{"prompt": "Write a Bash one-liner to find all files larger than 100MB modified in the last 7 days under /var/log."}
+{"prompt": "Implement quicksort in Go without using the standard library `sort` package. Include comments."}
+{"prompt": "What's wrong with this React component? Suggest a fix:\n\n```jsx\nfunction Counter() {\n  let [count, setCount] = useState(0);\n  useEffect(() => {\n    setInterval(() => setCount(count + 1), 1000);\n  }, []);\n  return <div>{count}</div>;\n}\n```"}
+{"prompt": "Write a Python regex that matches valid US phone numbers in any of these formats: (555) 123-4567, 555-123-4567, 555.123.4567, +1 555 123 4567."}
+{"prompt": "Write a TypeScript type that takes an object type and returns a new type where all keys ending in 'Id' are required and the rest are optional."}
+{"prompt": "Explain the difference between `async/await` and Promises in JavaScript. Give a code example for each."}
+{"prompt": "Write a Python decorator that retries the wrapped function up to N times with exponential backoff on any exception. Make N configurable."}
+{"prompt": "Implement a thread-safe LRU cache in Python. Include a brief docstring and at least one usage example."}
+{"prompt": "What does this Dockerfile do wrong? How would you fix it for a production Python web service?\n\n```\nFROM python:latest\nWORKDIR /app\nCOPY . .\nRUN pip install -r requirements.txt\nCMD python app.py\n```"}
+{"prompt": "Write a Kubernetes manifest for a Deployment with 3 replicas of nginx and a Service that exposes it on port 80, both in namespace `web`."}
+{"prompt": "Write a Python script that parses a CSV of (date, amount, category) transactions and prints monthly totals per category, sorted by total descending."}
+{"prompt": "Explain what 'closure' means in JavaScript and give a small example showing why it's useful."}
+{"prompt": "Write a recursive function in Haskell that flattens a list of lists into a single list."}
+{"prompt": "What is the difference between `git rebase` and `git merge`? When would you prefer each?"}
+{"prompt": "Write a Python class implementing a sliding-window rate limiter (N requests per T seconds), thread-safe."}
+{"prompt": "How would you parallelize this Python loop using multiprocessing?\n\n```python\nresults = []\nfor item in items:\n    results.append(expensive_function(item))\n```"}
+{"prompt": "Write an idiomatic Go function that reads a JSON file into a struct, with proper error wrapping."}
+{"prompt": "Explain what NULL means in SQL and how it interacts with comparisons like `WHERE x = NULL` versus `WHERE x IS NULL`."}
+{"prompt": "Refactor this code to use comprehensions and remove the intermediate variables:\n\n```python\nresult = []\nfor x in range(20):\n    if x % 2 == 0:\n        squared = x * x\n        if squared < 100:\n            result.append(squared)\n```"}
+{"prompt": "Write a unit test (using pytest) for a function `validate_email(s: str) -> bool` that checks for valid email format. Include happy path, edge cases, and one parameterized test."}
+{"prompt": "Implement a basic event emitter in TypeScript with `on`, `off`, and `emit` methods, fully typed."}
+{"prompt": "What does the following CSS selector match? `div.card > p:first-child + img[alt~='hero']`"}
+{"prompt": "Write a Rust function that takes a `&str` and returns a `HashMap<char, usize>` counting characters, skipping whitespace."}
+{"prompt": "Explain how `Promise.all`, `Promise.allSettled`, and `Promise.race` differ. Give one practical use case for each."}
+{"prompt": "Write a Python function that converts a nested dict like `{'a': {'b': 1, 'c': 2}, 'd': 3}` into a flat dict `{'a.b': 1, 'a.c': 2, 'd': 3}`."}
+{"prompt": "What is the time and space complexity of merge sort? Walk through how it works on the array [5, 2, 4, 6, 1, 3]."}
+{"prompt": "Write an nginx config that reverse-proxies / to localhost:8000 and /static/ to a local directory, with gzip enabled."}
+{"prompt": "Write a Python coroutine that consumes from one asyncio queue, transforms items, and writes to another queue. Handle cancellation gracefully."}
+{"prompt": "What is the difference between a process and a thread? Why is multiprocessing in Python often preferred over multithreading for CPU-bound work?"}

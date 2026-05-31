@@ -74,6 +74,46 @@ if TYPE_CHECKING:
 DEFAULT_DB_PATH = Path.home() / ".pping-lang" / "local.duckdb"
 
 
+# Env-var prefixes exposed in /api/system. Anything else is filtered out to
+# avoid leaking shell history / unrelated process env / accidental secrets.
+_ENV_PREFIXES_INCLUDED = (
+    "VLLM_",
+    "PPING_LANG_",
+    "HF_",
+    "CUDA_",
+    "TORCH_",
+    "NCCL_",
+    "TRITON_",
+    "MODELSCOPE_",
+)
+# Single keys (not prefixes) also included
+_ENV_KEYS_INCLUDED = frozenset({
+    "OMP_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    "TOKENIZERS_PARALLELISM",
+})
+# Names containing any of these substrings get their VALUE masked (key kept)
+_ENV_SECRET_MARKERS = ("TOKEN", "KEY", "SECRET", "PASSWORD", "API_KEY")
+
+
+def _snapshot_relevant_env() -> dict[str, str]:
+    """Return a dict of env vars relevant to vLLM/pping-lang/CUDA, with
+    obvious secrets masked. Captured once at plugin init for the dashboard."""
+    out: dict[str, str] = {}
+    for k, v in os.environ.items():
+        included = (
+            k in _ENV_KEYS_INCLUDED
+            or any(k.startswith(p) for p in _ENV_PREFIXES_INCLUDED)
+        )
+        if not included:
+            continue
+        if any(marker in k for marker in _ENV_SECRET_MARKERS):
+            out[k] = "***"
+        else:
+            out[k] = v
+    return out
+
+
 class PpingLangStatLogger(StatLoggerBase):
     """v0.1 主入口。每个 vLLM EngineCore 进程实例化一次。
 
@@ -203,7 +243,16 @@ class PpingLangStatLogger(StatLoggerBase):
         if os.environ.get("PPING_LANG_DISABLE_API") != "1":
             api_host = os.environ.get("PPING_LANG_API_HOST", "127.0.0.1")
             api_port = int(os.environ.get("PPING_LANG_API_PORT", "8765"))
+            # Snapshot vLLM startup context for the dashboard 启动信息 modal —
+            # captured once at plugin init so subsequent env mutations don't
+            # alter what users see (and so the dashboard can show env values
+            # even if vLLM scrubs them later).
+            import sys as _sys
+
             from pping_lang import __version__ as _version
+            cmdline_snapshot = list(_sys.argv)
+            env_snapshot = _snapshot_relevant_env()
+
             app = build_app(
                 db_path=str(db_path),
                 instance_id=instance_id,
@@ -216,6 +265,8 @@ class PpingLangStatLogger(StatLoggerBase):
                 vllm_config=self.vllm_config,
                 gpu_peak=gpu_peak,
                 gpu_name=gpu_name,
+                cmdline=cmdline_snapshot,
+                env_snapshot=env_snapshot,
             )
             self._api = ApiServer(app, host=api_host, port=api_port)
             self._api.start()

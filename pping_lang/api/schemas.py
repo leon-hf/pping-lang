@@ -54,3 +54,4 @@ class BenchStartIn(BaseModel):
     api: Literal["chat", "completions"] = "chat"
     sweep: str | None = None  # e.g. "concurrency=1,2,4,8"
     slo: str | None = None    # constraint spec, e.g. "ttft:p99<500ms;tpot:p99<50ms"
+    prompt_source: str = "synthetic"  # synthetic | builtin:<name> | file:<path>

@@ -204,6 +204,15 @@ class StaticScenario:
     # Optional explicit prompt content (otherwise synthesized to hit target token count)
     prompt_text: str | None = None
 
+    # Where prompts come from. See bench.prompts.loader for the syntax:
+    #   "synthetic"           — token-count-controlled filler (uses prompt_tokens)
+    #   "builtin:mixed-short" — bundled JSONL dataset
+    #   "builtin:mixed-long"
+    #   "builtin:code"
+    #   "file:/path/to.jsonl" — user-provided JSONL ({"prompt": "..."} per line)
+    # `prompt_text`, when set, wins over `prompt_source` (one fixed prompt).
+    prompt_source: str = "synthetic"
+
     def validate(self) -> None:
         """Raise ValueError with all issues joined; called at runner start."""
         errors: list[str] = []
@@ -235,6 +244,22 @@ class StaticScenario:
             errors.append(f"duration_s must be > 0 (got {self.duration_s})")
         if has_n and self.num_requests is not None and self.num_requests <= 0:
             errors.append(f"num_requests must be > 0 (got {self.num_requests})")
+
+        # prompt_source shape (deep validation — existence check — happens at
+        # runner start via bench.prompts.load_prompts, not here, so we don't
+        # touch the filesystem during scenario construction).
+        if self.prompt_source and not isinstance(self.prompt_source, str):
+            errors.append(f"prompt_source must be a string (got {type(self.prompt_source).__name__})")
+        elif (
+            self.prompt_source
+            and self.prompt_source != "synthetic"
+            and not self.prompt_source.startswith("builtin:")
+            and not self.prompt_source.startswith("file:")
+        ):
+            errors.append(
+                f"prompt_source={self.prompt_source!r} must be 'synthetic', "
+                f"'builtin:<name>', or 'file:<path>'"
+            )
 
         # Sweep consistency
         if self.sweep_param is not None and not self.sweep_values:

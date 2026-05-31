@@ -267,11 +267,194 @@
   .chip.indigo .chip-val { color: var(--indigo); }
   .chip.teal { background: var(--teal-soft); border-color: rgba(13, 139, 128, 0.18); }
   .chip.teal .chip-val { color: var(--teal); }
+
+  /* "启动信息" button — lives at the top of the right pulse column,
+     stacks above the TTFT p99 readout. No more absolute positioning. */
+  .hero-info-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 8px 16px 8px 13px;
+    background: var(--coral-soft);
+    border: 1px solid rgba(220, 77, 62, 0.35);
+    color: var(--coral-strong);
+    border-radius: 999px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: -0.005em;
+    white-space: nowrap;
+    box-shadow: 0 1px 3px rgba(220, 77, 62, 0.15);
+    transition: background 0.15s, color 0.15s, border-color 0.15s,
+                transform 0.1s, box-shadow 0.15s;
+  }
+  .hero-info-btn:hover {
+    background: linear-gradient(135deg, var(--coral) 0%, var(--rose) 100%);
+    color: white;
+    border-color: var(--coral);
+    box-shadow: 0 4px 12px -2px rgba(220, 77, 62, 0.4);
+    transform: translateY(-1px);
+  }
+  .hero-info-btn:active { transform: translateY(0); }
+  .hero-info-btn svg { width: 16px; height: 16px; stroke-width: 2.4; }
+
+  /* Startup-info modal */
+  .modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(28, 20, 16, 0.35);
+    backdrop-filter: blur(2px);
+    display: grid;
+    place-items: center;
+    z-index: 1000;
+    animation: fadeIn 0.15s ease-out;
+  }
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+  .modal {
+    background: var(--surface);
+    border-radius: var(--radius-lg);
+    width: min(900px, 92vw);
+    max-height: 85vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 24px 60px -16px rgba(28, 20, 16, 0.3);
+    overflow: hidden;
+  }
+  .modal-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 18px 24px;
+    border-bottom: 1px solid var(--border);
+  }
+  .modal-head h2 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--text-strong);
+    letter-spacing: -0.015em;
+  }
+  .modal-close {
+    background: none;
+    border: none;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 22px;
+    line-height: 1;
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-family: inherit;
+  }
+  .modal-close:hover { background: var(--surface-alt); color: var(--text-strong); }
+  .modal-body {
+    overflow-y: auto;
+    padding: 18px 24px 22px;
+  }
+  .modal-section {
+    margin-bottom: 22px;
+  }
+  .modal-section:last-child { margin-bottom: 0; }
+  .modal-section .section-head-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+  }
+  .modal-section h3 {
+    margin: 0;
+    font-size: 12px;
+    color: var(--muted);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  .modal-section .copy-btn {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    padding: 3px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 11.5px;
+    transition: background 0.12s, color 0.12s, border-color 0.12s;
+  }
+  .modal-section .copy-btn:hover {
+    background: var(--surface-tint);
+    color: var(--coral);
+    border-color: rgba(220, 77, 62, 0.25);
+  }
+  .modal-section pre.cmdline {
+    background: var(--surface-alt);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 12px 14px;
+    font-family: ui-monospace, Consolas, monospace;
+    font-size: 12px;
+    color: var(--text-strong);
+    line-height: 1.6;
+    overflow-x: auto;
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+  .modal-section table.kv {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12.5px;
+    font-family: ui-monospace, Consolas, monospace;
+  }
+  .modal-section table.kv td {
+    padding: 4px 12px 4px 0;
+    vertical-align: top;
+    border-bottom: 1px solid var(--border);
+  }
+  .modal-section table.kv tr:last-child td { border-bottom: none; }
+  .modal-section table.kv td:first-child {
+    color: var(--muted);
+    width: 40%;
+    word-break: break-all;
+  }
+  .modal-section table.kv td:last-child {
+    color: var(--text-strong);
+    word-break: break-all;
+  }
+  .modal-section table.kv .masked {
+    color: var(--rose);
+    background: var(--rose-soft);
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 11px;
+  }
+  .modal-section .config-group {
+    background: var(--surface-alt);
+    border-radius: var(--radius-sm);
+    padding: 10px 14px;
+    margin-bottom: 8px;
+  }
+  .modal-section .config-group h4 {
+    margin: 0 0 6px;
+    font-size: 11.5px;
+    color: var(--coral);
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    font-family: ui-monospace, Consolas, monospace;
+  }
+  .modal-section .empty {
+    color: var(--muted-2);
+    font-size: 12px;
+    font-style: italic;
+  }
+
   .hero-pulse {
     display: flex;
     flex-direction: column;
     align-items: flex-end;
     gap: 6px;
+  }
+  .hero-pulse .hero-info-btn {
+    margin-bottom: 6px;   /* slight gap before the TTFT readout */
   }
   .hero-pulse .label {
     font-size: 11px;
@@ -1497,8 +1680,94 @@
           </div>
         </div>
         <div class="hero-pulse">
+          <button class="hero-info-btn" @click="showStartupInfo = true" title="查看 vLLM 启动命令、环境变量、解析配置">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"/>
+              <line x1="12" y1="16" x2="12" y2="12"/>
+              <line x1="12" y1="8" x2="12.01" y2="8"/>
+            </svg>
+            启动信息
+          </button>
           <div class="label">TTFT p99</div>
           <div class="val"><span x-text="fmt(kpis.ttft_p99_ms, 0)"></span><span class="unit">ms</span></div>
+        </div>
+      </div>
+
+      <!-- 启动信息 modal -->
+      <div x-show="showStartupInfo" x-cloak class="modal-backdrop"
+           @click.self="showStartupInfo = false" @keydown.escape.window="showStartupInfo = false">
+        <div class="modal" role="dialog" aria-modal="true">
+          <div class="modal-head">
+            <h2>vLLM 启动信息 · <span x-text="system.instance_id"></span></h2>
+            <button class="modal-close" @click="showStartupInfo = false" aria-label="关闭">×</button>
+          </div>
+          <div class="modal-body">
+
+            <!-- 启动命令 -->
+            <div class="modal-section">
+              <div class="section-head-row">
+                <h3>启动命令</h3>
+                <button class="copy-btn" @click="copyCmdline()" x-text="cmdlineCopyLabel">复制</button>
+              </div>
+              <template x-if="(system.cmdline || []).length === 0">
+                <div class="empty">未捕获到 cmdline（plugin 早于 sys.argv 设定？）</div>
+              </template>
+              <template x-if="(system.cmdline || []).length > 0">
+                <pre class="cmdline" x-text="(system.cmdline || []).join(' ')"></pre>
+              </template>
+            </div>
+
+            <!-- 环境变量 -->
+            <div class="modal-section">
+              <div class="section-head-row">
+                <h3>环境变量 <span style="font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--muted-2);" x-text="`(${Object.keys(system.env || {}).length})`"></span></h3>
+              </div>
+              <template x-if="Object.keys(system.env || {}).length === 0">
+                <div class="empty">无相关环境变量（仅含 VLLM_/PPING_LANG_/HF_/CUDA_/TORCH_ 等前缀）</div>
+              </template>
+              <template x-if="Object.keys(system.env || {}).length > 0">
+                <table class="kv">
+                  <template x-for="key in Object.keys(system.env || {}).sort()" :key="key">
+                    <tr>
+                      <td x-text="key"></td>
+                      <td>
+                        <template x-if="system.env[key] === '***'">
+                          <span class="masked" title="名称含 TOKEN/KEY/SECRET，值已脱敏">***</span>
+                        </template>
+                        <template x-if="system.env[key] !== '***'">
+                          <span x-text="system.env[key]"></span>
+                        </template>
+                      </td>
+                    </tr>
+                  </template>
+                </table>
+              </template>
+            </div>
+
+            <!-- 解析配置 -->
+            <div class="modal-section">
+              <div class="section-head-row">
+                <h3>vLLM 解析配置 <span style="font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--muted-2);">CLI + 默认值合并后的最终生效值</span></h3>
+              </div>
+              <template x-if="!system.resolved_config || Object.keys(system.resolved_config).length === 0">
+                <div class="empty">无 vllm_config（plugin 实例化时未拿到，常见于本地 demo）</div>
+              </template>
+              <template x-for="group in Object.keys(system.resolved_config || {}).sort()" :key="group">
+                <div class="config-group">
+                  <h4 x-text="group"></h4>
+                  <table class="kv">
+                    <template x-for="k in Object.keys(system.resolved_config[group]).sort()" :key="k">
+                      <tr>
+                        <td x-text="k"></td>
+                        <td x-text="system.resolved_config[group][k] === null ? '—' : String(system.resolved_config[group][k])"></td>
+                      </tr>
+                    </template>
+                  </table>
+                </div>
+              </template>
+            </div>
+
+          </div>
         </div>
       </div>
 
@@ -1896,7 +2165,15 @@
           <label class="full">Model
             <input type="text" x-model="form.model" placeholder="Qwen2.5-32B-Instruct" required>
           </label>
-          <label>Prompt tokens
+          <label class="full">Prompt 数据源
+            <select x-model="form.prompt_source" @change="onPromptSourceChange()">
+              <template x-for="src in promptSources" :key="src.value">
+                <option :value="src.value" x-text="src.label"></option>
+              </template>
+            </select>
+            <span class="hint" x-text="currentPromptSourceDescription()"></span>
+          </label>
+          <label x-show="currentPromptSourceUsesPromptTokens()">Prompt tokens
             <input type="number" x-model.number="form.prompt_tokens" min="1">
           </label>
           <label>Output tokens
@@ -2201,7 +2478,12 @@ function benchTab() {
       timeout_s: 30,
       api: 'chat',
       sloRows: [],   // array of {metric, percentile, op, value, unit}
+      prompt_source: 'synthetic',
     },
+    promptSources: [
+      { value: 'synthetic', label: '合成填充 (synthetic)', uses_prompt_tokens: true,
+        description: '按 prompt_tokens 长度循环 the quick brown fox 句模板' },
+    ],
     runs: [],
     status: { running: [] },
     nowNs: 0,
@@ -2210,8 +2492,50 @@ function benchTab() {
     _timer: null,
 
     async init() {
+      // Prefill endpoint + model from /api/system so user doesn't have to retype
+      // what dashboard already knows. We don't overwrite values the user has
+      // already entered (e.g. if they're switching to a different endpoint).
+      try {
+        const sys = await fetch('/api/system').then(r => r.json());
+        if (!this.form.model && sys.model) {
+          this.form.model = sys.model;
+        }
+        // Endpoint heuristic: vLLM usually listens on :8000 on the same host
+        // as the dashboard. Use the page's hostname so this works across
+        // localhost / WSL forwarded / remote dashboard access.
+        if (this.form.endpoint === 'http://localhost:8000') {
+          this.form.endpoint = `http://${window.location.hostname}:8000`;
+        }
+      } catch (e) {
+        console.warn('[bench] prefill from /api/system failed:', e);
+      }
+      // Discover builtin prompt datasets — populates the dropdown below
+      // the synthetic default. Fails open: dropdown still has 'synthetic'.
+      try {
+        const r = await fetch('/api/bench/prompt-sources').then(r => r.json());
+        if (r.sources && r.sources.length) {
+          this.promptSources = r.sources;
+        }
+      } catch (e) {
+        console.warn('[bench] prompt-sources discovery failed:', e);
+      }
       await this.refresh();
       this._timer = setInterval(() => this.refresh(), 3000);
+    },
+
+    onPromptSourceChange() {
+      // No-op for now — hook reserved for clearing prompt_tokens when not used,
+      // or for showing a preview of dataset prompts.
+    },
+
+    currentPromptSourceDescription() {
+      const src = (this.promptSources || []).find(s => s.value === this.form.prompt_source);
+      return src ? src.description : '';
+    },
+
+    currentPromptSourceUsesPromptTokens() {
+      const src = (this.promptSources || []).find(s => s.value === this.form.prompt_source);
+      return src ? !!src.uses_prompt_tokens : true;
     },
 
     async refresh() {
@@ -2298,6 +2622,7 @@ function benchTab() {
           timeout_s: this.form.timeout_s,
           api: this.form.api,
           slo: this.form.sloRows.length > 0 ? this.buildSloSpec() : null,
+          prompt_source: this.form.prompt_source || 'synthetic',
         };
         if (this.form.boundedBy === 'duration') {
           payload.duration_s = this.form.duration_s;
@@ -2467,6 +2792,8 @@ function dashboard() {
     e2eP99: null,
     diagnoses: [],
     benchRunning: 0,
+    showStartupInfo: false,
+    cmdlineCopyLabel: '复制',
 
     fmt(v, digits) {
       if (v == null || isNaN(v)) return '—';
@@ -2623,6 +2950,18 @@ function dashboard() {
       } catch (e) {
         console.warn('[pping-lang] system info fetch failed:', e);
       }
+    },
+
+    async copyCmdline() {
+      const text = (this.system.cmdline || []).join(' ');
+      if (!text) return;
+      try {
+        await navigator.clipboard.writeText(text);
+        this.cmdlineCopyLabel = '已复制 ✓';
+      } catch (e) {
+        this.cmdlineCopyLabel = '复制失败';
+      }
+      setTimeout(() => { this.cmdlineCopyLabel = '复制'; }, 1800);
     },
 
     async refresh() {

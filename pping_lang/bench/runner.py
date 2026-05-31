@@ -17,8 +17,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from pping_lang.bench.client import synthesize_prompt
 from pping_lang.bench.measurement import RequestSample, RunSummary, aggregate
+from pping_lang.bench.prompts import load_prompts
 from pping_lang.bench.scenarios.schema import StaticScenario
 
 
@@ -57,7 +57,17 @@ async def run_static(
     `completions(model, prompt, output_tokens)` returning `RequestSample`.
     """
     scenario.validate()
-    prompt = scenario.prompt_text or synthesize_prompt(scenario.prompt_tokens)
+
+    # Resolve prompt source → list of strings. `prompt_text` (fixed prompt)
+    # wins over `prompt_source` (dataset/file/synthetic). Cycle through the
+    # list so a 50-entry dataset can serve any num_requests; per-worker
+    # selection is round-robin via a shared counter.
+    if scenario.prompt_text:
+        prompts: list[str] = [scenario.prompt_text]
+    else:
+        prompts = load_prompts(scenario.prompt_source, scenario.prompt_tokens)
+    prompt_idx = 0  # rotated under counter_lock so two workers don't race
+    n_prompts = len(prompts)
 
     # Shared mutable state across worker coroutines (single-threaded async loop,
     # explicit lock kept only for the counter decrement to be obvious).
@@ -70,11 +80,19 @@ async def run_static(
     counter_lock = asyncio.Lock()
 
     async def call_once() -> RequestSample:
+        # Pick the next prompt round-robin. n_prompts==1 short-circuits.
+        nonlocal prompt_idx
+        if n_prompts == 1:
+            this_prompt = prompts[0]
+        else:
+            async with counter_lock:
+                this_prompt = prompts[prompt_idx % n_prompts]
+                prompt_idx += 1
         try:
             if scenario.api == "chat":
-                coro = client.chat(scenario.model, prompt, scenario.output_tokens)
+                coro = client.chat(scenario.model, this_prompt, scenario.output_tokens)
             else:
-                coro = client.completions(scenario.model, prompt, scenario.output_tokens)
+                coro = client.completions(scenario.model, this_prompt, scenario.output_tokens)
             return await asyncio.wait_for(coro, timeout=scenario.timeout_s)
         except asyncio.TimeoutError:
             now = time.monotonic_ns()

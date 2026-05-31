@@ -51,6 +51,13 @@ Documentation = "https://github.com/leon/pping-lang/tree/main/docs"
 
 [tool.hatch.build.targets.wheel]
 packages = ["pping_lang"]
+# Bundle non-Python resources: report templates + bench prompt datasets.
+# Hatch picks .py up automatically; everything else needs explicit include.
+include = [
+  "pping_lang/report/templates/*.j2",
+  "pping_lang/bench/prompts/data/*.jsonl",
+  "pping_lang/ui/*.html",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

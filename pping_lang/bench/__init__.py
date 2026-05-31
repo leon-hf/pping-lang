@@ -21,6 +21,11 @@ from pping_lang.bench.microbench import (
     bench_record_overhead,
     main,
 )
+from pping_lang.bench.prompts import (
+    BUILTIN_DATASETS,
+    available_builtins,
+    load_prompts,
+)
 from pping_lang.bench.runner import SweepPoint, SweepResult, run_static, run_sweep
 from pping_lang.bench.scenarios.schema import SLO, ApiKind, StaticScenario, Threshold
 
@@ -42,6 +47,9 @@ __all__ = [
     "aggregate",
     "latency_stats",
     "synthesize_prompt",
+    "load_prompts",
+    "available_builtins",
+    "BUILTIN_DATASETS",
     "run_static",
     "run_sweep",
     "SweepResult",

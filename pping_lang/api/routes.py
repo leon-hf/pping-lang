@@ -42,6 +42,12 @@ from pping_lang.rules.schema import Condition, Rule
 
 _UI_INDEX = Path(__file__).parent.parent / "ui" / "index.html"
 
+_BUILTIN_DESCRIPTIONS: dict[str, str] = {
+    "mixed-short": "短问答 + 闲聊 + 简单指令（每条 50–180 tokens）",
+    "mixed-long":  "长上下文：文档摘要 / 长指令 / 转录稿（每条 1000–3000 tokens）",
+    "code":        "代码相关：写函数 / 解释代码 / 修 bug / 重构",
+}
+
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
@@ -64,6 +70,8 @@ def build_app(
     vllm_config: Any = None,
     gpu_peak: GPUPeak | None = None,
     gpu_name: str | None = None,
+    cmdline: list[str] | None = None,
+    env_snapshot: dict[str, str] | None = None,
 ) -> FastAPI:
     """Construct the FastAPI app with deps wired via closure."""
     app = FastAPI(
@@ -167,7 +175,20 @@ def build_app(
             "gpu_peak": peak,
             "instance_id": instance_id,
             "engine_index": engine_index,
+            # Startup-info modal payload — captured at plugin init time
+            "cmdline": cmdline or [],
+            "env": env_snapshot or {},
+            "resolved_config": _resolved_vllm_config(vllm_config),
         }
+
+    def _resolved_vllm_config(vc: Any) -> dict[str, Any] | None:
+        """Dump vllm_config's basic-typed fields per sub-config. Reuses the
+        report-side extraction so the modal stays in sync with HTML reports."""
+        from pping_lang.report.analysis import _config_to_dict
+        try:
+            return _config_to_dict(vc)
+        except Exception:
+            return None
 
     # === GET /api/metrics/available ===
     @app.get("/api/metrics/available")
@@ -554,6 +575,31 @@ def build_app(
         finally:
             _bench_runs.pop(run_id, None)
 
+    # === GET /api/bench/prompt-sources — UI dropdown discovery ===
+    @app.get("/api/bench/prompt-sources")
+    def bench_prompt_sources() -> dict[str, Any]:
+        from pping_lang.bench.prompts import available_builtins, load_prompts
+        items: list[dict[str, Any]] = [
+            {
+                "value": "synthetic",
+                "label": "合成填充 (synthetic)",
+                "description": "按 prompt_tokens 长度循环 the quick brown fox 句模板",
+                "uses_prompt_tokens": True,
+            },
+        ]
+        for name in available_builtins():
+            try:
+                size = len(load_prompts(f"builtin:{name}"))
+            except Exception:
+                size = 0
+            items.append({
+                "value": f"builtin:{name}",
+                "label": f"内置 {name} ({size} 条)",
+                "description": _BUILTIN_DESCRIPTIONS.get(name, ""),
+                "uses_prompt_tokens": False,
+            })
+        return {"sources": items}
+
     # === GET /api/bench/runs — list past + currently running ===
     @app.get("/api/bench/runs")
     def bench_list(
@@ -634,6 +680,7 @@ def build_app(
                 timeout_s=body.timeout_s,
                 api=body.api,
                 slo=slo_obj,
+                prompt_source=body.prompt_source,
             )
             scenario.validate()
         except (ValueError, TypeError) as e:
