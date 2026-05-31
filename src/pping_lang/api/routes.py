@@ -57,6 +57,68 @@ def _percentile(values: list[float], q: float) -> float | None:
     return s[lo] + (s[hi] - s[lo]) * (rank - lo)
 
 
+def _extract_arch(vllm_config: Any) -> dict[str, Any] | None:
+    """Pull transformer arch knobs out of vllm_config.model_config.hf_config.
+
+    Returns the fields we need to estimate parameter count + per-step
+    FLOPS/bytes when vllm doesn't emit perf_stats (i.e. <0.20). None if any
+    required field is missing — caller falls back to "no data" UI.
+    """
+    if vllm_config is None:
+        return None
+    mc = getattr(vllm_config, "model_config", None)
+    if mc is None:
+        return None
+    hf = getattr(mc, "hf_text_config", None) or getattr(mc, "hf_config", None)
+    if hf is None:
+        return None
+    needed = ("hidden_size", "num_hidden_layers", "intermediate_size",
+              "num_attention_heads", "vocab_size")
+    out: dict[str, Any] = {}
+    for k in needed:
+        v = getattr(hf, k, None)
+        if v is None:
+            return None
+        out[k] = int(v)
+    out["num_key_value_heads"] = int(getattr(hf, "num_key_value_heads", None)
+                                     or out["num_attention_heads"])
+    out["tie_word_embeddings"] = bool(getattr(hf, "tie_word_embeddings", False))
+    out["torch_dtype"] = str(getattr(hf, "torch_dtype", "bfloat16"))
+    return out
+
+
+def _estimate_params(arch: dict[str, Any]) -> int:
+    """Sum of weights for a standard decoder-only transformer (Llama/Qwen family).
+
+    Formula per layer:
+      attention = 2·h² + 2·h·Hkv·head_dim   (Q, O + K, V under GQA)
+      mlp       = 3·h·i                      (gate + up + down, SwiGLU)
+      norms     = 2·h
+    Plus embedding (tied = counted once) and final norm. Off by a few %
+    against the model card's "0.5B / 7B / 70B" round numbers — enough for
+    roofline scale.
+    """
+    h   = arch["hidden_size"]
+    L   = arch["num_hidden_layers"]
+    i   = arch["intermediate_size"]
+    H   = arch["num_attention_heads"]
+    Hkv = arch["num_key_value_heads"]
+    V   = arch["vocab_size"]
+    head_dim = h // H
+    per_layer = 2 * h * h + 2 * h * Hkv * head_dim + 3 * h * i + 2 * h
+    total = L * per_layer + V * h + h
+    if not arch["tie_word_embeddings"]:
+        total += V * h
+    return total
+
+
+# fp16/bf16 = 2 bytes; fp32 = 4. vLLM serves fp16/bf16 by default.
+_DTYPE_BYTES: dict[str, int] = {
+    "float16": 2, "bfloat16": 2, "torch.float16": 2, "torch.bfloat16": 2,
+    "float32": 4, "torch.float32": 4,
+}
+
+
 def _summary(values: list[float]) -> dict[str, float | int | None]:
     """{p50, p95, p99, avg, n} — one pass for the dashboard latency cards.
 
@@ -432,25 +494,41 @@ def build_app(
             "e2e_ms": e2e,
         }
 
+    # Precompute arch/params once at app-build time — vllm_config is immutable
+    # for the lifetime of the process.
+    _arch = _extract_arch(vllm_config)
+    _params = _estimate_params(_arch) if _arch else None
+    _dtype_b = _DTYPE_BYTES.get(_arch["torch_dtype"], 2) if _arch else 2
+
     # === GET /api/roofline — live Roofline scatter (points + peak roofs) ===
+    # Two data sources, chosen at request time:
+    #   "measured"   — direct from vllm perf_stats (flops/read_bytes/write_bytes),
+    #                   only available on vllm >=0.20. Each point is what the
+    #                   engine actually saw.
+    #   "analytical" — estimated from iter token counts + model parameter count:
+    #                   FLOPS ≈ 2 · params · tokens   (Kaplan/Chinchilla form)
+    #                   Bytes ≈ 2 · params · dtype_bytes   (weight re-read per
+    #                                                       fwd; KV ignored)
+    #                   AI    ≈ tokens / dtype_bytes
+    #                   So decode (tokens=1) sits at AI≈0.5 (memory-bound);
+    #                   prefill (tokens=N) at AI≈N/2 (compute-bound for large N).
+    #                   Always computable, even on old vllm. Reported as
+    #                   "estimate" in the response so the UI can flag it.
     @app.get("/api/roofline")
     def roofline(
         seconds: int = Query(60, ge=5, le=3600),
     ) -> dict[str, Any]:
-        # ≤60s: join flops + read_bytes + write_bytes by ts_ns from the live
-        # ring buffers in memory. They're pushed by the same collector at the
-        # same ts so timestamps line up exactly.
-        # >60s: fall back to DuckDB scan.
+        points: list[dict[str, Any]] = []
+        data_source = "measured"
+        formula: str | None = None
+
+        # First try the direct measured path.
         if seconds <= 60:
-            # Join flops + read_bytes + write_bytes by ts_ns from the live
-            # ring buffers. Collector pushes all three at the same monotonic_ns
-            # so they line up exactly. Same shape as report.analysis.roofline_data.
             flops_pts = sink.recent(M.VLLM_PERF_FLOPS_PER_GPU, seconds)
             read_pts = {ts: v for v, ts in sink.recent(M.VLLM_PERF_READ_BYTES_PER_GPU, seconds)}
             write_pts = {ts: v for v, ts in sink.recent(M.VLLM_PERF_WRITE_BYTES_PER_GPU, seconds)}
-            points = []
             last_ts: int | None = None
-            for flops_v, ts in flops_pts:  # already in chronological order
+            for flops_v, ts in flops_pts:
                 read_b = read_pts.get(ts)
                 if read_b is None:
                     continue
@@ -478,6 +556,36 @@ def build_app(
             finally:
                 conn.close()
 
+        # Fallback: vllm <0.20 doesn't emit perf_stats. Estimate from token
+        # counts + model architecture.
+        if not points and _params:
+            data_source = "analytical"
+            formula = (
+                f"FLOPS≈2·params·tokens, Bytes≈2·params·{_dtype_b} "
+                f"(params={_params/1e9:.2f}B, dtype={_arch['torch_dtype']})"
+            )
+            gen_pts = sink.recent(M.VLLM_ITER_GEN_TOKENS, seconds)
+            prompt_pts = {ts: v for v, ts in sink.recent(M.VLLM_ITER_PROMPT_TOKENS, seconds)}
+            last_ts = None
+            bytes_per_step = 2 * _params * _dtype_b  # weights re-read once / fwd
+            for gen_v, ts in gen_pts:
+                tokens = gen_v + prompt_pts.get(ts, 0.0)
+                if tokens <= 0:
+                    continue
+                if last_ts is None:
+                    last_ts = ts
+                    continue
+                dt_s = (ts - last_ts) / 1e9
+                last_ts = ts
+                if dt_s <= 0:
+                    continue
+                flops = 2.0 * _params * tokens
+                points.append({
+                    "ai": flops / bytes_per_step,
+                    "throughput_tflops": flops / dt_s / 1e12,
+                    "ts_ns": ts,
+                })
+
         # Peak from gpu_peak param, or fall back to env (demo)
         peak: dict[str, float] | None = None
         if gpu_peak is not None:
@@ -497,7 +605,14 @@ def build_app(
                 except ValueError:
                     peak = None
 
-        return {"seconds": seconds, "points": points, "peak": peak}
+        return {
+            "seconds": seconds,
+            "points": points,
+            "peak": peak,
+            "data_source": data_source,        # "measured" | "analytical"
+            "formula": formula,                # analytical only — explanation string
+            "params_billion": (_params / 1e9) if _params else None,
+        }
 
     # === GET /api/diagnoses ===
     @app.get("/api/diagnoses")

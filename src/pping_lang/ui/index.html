@@ -1920,6 +1920,12 @@
             <div style="margin-top: 4px; font-size: 11.5px; color: var(--muted-2);">
               每个点 = 一个 step · 看离上界还有多远，判断 compute-bound 还是 memory-bound
             </div>
+            <div x-show="rooflineSource === 'analytical'"
+                 style="margin-top: 6px; padding: 6px 10px; background: rgba(217, 119, 6, 0.08); border-left: 3px solid var(--amber); border-radius: 3px; font-size: 11px; color: var(--text);"
+                 :title="rooflineFormula">
+              ⚠ 估算数据 · 当前 vllm 不发 perf_stats，按 token 计数 + 模型参数推算（<span x-text="rooflineParamsB"></span>B 参数）。
+              <span style="color: var(--muted-2);">点形状对，绝对值有误差；升 vllm ≥0.20 自动切回实测。</span>
+            </div>
           </div>
           <div style="display: flex; gap: 14px; align-items: center; flex-wrap: wrap;">
             <span style="display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--muted);">
@@ -2830,6 +2836,9 @@ function dashboard() {
     },
     gpu_util_pct: 0,
     tpotSource: 'tpot',
+    rooflineSource: 'measured',
+    rooflineFormula: '',
+    rooflineParamsB: '0',
     ttftHasData: false,
     tpotHasData: false,
     e2eHasData: false,
@@ -2957,6 +2966,12 @@ function dashboard() {
 
     updateRoofline(data) {
       if (!_chart) return;
+      // Surface which path produced the points, plus the formula tooltip
+      this.rooflineSource = data.data_source || 'measured';
+      this.rooflineFormula = data.formula || '';
+      this.rooflineParamsB = data.params_billion != null
+        ? Number(data.params_billion).toFixed(2)
+        : '?';
       // Sample points
       const points = (data.points || []).map(p => ({
         x: p.ai,
