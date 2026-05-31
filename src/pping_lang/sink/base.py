@@ -13,6 +13,20 @@ Backpressure (Day 17 / real-vllm WSL实测):
     reaches `flush_wakeup_threshold`; flush thread waits on either timeout
     OR signal. Drains more responsively without raising hot-path cost.
 
+Dual-path read model (Day 18 / "实时" tab 延迟整改):
+    Persistence (DuckDB) and live dashboard reads are now decoupled. The
+    persistence path stays: push → deque → bg flush → _flush(...) → storage,
+    used for archival/historical queries (>60s windows, diagnoses replay,
+    HTML reports).
+
+    Live path: push_metric ALSO updates two in-memory structures —
+      _latest: name → (value, ts_ns)    last seen, dict overwrite, O(1)
+      _recent: name → ring buffer       bounded ts-stamped points, O(1) append
+    API handlers serving the realtime KPI marquee / 60s windows read these
+    directly via .latest() / .recent(), bypassing DuckDB entirely. Cost:
+    ~6MB RAM for 30 metrics × 2000 points; zero I/O on the read path;
+    dashboard latency = HTTP poll interval (1–2s), not flush+checkpoint+SQL.
+
 All flushing happens on a daemon background thread that wakes every
 flush_interval_s seconds OR on backpressure signal, and calls
 _flush(metrics, diags). Subclasses implement _flush only.
@@ -23,8 +37,9 @@ to vLLM (design §3.1: any bug must not bring down vLLM).
 from __future__ import annotations
 
 import logging
+import time
 from abc import ABC, abstractmethod
-from collections import deque
+from collections import defaultdict, deque
 from threading import Event, Thread
 from typing import Final
 
@@ -40,6 +55,12 @@ DEFAULT_FLUSH_INTERVAL_S: Final = 5.0
 # When queue is at this fraction of capacity, push side wakes the flush thread
 # early (don't wait for the interval). Lower → more responsive but more wakeups.
 DEFAULT_BACKPRESSURE_THRESHOLD: Final = 0.5
+# Per-metric ring buffer for the live read path. 2000 points covers:
+#   - NVML at 10 Hz → 200 s of history
+#   - vLLM scheduler at 100 Hz → 20 s of history
+# Both wider than the 60 s KPI window, so KPI quantiles see enough data
+# even under heavy load. Memory: ~30 metrics × 2000 × 24 B ≈ 1.5 MB.
+DEFAULT_LIVE_RING_SIZE: Final = 2000
 
 
 class Sink(ABC):
@@ -51,12 +72,21 @@ class Sink(ABC):
         diag_queue_size: int = DEFAULT_DIAG_QUEUE_SIZE,
         flush_interval_s: float = DEFAULT_FLUSH_INTERVAL_S,
         backpressure_threshold: float = DEFAULT_BACKPRESSURE_THRESHOLD,
+        live_ring_size: int = DEFAULT_LIVE_RING_SIZE,
     ) -> None:
         self._metric_q: deque[MetricPoint] = deque(maxlen=queue_size)
         self._diag_q: deque[Diagnosis] = deque(maxlen=diag_queue_size)
         self._flush_interval = flush_interval_s
         # Backpressure: wake the flush thread early when queue passes this mark
         self._flush_wakeup_threshold = max(1, int(queue_size * backpressure_threshold))
+        # Live read path (see module docstring) — read by API handlers, NEVER
+        # touched on bg flush. Single writer (push_metric) + many readers; all
+        # ops are GIL-atomic so no lock needed.
+        self._live_ring_size = live_ring_size
+        self._latest: dict[str, tuple[float, int]] = {}
+        self._recent: dict[str, deque[tuple[float, int]]] = defaultdict(
+            lambda: deque(maxlen=self._live_ring_size)
+        )
         self._wake = Event()
         self._stop = Event()
         self._dropped_metrics = 0
@@ -77,10 +107,36 @@ class Sink(ABC):
         if len(q) == q.maxlen:
             self._dropped_metrics += 1
         q.append(p)
+        # Live read path — dict assign + deque append are both GIL-atomic.
+        # `_recent[name]` triggers defaultdict factory on first push; cheap
+        # one-time cost per new metric name.
+        self._latest[p.name] = (p.value, p.ts_ns)
+        self._recent[p.name].append((p.value, p.ts_ns))
         # Backpressure: nudge flush thread early when queue is filling up.
         # Event.set() is O(1) and idempotent — safe to call every push.
         if len(q) >= self._flush_wakeup_threshold:
             self._wake.set()
+
+    # === Live read API (for dashboard hot path; no DuckDB) ===
+
+    def latest(self, name: str) -> tuple[float, int] | None:
+        """Last (value, ts_ns) pushed for `name`, or None if never seen."""
+        return self._latest.get(name)
+
+    def recent(self, name: str, seconds: float) -> list[tuple[float, int]]:
+        """Points pushed for `name` within the last `seconds`, oldest first.
+
+        Returns at most `live_ring_size` points (= ring buffer capacity); if
+        the actual rate is higher, callers see only the most recent ones.
+        For windows >60s use a DuckDB-backed query, the ring isn't sized for it.
+        """
+        dq = self._recent.get(name)
+        if not dq:
+            return []
+        cutoff_ns = time.monotonic_ns() - int(seconds * 1e9)
+        # list(dq) snapshots under GIL; iterating the snapshot is safe even if
+        # writer appends concurrently. Items older than cutoff are filtered out.
+        return [(v, t) for v, t in list(dq) if t >= cutoff_ns]
 
     def push_diagnosis(self, d: Diagnosis) -> None:
         if len(self._diag_q) == self._diag_q.maxlen:

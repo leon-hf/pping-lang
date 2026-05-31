@@ -42,6 +42,20 @@ from pping_lang.rules.schema import Condition, Rule
 
 _UI_INDEX = Path(__file__).parent.parent / "ui" / "index.html"
 
+
+def _percentile(values: list[float], q: float) -> float | None:
+    """Sorted-list linear-interpolation percentile. q in [0, 1]. None if empty."""
+    n = len(values)
+    if n == 0:
+        return None
+    if n == 1:
+        return values[0]
+    s = sorted(values)
+    rank = q * (n - 1)
+    lo = int(rank)
+    hi = min(lo + 1, n - 1)
+    return s[lo] + (s[hi] - s[lo]) * (rank - lo)
+
 _BUILTIN_DESCRIPTIONS: dict[str, str] = {
     "mixed-short": "短问答 + 闲聊 + 简单指令（每条 50–180 tokens）",
     "mixed-long":  "长上下文：文档摘要 / 长指令 / 转录稿（每条 1000–3000 tokens）",
@@ -220,6 +234,16 @@ def build_app(
     ) -> dict[str, Any]:
         if name not in ALLOWED_METRICS:
             raise HTTPException(422, f"unknown metric {name!r}")
+        # Short-window reads (the dashboard's poll path) go straight to the
+        # in-memory ring buffer — no DuckDB roundtrip, no checkpoint wait.
+        # Long-window reads still go to DuckDB since the ring isn't sized for it.
+        if seconds <= 60:
+            ring = sink.recent(name, seconds)
+            points = [
+                {"ts_ns": ts, "value": v, "engine_idx": 0, "gpu_idx": -1}
+                for v, ts in ring[-limit:]
+            ]
+            return {"name": name, "seconds": seconds, "points": points}
         since_ns = time.monotonic_ns() - int(seconds * 1e9)
         conn = open_conn(db_path)
         try:
@@ -232,63 +256,56 @@ def build_app(
         return {"name": name, "seconds": seconds, "points": points}
 
     # === GET /api/metrics/snapshot ===
+    # "Latest value per metric within window" — live read path, in-memory.
     @app.get("/api/metrics/snapshot")
     def metrics_snapshot(
         seconds: int = Query(30, ge=1, le=3600),
     ) -> dict[str, Any]:
-        since_ns = time.monotonic_ns() - int(seconds * 1e9)
-        conn = open_conn(db_path)
-        try:
-            try:
-                latest = latest_per_metric(conn, since_ns)
-            except Exception:
-                latest = {}
-        finally:
-            conn.close()
+        cutoff_ns = time.monotonic_ns() - int(seconds * 1e9)
+        latest: dict[str, dict[str, Any]] = {}
+        for name in ALLOWED_METRICS:
+            row = sink.latest(name)
+            if row is None:
+                continue
+            value, ts_ns = row
+            if ts_ns >= cutoff_ns:
+                latest[name] = {
+                    "value": value, "ts_ns": ts_ns,
+                    "engine_idx": 0, "gpu_idx": -1,
+                }
         return {"window_seconds": seconds, "metrics": latest}
 
     # === GET /api/kpis — curated KPI bundle for dashboard (one round-trip) ===
+    # Live read path: ALL data comes from Sink's in-memory ring buffers, no
+    # DuckDB roundtrip, no checkpoint dance. Latency = push→memory (<1μs),
+    # so the dashboard sees a metric within one poll interval of arrival.
     @app.get("/api/kpis")
     def kpis(
         window: int = Query(60, ge=5, le=3600, description="Aggregation window (s)"),
     ) -> dict[str, Any]:
-        since_ns = time.monotonic_ns() - int(window * 1e9)
-        conn = open_conn(db_path)
-        try:
-            try:
-                latest = latest_per_metric(conn, since_ns)
-            except Exception:
-                latest = {}
+        def latest_val(name: str) -> float | None:
+            row = sink.latest(name)
+            return row[0] if row else None
 
-            def latest_val(name: str) -> float | None:
-                row = latest.get(name)
-                return row["value"] if row else None
+        def values_in_window(name: str) -> list[float]:
+            return [v for v, _ts in sink.recent(name, window)]
 
-            def agg(name: str, op: str) -> float | None:
-                try:
-                    return aggregate_metric(conn, name, since_ns, op)
-                except Exception:
-                    return None
+        # TTFT — per-iter percentile over the window
+        ttft = values_in_window(M.VLLM_REQ_TTFT_MS)
+        ttft_p50 = _percentile(ttft, 0.50)
+        ttft_p99 = _percentile(ttft, 0.99)
 
-            # TTFT (always per-iter list, p50/p99 over window)
-            ttft_p50 = agg(M.VLLM_REQ_TTFT_MS, "p50")
-            ttft_p99 = agg(M.VLLM_REQ_TTFT_MS, "p99")
+        # TPOT preferred, fall back to ITL when the model never emits TPOT
+        tpot = values_in_window(M.VLLM_REQ_TPOT_MS) or values_in_window(M.VLLM_REQ_ITL_MS)
+        tpot_p50 = _percentile(tpot, 0.50)
+        tpot_p99 = _percentile(tpot, 0.99)
 
-            # TPOT preferred (per-finished-request), fall back to ITL (per-iter)
-            tpot_p50 = agg(M.VLLM_REQ_TPOT_MS, "p50") or agg(M.VLLM_REQ_ITL_MS, "p50")
-            tpot_p99 = agg(M.VLLM_REQ_TPOT_MS, "p99") or agg(M.VLLM_REQ_ITL_MS, "p99")
+        # Output throughput: sum gen tokens / window seconds
+        gen_vals = values_in_window(M.VLLM_ITER_GEN_TOKENS)
+        output_tps = (sum(gen_vals) / window) if gen_vals else None
 
-            # Output throughput: sum gen tokens / window seconds
-            gen_sum = agg(M.VLLM_ITER_GEN_TOKENS, "sum")
-            output_tps = (gen_sum / window) if gen_sum is not None else None
-
-            # Preemption rate per minute
-            preempt_sum = agg(M.VLLM_ITER_PREEMPTED_REQS, "sum")
-            preempt_per_min = (
-                preempt_sum * 60.0 / window if preempt_sum is not None else None
-            )
-        finally:
-            conn.close()
+        preempt_vals = values_in_window(M.VLLM_ITER_PREEMPTED_REQS)
+        preempt_per_min = (sum(preempt_vals) * 60.0 / window) if preempt_vals else None
 
         return {
             "window_seconds": window,
@@ -347,15 +364,46 @@ def build_app(
     def roofline(
         seconds: int = Query(60, ge=5, le=3600),
     ) -> dict[str, Any]:
-        since_ns = time.monotonic_ns() - int(seconds * 1e9)
-        conn = open_conn(db_path)
-        try:
+        # ≤60s: join flops + read_bytes + write_bytes by ts_ns from the live
+        # ring buffers in memory. They're pushed by the same collector at the
+        # same ts so timestamps line up exactly.
+        # >60s: fall back to DuckDB scan.
+        if seconds <= 60:
+            # Join flops + read_bytes + write_bytes by ts_ns from the live
+            # ring buffers. Collector pushes all three at the same monotonic_ns
+            # so they line up exactly. Same shape as report.analysis.roofline_data.
+            flops_pts = sink.recent(M.VLLM_PERF_FLOPS_PER_GPU, seconds)
+            read_pts = {ts: v for v, ts in sink.recent(M.VLLM_PERF_READ_BYTES_PER_GPU, seconds)}
+            write_pts = {ts: v for v, ts in sink.recent(M.VLLM_PERF_WRITE_BYTES_PER_GPU, seconds)}
+            points = []
+            last_ts: int | None = None
+            for flops_v, ts in flops_pts:  # already in chronological order
+                read_b = read_pts.get(ts)
+                if read_b is None:
+                    continue
+                total_b = read_b + write_pts.get(ts, 0.0)
+                if last_ts is None:
+                    last_ts = ts
+                    continue
+                dt_s = (ts - last_ts) / 1e9
+                last_ts = ts
+                if dt_s <= 0 or total_b <= 0 or flops_v <= 0:
+                    continue
+                points.append({
+                    "ai": flops_v / total_b,
+                    "throughput_tflops": flops_v / dt_s / 1e12,
+                    "ts_ns": ts,
+                })
+        else:
+            since_ns = time.monotonic_ns() - int(seconds * 1e9)
+            conn = open_conn(db_path)
             try:
-                points = roofline_data(conn, since_ns)
-            except Exception:
-                points = []
-        finally:
-            conn.close()
+                try:
+                    points = roofline_data(conn, since_ns)
+                except Exception:
+                    points = []
+            finally:
+                conn.close()
 
         # Peak from gpu_peak param, or fall back to env (demo)
         peak: dict[str, float] | None = None

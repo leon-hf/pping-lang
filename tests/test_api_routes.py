@@ -39,7 +39,14 @@ def empty_app(tmp_path):
 
 @pytest.fixture
 def app_with_data(tmp_path):
-    """DB pre-populated with metrics + diagnoses for richer endpoint tests."""
+    """DB + in-memory sink state both pre-populated for endpoint tests.
+
+    Day 18 dual-path note: the realtime endpoints (kpis/snapshot/recent ≤60s,
+    roofline) read from Sink.latest() / Sink.recent() — in-memory ring
+    buffers — so we MUST push test data through the same sink instance the
+    app receives. The DuckDB file gets populated as a side effect of bg flush
+    so the long-window endpoints (latency_trends, diagnoses_history) work too.
+    """
     db = tmp_path / "api.duckdb"
     sink = LocalSink(db_path=db, instance_id="test-inst", flush_interval_s=10.0)
     base = time.monotonic_ns()
@@ -50,11 +57,9 @@ def app_with_data(tmp_path):
             name=M.GPU_UTIL_PCT, value=30.0 + i * 0.5,
             engine_idx=0, gpu_idx=0,
         ))
-    # A different metric
     sink.push_metric(MetricPoint(
         ts_ns=base, name=M.VLLM_SCHEDULER_KV_CACHE_USAGE_RATIO, value=0.45,
     ))
-    # A diagnosis
     sink.push_diagnosis(Diagnosis(
         ts_ns=base, rule_id="low-gpu-util", severity="warning",
         triggered_value=34.0, threshold=50.0, window_seconds=30,
@@ -62,17 +67,18 @@ def app_with_data(tmp_path):
         suggestion="检查 batch 是否退化为 1",
         engine_idx=0,
     ))
-    sink.close()
-    sink2 = LocalSink(db_path=db, instance_id="test-inst", flush_interval_s=10.0)
+    # Force a flush so the DuckDB file has the data for long-window queries.
+    # Sink stays open — app reads its in-memory state for short-window queries.
+    sink._drain()
     app = build_app(
         db_path=str(db),
         instance_id="test-inst",
         engine_index=0,
-        sink=sink2,
+        sink=sink,
         rule_store=RuleStore(),
     )
-    yield TestClient(app), db, sink2
-    sink2.close()
+    yield TestClient(app), db, sink
+    sink.close()
 
 
 def test_health_returns_ok(empty_app):
