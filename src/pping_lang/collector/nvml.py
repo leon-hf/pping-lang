@@ -134,6 +134,15 @@ class NvmlSampler:
 
         mem = nvml.nvmlDeviceGetMemoryInfo(handle)
         push(MetricPoint(ts, M.GPU_MEM_USED_BYTES, float(mem.used), ei, gpu_idx))
+        # Capacity occupancy as a derived ratio so the dashboard doesn't have
+        # to remember total VRAM. mem.total is fixed per-device — read at
+        # every sample is cheap and means the metric is self-contained.
+        if mem.total > 0:
+            push(MetricPoint(
+                ts, M.GPU_MEM_USED_PCT,
+                100.0 * float(mem.used) / float(mem.total),
+                ei, gpu_idx,
+            ))
 
         power_mw = nvml.nvmlDeviceGetPowerUsage(handle)
         push(MetricPoint(ts, M.GPU_POWER_W, power_mw / 1000.0, ei, gpu_idx))

@@ -14,6 +14,7 @@ class M:
     GPU_UTIL_PCT = "gpu.utilization_pct"
     GPU_MEM_UTIL_PCT = "gpu.mem_util_pct"
     GPU_MEM_USED_BYTES = "gpu.mem_used_bytes"
+    GPU_MEM_USED_PCT = "gpu.mem_used_pct"
     GPU_POWER_W = "gpu.power_w"
     GPU_TEMP_C = "gpu.temp_c"
     GPU_SM_CLOCK_MHZ = "gpu.sm_clock_mhz"

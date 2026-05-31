@@ -1924,19 +1924,53 @@
       </div>
 
       <div class="kpis">
-        <div class="kpi teal" :class="{ warn: kpis.mfu > 0 && kpis.mfu < 0.2 }">
-          <div class="label">MFU</div>
+        <div class="kpi teal" :class="{ warn: kpis.mfu > 0 && kpis.mfu < 0.2 }"
+             title="MFU = Model FLOPs Utilization
+实际算力 / GPU 峰值算力，衡量「跑模型时 GPU 算力真正被用了多少」。
+公式：MFU = (6 · params · tokens/sec) / peak_TFLOPS
+解读：
+  · 训练通常 30-55% 算良好（A100/H100 上）
+  · 推理 decode 阶段天然低（~1-5%）—— 受带宽限制，不是 MFU 越高越好
+  · prefill 阶段高（>30%）才是 MFU 真正有意义的时候
+依赖 vllm ≥0.20 的 perf_stats，当前 0.13 不发，这里会显示 —">
+          <div class="label">MFU <span class="kpi-sub-label">算力利用率</span></div>
           <div class="value"><span x-text="fmt(kpis.mfu * 100, 0)"></span><span class="unit">%</span></div>
         </div>
-        <div class="kpi sage" :class="{ warn: kpis.prefix_cache_hit !== null && kpis.prefix_cache_hit < 0.1 }">
+        <div class="kpi indigo" :class="{ warn: kpis.gpu_util !== null && kpis.gpu_util < 30 }"
+             title="GPU 利用率 = SM (Streaming Multiprocessor) 忙碌时间占比
+NVML 报的值，反映「过去采样间隔内，至少一个 kernel 在跑」的时间比例。
+注意：不代表算力用满了 —— decode 阶段常见 70-90% 但 MFU 只有 1-5%，
+因为 SM 在「跑 kernel 等数据」也算忙。
+真正衡量算力效率要看 MFU。">
+          <div class="label">GPU 利用率 <span class="kpi-sub-label">SM 忙碌</span></div>
+          <div class="value"><span x-text="fmt(kpis.gpu_util, 0)"></span><span class="unit">%</span></div>
+        </div>
+        <div class="kpi rose" :class="{ warn: kpis.gpu_mem_used_pct > 85 && kpis.gpu_mem_used_pct <= 95, crit: kpis.gpu_mem_used_pct > 95 }"
+             title="显存占用率 = 已用 VRAM / 总 VRAM
+权重 + KV cache + 激活值 + CUDA workspace 之和。
+vllm 启动时 --gpu-memory-utilization 决定权重+KV的目标占比（默认 0.9）。
+持续 >95% 容易触发 preemption / OOM。">
+          <div class="label">显存占用 <span class="kpi-sub-label">VRAM 容量</span></div>
+          <div class="value"><span x-text="fmt(kpis.gpu_mem_used_pct, 0)"></span><span class="unit">%</span></div>
+        </div>
+        <div class="kpi sage" :class="{ warn: kpis.prefix_cache_hit !== null && kpis.prefix_cache_hit < 0.1 }"
+             title="Prefix cache 命中率 = 复用前缀的 KV 块 / 总查询块
+vllm 会缓存已经算过的 prompt 前缀的 KV，下次请求命中前缀可以跳过 prefill。
+多轮对话 / system prompt 固定的场景应该 >50%；一次性请求自然为 0。">
           <div class="label">Prefix cache 命中</div>
           <div class="value"><span x-text="fmt(kpis.prefix_cache_hit * 100, 0)"></span><span class="unit">%</span></div>
         </div>
-        <div class="kpi amber" :class="{ warn: kpis.padding_ratio > 0.3 }">
+        <div class="kpi amber" :class="{ warn: kpis.padding_ratio > 0.3 }"
+             title="CUDA padding = (cudagraph 实际批量 - 真实 token) / cudagraph 批量
+vllm 用 CUDA graph 加速时按固定 batch size 跑，少的 token 用 padding 填。
+padding 越高浪费越大。>30% 说明 batch 大小档位选得不合适。">
           <div class="label">CUDA padding</div>
           <div class="value"><span x-text="fmt(kpis.padding_ratio * 100, 0)"></span><span class="unit">%</span></div>
         </div>
-        <div class="kpi rose" :class="{ warn: kpis.preempt_per_min > 0 && kpis.preempt_per_min <= 5, crit: kpis.preempt_per_min > 5 }">
+        <div class="kpi coral" :class="{ warn: kpis.preempt_per_min > 0 && kpis.preempt_per_min <= 5, crit: kpis.preempt_per_min > 5 }"
+             title="抢占 / 分钟 = 每分钟有多少请求被 swap out
+KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来。
+>0 说明显存紧张，>5/min 是明显信号 — 应当减小 max_num_seqs 或扩 VRAM。">
           <div class="label">抢占 / 分钟</div>
           <div class="value" x-text="fmt(kpis.preempt_per_min, 1)"></div>
         </div>
@@ -2969,7 +3003,7 @@ function dashboard() {
       running_reqs: null, waiting_reqs: null,
       mfu: null, prefix_cache_hit: null,
       padding_ratio: null, preempt_per_min: null,
-      gpu_util: null,
+      gpu_util: null, gpu_mem_used_pct: null, gpu_mem_bw_pct: null,
     },
     gpu_util_pct: 0,
     tpotSource: 'tpot',

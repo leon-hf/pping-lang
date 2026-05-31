@@ -420,6 +420,8 @@ def build_app(
                 "prefix_cache_hit": latest_val(M.VLLM_SCHEDULER_PREFIX_CACHE_HIT_RATIO),
                 "preempt_per_min": preempt_per_min,
                 "gpu_util": latest_val(M.GPU_UTIL_PCT),
+                "gpu_mem_used_pct": latest_val(M.GPU_MEM_USED_PCT),
+                "gpu_mem_bw_pct": latest_val(M.GPU_MEM_UTIL_PCT),
             },
         }
 
