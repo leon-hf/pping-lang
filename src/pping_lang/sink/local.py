@@ -81,6 +81,8 @@ class LocalSink(Sink):
         self._db_path = str(db_path)
         self._instance_id = instance_id
         self._conn: duckdb.DuckDBPyConnection | None = None
+        self._checkpoint_ok = 0
+        self._checkpoint_skipped = 0
         # Bootstrap schema BEFORE super().__init__ starts the bg flush thread
         # and BEFORE RuleEngine spins up. Without this, LocalSink and RuleEngine
         # both race to CREATE TABLE IF NOT EXISTS on first use → DuckDB throws
@@ -139,6 +141,22 @@ class LocalSink(Sink):
                     for d in diags
                 ],
             )
+        # CHECKPOINT so fresh API-handler connections (one per request) see the
+        # writes. Default DuckDB auto-checkpoint waits for WAL > 16MB, which at
+        # our flush rate means minutes of dashboard staleness. With the schema
+        # race fixed (writer conn healthy), plain CHECKPOINT — not FORCE —
+        # works reliably; if the rule-engine reader briefly holds a conflicting
+        # snapshot, DuckDB raises and we swallow it (next tick gets it).
+        # FORCE — not plain CHECKPOINT — because the rule-engine reader holds
+        # a long-lived conn in the same process. Plain CHECKPOINT bails out
+        # silently when it sees a possible reader snapshot, leaving the WAL
+        # to grow until 16MB auto-checkpoint (= minutes of dashboard lag).
+        # FORCE waits for the reader (queries are <100ms) and goes through.
+        try:
+            conn.execute("FORCE CHECKPOINT")
+            self._checkpoint_ok += 1
+        except Exception:
+            self._checkpoint_skipped += 1
 
     def close(self) -> None:
         super().close()
