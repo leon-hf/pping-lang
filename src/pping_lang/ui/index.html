@@ -574,6 +574,82 @@
   }
   .kpi .sub-line span { color: var(--text); font-weight: 600; }
 
+  /* === Roofline plain-language verdict === */
+  .roofline-verdict {
+    margin-top: 18px;
+    padding: 16px 18px;
+    background: var(--surface-2);
+    border-radius: 8px;
+    border-left: 3px solid var(--indigo);
+  }
+  .roofline-verdict.cmp { border-left-color: var(--coral); }
+  .roofline-verdict.empty {
+    color: var(--muted-2);
+    font-size: 12.5px;
+    border-left-color: var(--muted-3, #ddd);
+    text-align: center;
+  }
+  .rv-headline {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+  .rv-tag {
+    font-size: 11px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .rv-text {
+    font-size: 15.5px;
+    font-weight: 600;
+    color: var(--text-strong);
+    letter-spacing: -0.01em;
+  }
+  .rv-bars { display: grid; gap: 8px; margin-bottom: 14px; }
+  .rv-bar-row {
+    display: grid;
+    grid-template-columns: 70px 1fr auto;
+    align-items: center;
+    gap: 10px;
+    font-size: 12px;
+  }
+  .rv-bar-label { color: var(--muted); font-weight: 500; }
+  .rv-bar-track {
+    height: 7px;
+    background: rgba(0, 0, 0, 0.06);
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  .rv-bar-fill { height: 100%; border-radius: 4px; transition: width 0.4s; }
+  .rv-bar-compute { background: var(--coral); }
+  .rv-bar-memory { background: var(--indigo); }
+  .rv-bar-val { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .rv-bar-detail { color: var(--muted-2); font-weight: 400; font-size: 11px; }
+  .rv-suggest-title {
+    font-size: 11px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 6px;
+  }
+  .rv-suggest ul {
+    margin: 0;
+    padding-left: 18px;
+    font-size: 12.5px;
+    color: var(--text);
+    line-height: 1.7;
+  }
+  .rv-foot {
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px dashed rgba(0, 0, 0, 0.08);
+    font-size: 11px;
+    color: var(--muted-2);
+    font-variant-numeric: tabular-nums;
+  }
+
   /* === Latency trends (mini charts) === */
   .latency-trends {
     display: grid;
@@ -1943,6 +2019,67 @@
           </div>
         </div>
         <div class="chart-wrap" style="height: 300px;"><canvas id="gpu-chart"></canvas></div>
+
+        <!-- Plain-language interpretation of the chart -->
+        <template x-if="rooflineVerdict">
+          <div class="roofline-verdict" :class="rooflineVerdict.bound === 'memory' ? 'mem' : 'cmp'">
+            <div class="rv-headline">
+              <span class="rv-tag" x-text="rooflineVerdict.bound === 'memory' ? '当前结论' : '当前结论'"></span>
+              <span class="rv-text" x-text="rooflineVerdict.headline"></span>
+            </div>
+            <div class="rv-bars">
+              <div class="rv-bar-row">
+                <span class="rv-bar-label">算力利用</span>
+                <div class="rv-bar-track">
+                  <div class="rv-bar-fill rv-bar-compute"
+                       :style="`width: ${Math.min(100, rooflineVerdict.computeUtil * 100).toFixed(1)}%`"></div>
+                </div>
+                <span class="rv-bar-val">
+                  <span x-text="(rooflineVerdict.computeUtil * 100).toFixed(0)"></span>%
+                  <span class="rv-bar-detail">
+                    （<span x-text="fmt(rooflineVerdict.medTput, 2)"></span>
+                    / <span x-text="fmt(rooflineVerdict.peakC, 0)"></span> TFLOPS）
+                  </span>
+                </span>
+              </div>
+              <div class="rv-bar-row">
+                <span class="rv-bar-label">带宽利用</span>
+                <div class="rv-bar-track">
+                  <div class="rv-bar-fill rv-bar-memory"
+                       :style="`width: ${Math.min(100, rooflineVerdict.bwUtil * 100).toFixed(1)}%`"></div>
+                </div>
+                <span class="rv-bar-val">
+                  <span x-text="(rooflineVerdict.bwUtil * 100).toFixed(0)"></span>%
+                  <span class="rv-bar-detail">
+                    （<span x-text="fmt(rooflineVerdict.medTput / rooflineVerdict.medAI * 1000, 0)"></span>
+                    / <span x-text="(rooflineVerdict.peakBW * 1000).toFixed(0)"></span> GB/s）
+                  </span>
+                </span>
+              </div>
+            </div>
+            <div class="rv-suggest">
+              <div class="rv-suggest-title">提速方向</div>
+              <ul>
+                <template x-for="(s, i) in rooflineVerdict.suggestions" :key="i">
+                  <li x-text="s"></li>
+                </template>
+              </ul>
+            </div>
+            <div class="rv-foot" :title="`样本数=${rooflineVerdict.n}  AI 中位=${rooflineVerdict.medAI.toFixed(2)}  knee=${rooflineVerdict.knee.toFixed(0)}`">
+              中位 AI=<span x-text="rooflineVerdict.medAI.toFixed(2)"></span>
+              · 拐点=<span x-text="rooflineVerdict.knee.toFixed(0)"></span>
+              · 样本=<span x-text="rooflineVerdict.n"></span>
+              <span x-show="rooflineVerdict.medAI < rooflineVerdict.knee" style="color: var(--indigo);"> · 位于 memory-bound 区</span>
+              <span x-show="rooflineVerdict.medAI >= rooflineVerdict.knee" style="color: var(--coral);"> · 位于 compute-bound 区</span>
+            </div>
+          </div>
+        </template>
+
+        <template x-if="!rooflineVerdict">
+          <div class="roofline-verdict empty">
+            没有样本可解读 — 跑一次 bench 触发数据。
+          </div>
+        </template>
       </div>
 
     </div>
@@ -2839,6 +2976,8 @@ function dashboard() {
     rooflineSource: 'measured',
     rooflineFormula: '',
     rooflineParamsB: '0',
+    // Verdict card — populated each refresh from the recent points
+    rooflineVerdict: null,    // {bound, computeUtil, bwUtil, knee, suggestions[]}
     ttftHasData: false,
     tpotHasData: false,
     e2eHasData: false,
@@ -2851,6 +2990,57 @@ function dashboard() {
     fmt(v, digits) {
       if (v == null || isNaN(v)) return '—';
       return Number(v).toFixed(digits);
+    },
+
+    // ===== Roofline verdict (plain-language interpretation) =====
+    _computeRooflineVerdict(data) {
+      const pts = data.points || [];
+      const peak = data.peak;
+      if (!pts.length || !peak || !peak.compute_tflops || !peak.mem_bw_tbs) {
+        return null;
+      }
+      const median = arr => {
+        const s = [...arr].sort((a, b) => a - b);
+        return s[Math.floor(s.length / 2)];
+      };
+      const med_ai = median(pts.map(p => p.ai));
+      const med_tput = median(pts.map(p => p.throughput_tflops));
+      const knee = peak.compute_tflops / peak.mem_bw_tbs;       // op/byte
+      const isMemBound = med_ai < knee;
+      // Achievable throughput at this AI (the Roofline envelope value)
+      const achievable = Math.min(peak.compute_tflops, med_ai * peak.mem_bw_tbs);
+      const utilization = med_tput / achievable;                // 0..1
+      // Compute & bandwidth utilizations separately (each vs its own roof)
+      const computeUtil = med_tput / peak.compute_tflops;
+      const usedBwTbs = med_tput / med_ai;                      // TFLOPS / (op/byte) = TB/s
+      const bwUtil = usedBwTbs / peak.mem_bw_tbs;
+      let bound, headline, suggestions;
+      if (isMemBound) {
+        bound = 'memory';
+        headline = 'Memory-bound（LLM decode 阶段的常态）';
+        suggestions = [
+          '增大 batch 直到 KV cache 接近 80% — 摊薄权重 re-read',
+          '启用 speculative decoding — 减少 decode 步数',
+          '权重量化 (AWQ / GPTQ) — 直接减小要读的字节数',
+          `升级带宽更高的卡（你当前 ${(peak.mem_bw_tbs * 1000).toFixed(0)} GB/s；H100 3.4 TB/s，H200 4.8 TB/s）`,
+        ];
+      } else {
+        bound = 'compute';
+        headline = 'Compute-bound（prefill 或大 batch 状态）';
+        suggestions = [
+          '继续增大 batch 收益递减 — 算力已接近上限',
+          '升级算力更高的 GPU 或上 tensor parallel',
+          'Chunked prefill — 拆开长 prompt 让 decode 喘息',
+        ];
+      }
+      return {
+        bound, headline, suggestions,
+        medAI: med_ai, medTput: med_tput,
+        achievable, utilization,
+        computeUtil, bwUtil,
+        knee, peakC: peak.compute_tflops, peakBW: peak.mem_bw_tbs,
+        n: pts.length,
+      };
     },
 
     init() {
@@ -2875,24 +3065,31 @@ function dashboard() {
               order: 3,
             },
             {
+              // Compute roof: horizontal line + fill the compute-bound zone
+              // (right of knee). Soft coral wash hints "this is the compute
+              // wall, points here are bounded by FLOPS not bandwidth."
               label: 'Compute roof',
               data: [],
               showLine: true,
               borderColor: '#dc4d3e',
               borderWidth: 2.5,
               pointRadius: 0,
-              fill: false,
+              fill: 'origin',
+              backgroundColor: 'rgba(220, 77, 62, 0.06)',
               tension: 0,
               order: 1,
             },
             {
+              // Memory roof: diagonal + fill memory-bound zone (left of knee).
+              // Soft indigo wash hints "you're stuck on bandwidth here."
               label: 'Memory roof',
               data: [],
               showLine: true,
               borderColor: '#5147c8',
               borderWidth: 2.5,
               pointRadius: 0,
-              fill: false,
+              fill: 'origin',
+              backgroundColor: 'rgba(81, 71, 200, 0.06)',
               tension: 0,
               order: 2,
             },
@@ -2978,6 +3175,10 @@ function dashboard() {
         y: p.throughput_tflops,
       }));
       _chart.data.datasets[0].data = points;
+      // Plain-language verdict — Roofline is unintuitive on its own. We
+      // pick the median AI / throughput of recent points so a single
+      // outlier doesn't flip the bound classification.
+      this.rooflineVerdict = this._computeRooflineVerdict(data);
 
       // Roof lines from peak info
       if (data.peak && data.peak.compute_tflops && data.peak.mem_bw_tbs) {

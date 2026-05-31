@@ -506,12 +506,14 @@ def build_app(
     #                   only available on vllm >=0.20. Each point is what the
     #                   engine actually saw.
     #   "analytical" — estimated from iter token counts + model parameter count:
-    #                   FLOPS ≈ 2 · params · tokens   (Kaplan/Chinchilla form)
-    #                   Bytes ≈ 2 · params · dtype_bytes   (weight re-read per
-    #                                                       fwd; KV ignored)
-    #                   AI    ≈ tokens / dtype_bytes
-    #                   So decode (tokens=1) sits at AI≈0.5 (memory-bound);
-    #                   prefill (tokens=N) at AI≈N/2 (compute-bound for large N).
+    #                   FLOPS ≈ 2 · params · tokens   (mul+add per param per
+    #                                                  token — Kaplan form)
+    #                   Bytes ≈ params · dtype_bytes  (weights read once per
+    #                                                  fwd pass; KV ignored)
+    #                   AI    ≈ 2 · tokens / dtype_bytes
+    #                   For bf16 (dtype_bytes=2): AI ≈ tokens. So decode
+    #                   (tokens=1) at AI≈1 (memory-bound); prefill (tokens=N)
+    #                   at AI≈N (compute-bound for large N).
     #                   Always computable, even on old vllm. Reported as
     #                   "estimate" in the response so the UI can flag it.
     @app.get("/api/roofline")
@@ -561,13 +563,13 @@ def build_app(
         if not points and _params:
             data_source = "analytical"
             formula = (
-                f"FLOPS≈2·params·tokens, Bytes≈2·params·{_dtype_b} "
+                f"FLOPS≈2·params·tokens, Bytes≈params·{_dtype_b} "
                 f"(params={_params/1e9:.2f}B, dtype={_arch['torch_dtype']})"
             )
             gen_pts = sink.recent(M.VLLM_ITER_GEN_TOKENS, seconds)
             prompt_pts = {ts: v for v, ts in sink.recent(M.VLLM_ITER_PROMPT_TOKENS, seconds)}
             last_ts = None
-            bytes_per_step = 2 * _params * _dtype_b  # weights re-read once / fwd
+            bytes_per_step = _params * _dtype_b  # weights read once per fwd pass
             for gen_v, ts in gen_pts:
                 tokens = gen_v + prompt_pts.get(ts, 0.0)
                 if tokens <= 0:
