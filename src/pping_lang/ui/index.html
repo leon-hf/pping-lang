@@ -541,6 +541,13 @@
     margin-bottom: 14px;
     letter-spacing: -0.005em;
   }
+  .kpi .kpi-sub-label {
+    color: var(--muted-2);
+    font-size: 10.5px;
+    font-weight: 400;
+    margin-left: 4px;
+    letter-spacing: 0;
+  }
   .kpi .value {
     font-size: 40px;
     font-weight: 700;
@@ -1791,18 +1798,33 @@
 
       <div class="kpis">
         <div class="kpi coral" :class="{ warn: kpis.ttft_p99_ms > 1000 && kpis.ttft_p99_ms <= 2000, crit: kpis.ttft_p99_ms > 2000 }">
-          <div class="label">TTFT p99</div>
+          <div class="label">TTFT p99 <span class="kpi-sub-label">最坏 1% 体验</span></div>
           <div class="value"><span x-text="fmt(kpis.ttft_p99_ms, 0)"></span><span class="unit">ms</span></div>
-          <div class="sub-line">p50 <span x-text="fmt(kpis.ttft_p50_ms, 0)"></span>ms</div>
+          <div class="sub-line" x-show="kpis.ttft">
+            p50 <span x-text="fmt(kpis.ttft?.p50, 0)"></span>
+            · p95 <span x-text="fmt(kpis.ttft?.p95, 0)"></span>
+            · avg <span x-text="fmt(kpis.ttft?.avg, 0)"></span>
+            · n=<span x-text="kpis.ttft?.n ?? 0"></span>
+          </div>
         </div>
         <div class="kpi rose" :class="{ warn: kpis.tpot_p99_ms > 50 && kpis.tpot_p99_ms <= 100, crit: kpis.tpot_p99_ms > 100 }">
-          <div class="label">TPOT p99</div>
+          <div class="label">
+            TPOT p99 <span class="kpi-sub-label" x-text="kpis.tpot_source === 'itl' ? '(ITL fallback)' : '每 token 间隔'"></span>
+          </div>
           <div class="value"><span x-text="fmt(kpis.tpot_p99_ms, 0)"></span><span class="unit">ms</span></div>
-          <div class="sub-line">p50 <span x-text="fmt(kpis.tpot_p50_ms, 0)"></span>ms</div>
+          <div class="sub-line" x-show="kpis.tpot">
+            p50 <span x-text="fmt(kpis.tpot?.p50, 0)"></span>
+            · p95 <span x-text="fmt(kpis.tpot?.p95, 0)"></span>
+            · avg <span x-text="fmt(kpis.tpot?.avg, 0)"></span>
+            · n=<span x-text="kpis.tpot?.n ?? 0"></span>
+          </div>
         </div>
         <div class="kpi teal">
-          <div class="label">Output 吞吐</div>
+          <div class="label">Output 吞吐 <span class="kpi-sub-label">系统聚合</span></div>
           <div class="value"><span x-text="fmt(kpis.output_tps, 0)"></span><span class="unit">tok/s</span></div>
+          <div class="sub-line" x-show="kpis.per_req_decode_tps">
+            单请求 <span x-text="fmt(kpis.per_req_decode_tps, 0)"></span> tok/s
+          </div>
         </div>
         <div class="kpi amber" :class="{ warn: kpis.kv_cache > 0.8 && kpis.kv_cache <= 0.9, crit: kpis.kv_cache > 0.9 }">
           <div class="label">KV cache</div>
@@ -2792,9 +2814,13 @@ function dashboard() {
     health: {},
     system: {},
     kpis: {
+      // New shape: ttft/tpot are {p50, p95, p99, avg, n} objects
+      ttft: null, tpot: null, tpot_source: 'tpot',
+      output_tps: null, per_req_decode_tps: null,
+      // Flat aliases kept so older bench/report cards keep rendering
       ttft_p50_ms: null, ttft_p99_ms: null,
       tpot_p50_ms: null, tpot_p99_ms: null,
-      output_tps: null, kv_cache: null,
+      kv_cache: null,
       running_reqs: null, waiting_reqs: null,
       mfu: null, prefix_cache_hit: null,
       padding_ratio: null, preempt_per_min: null,

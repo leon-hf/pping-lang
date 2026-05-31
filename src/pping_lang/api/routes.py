@@ -56,6 +56,26 @@ def _percentile(values: list[float], q: float) -> float | None:
     hi = min(lo + 1, n - 1)
     return s[lo] + (s[hi] - s[lo]) * (rank - lo)
 
+
+def _summary(values: list[float]) -> dict[str, float | int | None]:
+    """{p50, p95, p99, avg, n} — one pass for the dashboard latency cards.
+
+    Single-number summaries lie about skewed distributions. Reporting p50/p95/p99
+    together with avg and n lets the reader judge typical experience, tail,
+    central tendency, and sample-size confidence at once.
+    """
+    n = len(values)
+    if n == 0:
+        return {"p50": None, "p95": None, "p99": None, "avg": None, "n": 0}
+    s = sorted(values)
+    return {
+        "p50": _percentile(s, 0.50),
+        "p95": _percentile(s, 0.95),
+        "p99": _percentile(s, 0.99),
+        "avg": sum(s) / n,
+        "n":   n,
+    }
+
 _BUILTIN_DESCRIPTIONS: dict[str, str] = {
     "mixed-short": "短问答 + 闲聊 + 简单指令（每条 50–180 tokens）",
     "mixed-long":  "长上下文：文档摘要 / 长指令 / 转录稿（每条 1000–3000 tokens）",
@@ -290,19 +310,26 @@ def build_app(
         def values_in_window(name: str) -> list[float]:
             return [v for v, _ts in sink.recent(name, window)]
 
-        # TTFT — per-iter percentile over the window
-        ttft = values_in_window(M.VLLM_REQ_TTFT_MS)
-        ttft_p50 = _percentile(ttft, 0.50)
-        ttft_p99 = _percentile(ttft, 0.99)
+        # Latency cards: report a full summary, not a single number — see _summary.
+        ttft = _summary(values_in_window(M.VLLM_REQ_TTFT_MS))
 
-        # TPOT preferred, fall back to ITL when the model never emits TPOT
-        tpot = values_in_window(M.VLLM_REQ_TPOT_MS) or values_in_window(M.VLLM_REQ_ITL_MS)
-        tpot_p50 = _percentile(tpot, 0.50)
-        tpot_p99 = _percentile(tpot, 0.99)
+        # TPOT preferred (per-finished-request), fall back to ITL (per-iter)
+        # when the model/version never emits TPOT. We label which source won so
+        # the dashboard can flag "this is ITL, not TPOT" honestly.
+        tpot_vals = values_in_window(M.VLLM_REQ_TPOT_MS)
+        tpot_source = "tpot"
+        if not tpot_vals:
+            tpot_vals = values_in_window(M.VLLM_REQ_ITL_MS)
+            tpot_source = "itl"
+        tpot = _summary(tpot_vals)
 
-        # Output throughput: sum gen tokens / window seconds
+        # Output throughput: sum gen tokens / window seconds (system aggregate)
         gen_vals = values_in_window(M.VLLM_ITER_GEN_TOKENS)
         output_tps = (sum(gen_vals) / window) if gen_vals else None
+
+        # Per-request decode rate: derived directly from TPOT. With TPOT in ms,
+        # 1000/TPOT_p50 gives tokens/sec a single user feels typing on screen.
+        per_req_decode_tps = (1000.0 / tpot["p50"]) if tpot["p50"] else None
 
         preempt_vals = values_in_window(M.VLLM_ITER_PREEMPTED_REQS)
         preempt_per_min = (sum(preempt_vals) * 60.0 / window) if preempt_vals else None
@@ -310,11 +337,19 @@ def build_app(
         return {
             "window_seconds": window,
             "kpis": {
-                "ttft_p50_ms": ttft_p50,
-                "ttft_p99_ms": ttft_p99,
-                "tpot_p50_ms": tpot_p50,
-                "tpot_p99_ms": tpot_p99,
+                # Latency: full summaries instead of one percentile each.
+                "ttft": ttft,                       # {p50, p95, p99, avg, n}
+                "tpot": tpot,                       # ditto
+                "tpot_source": tpot_source,         # "tpot" | "itl"
+                # Throughput pair: system-aggregate + per-request feel
                 "output_tps": output_tps,
+                "per_req_decode_tps": per_req_decode_tps,
+                # Backwards-compatible flat keys (older UI builds, bench cards)
+                "ttft_p50_ms": ttft["p50"],
+                "ttft_p99_ms": ttft["p99"],
+                "tpot_p50_ms": tpot["p50"],
+                "tpot_p99_ms": tpot["p99"],
+                # Scheduler & efficiency latches
                 "kv_cache": latest_val(M.VLLM_SCHEDULER_KV_CACHE_USAGE_RATIO),
                 "running_reqs": latest_val(M.VLLM_SCHEDULER_RUNNING_REQS),
                 "waiting_reqs": latest_val(M.VLLM_SCHEDULER_WAITING_REQS),
