@@ -362,6 +362,36 @@ def build_app(
         }
 
     # === GET /api/latency_trends — TTFT / TPOT / E2E bucketed p50+p99 over time ===
+    # Same dual-path strategy as /api/kpis: ≤200s windows served from the live
+    # ring buffer (per-metric ring holds ~2000 points; at typical req rates
+    # that covers 200s+). Longer windows still go to DuckDB. Lets the trend
+    # charts paint within one poll cycle of a metric arriving instead of
+    # waiting for WAL→checkpoint.
+    def _bucketed_from_memory(
+        name: str, since_ns: int, until_ns: int, buckets: int,
+    ) -> list[dict[str, Any]]:
+        pts = sink.recent(name, max(1, (until_ns - since_ns) / 1e9))
+        if not pts:
+            return []
+        bucket_width_ns = max(1, (until_ns - since_ns) // buckets)
+        groups: dict[int, list[float]] = {}
+        for v, ts in pts:
+            if ts < since_ns or ts >= until_ns:
+                continue
+            b = int((ts - since_ns) // bucket_width_ns)
+            if 0 <= b < buckets:
+                groups.setdefault(b, []).append(v)
+        out: list[dict[str, Any]] = []
+        for b in sorted(groups):
+            vals = groups[b]
+            out.append({
+                "t":   (b * bucket_width_ns) / 1e9,
+                "p50": _percentile(vals, 0.50),
+                "p99": _percentile(vals, 0.99),
+                "n":   len(vals),
+            })
+        return out
+
     @app.get("/api/latency_trends")
     def latency_trends(
         seconds: int = Query(300, ge=30, le=86400),
@@ -369,22 +399,30 @@ def build_app(
     ) -> dict[str, Any]:
         now_ns = time.monotonic_ns()
         since_ns = now_ns - int(seconds * 1e9)
-        conn = open_conn(db_path)
-        try:
-            ttft = bucketed_quantiles(conn, M.VLLM_REQ_TTFT_MS, since_ns, now_ns, buckets)
-            # TPOT prefers per-finished-request, fall back to per-iter ITL when missing
-            tpot = bucketed_quantiles(conn, M.VLLM_REQ_TPOT_MS, since_ns, now_ns, buckets)
+        # ≤900s: serve from memory (ring may not cover the whole window under
+        # extreme push rates, but it'll always have the *most recent* data,
+        # which is what users actually look at on the dashboard). >900s falls
+        # back to DuckDB for genuine historical replays.
+        if seconds <= 900:
+            ttft = _bucketed_from_memory(M.VLLM_REQ_TTFT_MS, since_ns, now_ns, buckets)
+            tpot = _bucketed_from_memory(M.VLLM_REQ_TPOT_MS, since_ns, now_ns, buckets)
             tpot_source = "tpot"
             if not tpot:
-                tpot = bucketed_quantiles(
-                    conn, M.VLLM_REQ_ITL_MS, since_ns, now_ns, buckets,
-                )
+                tpot = _bucketed_from_memory(M.VLLM_REQ_ITL_MS, since_ns, now_ns, buckets)
                 tpot_source = "itl"
-            e2e = bucketed_quantiles(
-                conn, M.VLLM_REQ_E2E_LATENCY_MS, since_ns, now_ns, buckets,
-            )
-        finally:
-            conn.close()
+            e2e = _bucketed_from_memory(M.VLLM_REQ_E2E_LATENCY_MS, since_ns, now_ns, buckets)
+        else:
+            conn = open_conn(db_path)
+            try:
+                ttft = bucketed_quantiles(conn, M.VLLM_REQ_TTFT_MS, since_ns, now_ns, buckets)
+                tpot = bucketed_quantiles(conn, M.VLLM_REQ_TPOT_MS, since_ns, now_ns, buckets)
+                tpot_source = "tpot"
+                if not tpot:
+                    tpot = bucketed_quantiles(conn, M.VLLM_REQ_ITL_MS, since_ns, now_ns, buckets)
+                    tpot_source = "itl"
+                e2e = bucketed_quantiles(conn, M.VLLM_REQ_E2E_LATENCY_MS, since_ns, now_ns, buckets)
+            finally:
+                conn.close()
         return {
             "seconds": seconds,
             "buckets": buckets,

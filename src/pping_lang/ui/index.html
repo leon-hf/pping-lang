@@ -1893,7 +1893,7 @@
               <span x-text="fmt(kpis.tpot_p99_ms, 0)"></span><span class="unit">ms</span>
             </span>
           </div>
-          <div class="lat-source" x-show="tpotSource === 'itl'">数据源：ITL（无 finished_requests 时 fallback，语义近似）</div>
+          <div class="lat-source" x-show="tpotSource === 'itl'">数据源：ITL fallback（当前 vllm 没发 TPOT 字段，用 iter 间隔近似）</div>
           <div class="lat-chart" x-show="tpotHasData"><canvas id="tpot-chart"></canvas></div>
           <div class="lat-empty" x-show="!tpotHasData">暂无 TPOT / ITL 数据</div>
         </div>
@@ -1908,7 +1908,7 @@
             <span class="lat-now" x-show="!e2eHasData" style="color: var(--muted-2);">—</span>
           </div>
           <div class="lat-chart" x-show="e2eHasData"><canvas id="e2e-chart"></canvas></div>
-          <div class="lat-empty" x-show="!e2eHasData">暂无 finished_requests<br/>（demo 不模拟请求完成事件）</div>
+          <div class="lat-empty" x-show="!e2eHasData">暂无 E2E 数据<br/>（跑一次 bench 触发请求完成事件）</div>
         </div>
       </div>
 
