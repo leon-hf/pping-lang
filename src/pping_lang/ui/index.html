@@ -1800,11 +1800,12 @@
         <div class="kpi coral" :class="{ warn: kpis.ttft_p99_ms > 1000 && kpis.ttft_p99_ms <= 2000, crit: kpis.ttft_p99_ms > 2000 }">
           <div class="label">TTFT p99 <span class="kpi-sub-label">最坏 1% 体验</span></div>
           <div class="value"><span x-text="fmt(kpis.ttft_p99_ms, 0)"></span><span class="unit">ms</span></div>
-          <div class="sub-line" x-show="kpis.ttft">
+          <div class="sub-line" x-show="kpis.ttft"
+               title="窗口内完成的请求数。样本越多，p99 越可信 — <30 时建议结合 p50/avg 一起看。">
             p50 <span x-text="fmt(kpis.ttft?.p50, 0)"></span>
             · p95 <span x-text="fmt(kpis.ttft?.p95, 0)"></span>
             · avg <span x-text="fmt(kpis.ttft?.avg, 0)"></span>
-            · n=<span x-text="kpis.ttft?.n ?? 0"></span>
+            · 请求数 <span x-text="kpis.ttft?.n ?? 0"></span>
           </div>
         </div>
         <div class="kpi rose" :class="{ warn: kpis.tpot_p99_ms > 50 && kpis.tpot_p99_ms <= 100, crit: kpis.tpot_p99_ms > 100 }">
@@ -1812,11 +1813,13 @@
             TPOT p99 <span class="kpi-sub-label" x-text="kpis.tpot_source === 'itl' ? '(ITL fallback)' : '每 token 间隔'"></span>
           </div>
           <div class="value"><span x-text="fmt(kpis.tpot_p99_ms, 0)"></span><span class="unit">ms</span></div>
-          <div class="sub-line" x-show="kpis.tpot">
+          <div class="sub-line" x-show="kpis.tpot"
+               :title="kpis.tpot_source === 'itl' ? '窗口内的 iter 采样数（每次调度循环一条）' : '窗口内完成的请求数。样本越多，p99 越可信。'">
             p50 <span x-text="fmt(kpis.tpot?.p50, 0)"></span>
             · p95 <span x-text="fmt(kpis.tpot?.p95, 0)"></span>
             · avg <span x-text="fmt(kpis.tpot?.avg, 0)"></span>
-            · n=<span x-text="kpis.tpot?.n ?? 0"></span>
+            · <span x-text="kpis.tpot_source === 'itl' ? '采样' : '请求数'"></span>
+            <span x-text="kpis.tpot?.n ?? 0"></span>
           </div>
         </div>
         <div class="kpi teal">
