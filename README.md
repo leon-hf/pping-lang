@@ -160,7 +160,7 @@ vLLM 启动日志会多出一行仪表盘网址（默认 `http://localhost:8765`
 | `PPING_LANG_RULES_PATH` | — | 自定义规则 JSON 文件，覆盖默认规则 |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | — | 设了就把数据同时发去已有的 OTel 后端 |
 
-<sub>完整开关列表见<a href="docs/pping-lang-design-v0.2.md">设计文档</a>。</sub>
+<sub>完整开关列表见源码 <code>pping_lang/plugin.py</code> 顶部 docstring。</sub>
 
 <br/>
 
@@ -176,10 +176,6 @@ vLLM 进程
 ```
 
 热路径只做 O(1) 入队，采样、规则评估、数据库写入全部异步 —— 这是 < 2% 开销的来源。
-
-为什么不重复造 observability 后端、规则引擎为什么自己写、四种部署模式怎么演进 ——
-都在<strong><a href="docs/pping-lang-design-v0.2.md">设计文档</a></strong>里。想看一个完整的真实排查过程，读
-<strong><a href="docs/case-study-1-padding.md">GPU 在补 0</a></strong>。
 
 <br/>
 

@@ -44,3 +44,6 @@ htmlcov/
 # logs
 *.log
 .gstack/
+
+# Personal design notes — kept on disk for reference, never committed
+_design-notes/
