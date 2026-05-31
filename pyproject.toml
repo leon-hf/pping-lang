@@ -50,18 +50,18 @@ Homepage = "https://github.com/leon/pping-lang"
 Documentation = "https://github.com/leon/pping-lang/tree/main/docs"
 
 [tool.hatch.build.targets.wheel]
-packages = ["pping_lang"]
+packages = ["src/pping_lang"]
 # Bundle non-Python resources: report templates + bench prompt datasets.
 # Hatch picks .py up automatically; everything else needs explicit include.
 include = [
-  "pping_lang/report/templates/*.j2",
-  "pping_lang/bench/prompts/data/*.jsonl",
-  "pping_lang/ui/*.html",
+  "src/pping_lang/report/templates/*.j2",
+  "src/pping_lang/bench/prompts/data/*.jsonl",
+  "src/pping_lang/ui/*.html",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["."]
+pythonpath = ["src"]
 addopts = "-ra --strict-markers"
 asyncio_mode = "auto"
 
