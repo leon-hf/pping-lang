@@ -1,0 +1,23 @@
+#!/bin/sh
+# Refuse to commit anything under AI-assistant config directories. These
+# directories belong on the developer's machine, not in shared history.
+# .gitignore already excludes them; this hook is the second line of defense
+# for the case where someone uses `git add -f` or for new tools we forgot
+# to gitignore.
+#
+# Activate once per clone:  git config core.hooksPath .githooks
+set -e
+
+# Staged paths matching any of these prefixes will be rejected.
+BAD_PATTERN='^\(\.claude\|\.codex\|\.copilot\|\.cursor\|\.aider\|\.continue\)/'
+
+STAGED=$(git diff --cached --name-only --diff-filter=ACM | grep "$BAD_PATTERN" || true)
+if [ -n "$STAGED" ]; then
+    echo "[pre-commit hook] refusing to commit AI-assistant local config:"
+    echo "$STAGED" | sed 's/^/  /'
+    echo
+    echo "These directories belong on your machine, not in git history."
+    echo "Unstage with:  git restore --staged <path>"
+    echo "If you genuinely intend to track this file, bypass with --no-verify."
+    exit 1
+fi

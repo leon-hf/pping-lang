@@ -1,0 +1,23 @@
+#!/bin/sh
+# Strip any AI-assistant Co-Authored-By trailers from commit messages
+# before they land. AI agents (Claude Code, Codex, Copilot, etc.) sometimes
+# auto-insert these — once committed they make the bot show up as a
+# GitHub contributor, and removing them later requires history rewrite.
+#
+# Activate once per clone:  git config core.hooksPath .githooks
+set -e
+
+MSG_FILE="$1"
+[ -z "$MSG_FILE" ] && exit 0
+
+# Pattern: any Co-Authored-By line that names an AI assistant or its email
+# domain. Case-insensitive. Extend the alternation list as new tools appear.
+PATTERN='^Co-Authored-By:.*\(claude\|codex\|copilot\|anthropic\|openai\|noreply@anthropic\.com\|noreply@openai\.com\)'
+
+if grep -qi "$PATTERN" "$MSG_FILE"; then
+    echo "[commit-msg hook] stripping AI-assistant Co-Authored-By trailer(s)"
+    # Portable in-place edit (avoids GNU sed -i / BSD sed -i '' divergence)
+    tmp="$(mktemp)"
+    grep -vi "$PATTERN" "$MSG_FILE" > "$tmp"
+    mv "$tmp" "$MSG_FILE"
+fi
