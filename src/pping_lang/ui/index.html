@@ -1066,6 +1066,18 @@
     margin-top: 2px;
     font-weight: 400;
   }
+  .form-grid .hint code {
+    background: var(--surface-2);
+    padding: 1px 4px;
+    border-radius: 3px;
+    font-size: 11px;
+  }
+  .form-grid .hint-inline {
+    font-size: 11px;
+    color: var(--muted-2);
+    font-weight: 400;
+    margin-left: 4px;
+  }
   .form-actions {
     margin-top: 24px;
     display: flex;
@@ -1655,7 +1667,7 @@
         </div>
         <div class="hero-body">
           <div class="hero-eyebrow">currently serving</div>
-          <h2 class="hero-title" x-text="system.model || '—'"></h2>
+          <h2 class="hero-title" x-text="system.served_model_name || system.model || '—'"></h2>
           <div class="hero-meta">
             <span class="chip coral" x-show="system.vllm_version">
               <span class="chip-label">vLLM</span>
@@ -2162,8 +2174,9 @@
             <input type="text" x-model="form.endpoint" placeholder="http://localhost:8000" required>
             <span class="hint">vLLM 服务的 base URL，自动追加 /v1/...</span>
           </label>
-          <label class="full">Model
-            <input type="text" x-model="form.model" placeholder="Qwen2.5-32B-Instruct" required>
+          <label class="full">调用名 <span class="hint-inline">(served-model-name)</span>
+            <input type="text" x-model="form.model" placeholder="Qwen/Qwen2.5-0.5B-Instruct" required>
+            <span class="hint">写进 OpenAI 请求 <code>{"model": "..."}</code> 的字符串，必须匹配 vLLM 启动时的 <code>--served-model-name</code>。与磁盘上权重路径无关。</span>
           </label>
           <label class="full">Prompt 数据源
             <select x-model="form.prompt_source" @change="onPromptSourceChange()">
@@ -2497,8 +2510,11 @@ function benchTab() {
       // already entered (e.g. if they're switching to a different endpoint).
       try {
         const sys = await fetch('/api/system').then(r => r.json());
-        if (!this.form.model && sys.model) {
-          this.form.model = sys.model;
+        // Prefer served_model_name — that's what clients put into the OpenAI
+        // request body. `sys.model` is the disk path / HF id vllm was launched
+        // with, which is wrong here.
+        if (!this.form.model && (sys.served_model_name || sys.model)) {
+          this.form.model = sys.served_model_name || sys.model;
         }
         // Endpoint heuristic: vLLM usually listens on :8000 on the same host
         // as the dashboard. Use the page's hostname so this works across

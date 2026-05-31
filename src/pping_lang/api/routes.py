@@ -135,14 +135,29 @@ def build_app(
         if not vllm_ver:
             vllm_ver = os.environ.get("PPING_LANG_INFO_VLLM_VERSION") or None
 
-        # Model name: from vllm_config.model_config.model, then env override
+        # Two distinct identities from vllm_config.model_config:
+        #   `model`               → what `vllm serve` was pointed at (often a disk path
+        #                            from a local cache like ~/.cache/modelscope/...)
+        #   `served_model_name`   → the name clients use in OpenAI-protocol calls
+        #                            (--served-model-name). May be a list of aliases.
+        # Dashboard prefers served_model_name for display + bench form prefill —
+        # it's the user-facing identity that matches what the OpenAI request body
+        # says. The disk path is still surfaced via cmdline in the startup modal.
         model: str | None = None
+        served_model_name: str | None = None
         if vllm_config is not None:
             mc = getattr(vllm_config, "model_config", None)
             if mc is not None:
-                model = getattr(mc, "model", None) or getattr(mc, "served_model_name", None)
+                model = getattr(mc, "model", None)
+                smn = getattr(mc, "served_model_name", None)
+                if isinstance(smn, (list, tuple)) and smn:
+                    served_model_name = str(smn[0])
+                elif isinstance(smn, str):
+                    served_model_name = smn
         if not model:
             model = os.environ.get("PPING_LANG_INFO_MODEL") or None
+        if not served_model_name:
+            served_model_name = os.environ.get("PPING_LANG_INFO_SERVED_MODEL_NAME") or model
 
         # GPU: NVML-detected first, then env override
         name = gpu_name or os.environ.get("PPING_LANG_INFO_GPU") or None
@@ -170,6 +185,7 @@ def build_app(
         return {
             "vllm_version": vllm_ver,
             "model": model,
+            "served_model_name": served_model_name,
             "gpu_name": name,
             "gpu_count": count,
             "gpu_peak": peak,
