@@ -2,9 +2,7 @@
 
 # pping-lang
 
-### 给 vLLM 装一个会说人话的性能诊断仪表盘
-
-不只是把指标画出来 —— 它告诉你「为什么慢、是 memory-bound 还是 compute-bound、改哪个参数能再榨多少」。
+**vLLM 性能诊断插件 —— 实时指标采集、规则化分析、结构化建议**
 
 [![PyPI](https://img.shields.io/pypi/v/pping-lang?color=4c8bf5&label=PyPI)](https://pypi.org/project/pping-lang/)
 [![Python](https://img.shields.io/badge/python-3.10%20|%203.11%20|%203.12-4c8bf5)](https://pypi.org/project/pping-lang/)
@@ -12,94 +10,96 @@
 [![Status](https://img.shields.io/badge/status-pre--alpha-fb8c00)](#项目状态)
 [![Tests](https://img.shields.io/badge/tests-309%20passing-43a047)](tests/)
 
-**[快速上手](#快速上手)** · **[仪表盘](#仪表盘)** · **[兼容性](#兼容性)** · **[架构](#架构)** · **[路线图](#路线图)**
+[快速上手](#快速上手) · [仪表盘](#仪表盘) · [兼容性](#兼容性) · [架构](#架构) · [路线图](#路线图)
 
 </div>
 
 ---
 
-## 📰 Latest News
+## Latest News
 
-- **2026-06** · **Dual-path 实时架构**：实时面板从「DuckDB → fresh conn → SQL」改成「in-memory ring → 直接读」，bench 启动后 KPI 出现延迟从 20 s 降到 2 s
-- **2026-06** · **Roofline analytical fallback**：vllm 0.13 没 `perf_stats` 也能画 — 用 `FLOPS ≈ 2·params·tokens` 从 token 计数和模型参数量反推；附自动解读卡（memory-bound / compute-bound + 4 条提速建议）
-- **2026-06** · **延迟卡升级**：TTFT/TPOT 不再只报 p99，同时显示 p50/p95/p99/avg/请求数，单一数字骗不了人
-- **2026-05** · **内置 bench 模块**：dashboard 直接发起静态压测，附三个标准 prompt 数据集（短问答 / 长文档 / 代码）
-- **2026-05** · `v0.1.0a1` 上 PyPI，单机本地全功能可跑
+- **2026-06** —— Dual-path 实时读取架构：实时面板从 DuckDB SQL 路径迁移至内存 ring buffer，bench 启动后 KPI 可见性延迟由 20s 降至 2s
+- **2026-06** —— Roofline analytical fallback：在缺失 `perf_stats` 的 vLLM 版本上，依据 `FLOPS ≈ 2·params·tokens` 从 iter 级 token 计数和模型参数量推算 arithmetic intensity 与 throughput，并附区域着色 + 自动结论卡（memory-bound / compute-bound 判定及对应优化路径）
+- **2026-06** —— 延迟指标改为多统计量并报：TTFT / TPOT 同时披露 p50 / p95 / p99 / avg 及请求数，避免单一百分位对偏态分布的失真
+- **2026-05** —— 内置 bench 模块：dashboard 直接发起静态压测，含三个标准 prompt 数据集（短问答 / 长文档 / 代码）
+- **2026-05** —— `v0.1.0a1` 发布至 PyPI
 
 ---
 
-## 它解决什么问题
+## 概述
 
-vLLM 把指标都暴露给你了 —— TTFT、TPOT、KV cache 用量、GPU 利用率、运行队列…… 但**没人帮你解读**。
+vLLM 通过 `stat_logger_plugins` 入口暴露完整的运行时指标（SchedulerStats、IterationStats、cudagraph / perf 派生量），其消费方式通常为 Prometheus 抓取 + Grafana 可视化。该方案能展示指标但不输出决策结论，存在两个具体问题：
 
-「GPU 利用率 94%」看了等于没看。业界已知的坑是 **GPU util 是 duty cycle，不是吞吐** —— 97% 利用率照样能掉 3 倍吞吐，因为 SM 在等数据。Grafana / Prometheus 仪表盘只是把这些数字画出来，要人盯、还得自己会看。
+1. **指标语义模糊**。`GPU utilization` 反映的是 SM duty cycle 而非吞吐量。在 LLM decode 阶段，该值常稳定于 70–90% 而 MFU 不足 5%，原因为 memory-bound。仅看 utilization 数字无法识别此类瓶颈
+2. **缺乏可操作性**。规则触发、阈值告警、根因关联需要使用方自行实现
 
-pping-lang 把 vLLM 自带指标加上 NVML 物理层数据，喂给一个轻量规则引擎，**输出的不是数字而是结论**：
+pping-lang 直接消费 `stat_logger_plugins` 回调，结合 NVML 物理层采样，通过规则引擎输出结构化诊断与优化路径。示例输出：
 
 ```text
-[pping-lang] [!] WARNING: GPU 利用率偏低
+[pping-lang] WARNING  GPU 利用率偏低
   GPU 平均利用率 3% 持续低于 50% 已 30s
-  → 检查 batch 是否退化为 1，或开启连续 batching
+  建议：检查 batch 是否退化为 1，或开启连续 batching
 
-[pping-lang] [!] WARNING: batch 退化
-  并发请求数 1.0 ≤ 1.0 已 30s（无法发挥 batching 优势）
-  → 增加客户端并发，或检查路由是否串行化
+[pping-lang] WARNING  batch 退化
+  并发请求数 1.0 ≤ 1.0 已 30s
+  建议：增加客户端并发，或检查上游路由是否串行化
 ```
 
-Roofline 散点也不让你自己看 —— 解读卡直接告诉你：
+Roofline 视图附带自动结论：
 
-```
-当前结论: Memory-bound（LLM decode 阶段的常态）
-  算力利用  ▰▱▱▱▱▱▱▱▱▱   1%   （0.40 / 33 TFLOPS）
-  带宽利用  ▰▰▰▰▰▱▱▱▱▱  52%   （132 / 256 GB/s）
+```text
+当前结论  Memory-bound（decode 阶段的典型状态）
+  算力利用    1%   （0.40 / 33 TFLOPS）
+  带宽利用   52%   （132 / 256 GB/s）
 
-提速方向
-  · 增大 batch 直到 KV cache 接近 80%
+优化路径
+  · 增大 batch 直至 KV cache 占用接近 80%
   · 启用 speculative decoding
   · 权重量化 (AWQ / GPTQ)
-  · 换带宽更高的卡 (H100 3.4 TB/s)
+  · 升级带宽更高的 GPU
 ```
 
 ---
 
 ## 快速上手
 
-### 不用 GPU、不用 vLLM 先试试
+### 离线 demo（无需 GPU / vLLM）
 
 ```bash
 pip install pping-lang
 python -m examples.embedded.demo
 ```
 
-约 7 秒后终端打印两条诊断、浏览器同时能访问 `http://localhost:8765` —— 确认装好了。
+脚本注入合成指标，约 7 秒后终端打印诊断，dashboard 可访问 `http://localhost:8765`。
 
-### 接到真实的 vLLM
+### 接入 vLLM
 
 ```bash
-vllm serve <your-model>
+pip install pping-lang
+vllm serve <model>
 ```
 
-vLLM 启动日志里会多出一行：
+vLLM 启动日志将输出 dashboard 地址：
 
 ```
 [pping-lang] dashboard → http://localhost:8765
 ```
 
-打开网址即用 —— **不改任何 vLLM 启动参数**。
+无需修改任何 vLLM 启动参数。
 
 ---
 
 ## 仪表盘
 
-单页 SPA、单文件 HTML，无需 npm / 打包。三个 tab：
+单页应用，单文件 HTML，无需前端构建工具。三个标签页：
 
-| Tab | 内容 |
+| 标签页 | 内容 |
 |:--|:--|
-| **实时** | 12 张 KPI 卡（TTFT / TPOT / 吞吐 / KV cache / 运行+等待请求 / MFU / GPU 利用率 / 显存占用 / Prefix cache / CUDA padding / 抢占率）；Roofline 散点 + 解读卡；TTFT / TPOT / E2E 三张趋势小图。每张卡悬停看公式 + 怎么解读 |
-| **规则** | 卡片式 CRUD，改阈值即热生效；「测试当前数据」按钮一键预览本规则在当前指标下会不会触发 |
-| **压测** | dashboard 直接发起静态 bench：选 endpoint / 调用名 / 并发 / 时长 / 内置 prompt 数据集，结果带 client-side TTFT/TPOT/E2E 全分布 + SLO 校验 |
+| 实时 | 12 项 KPI（TTFT / TPOT / 吞吐 / KV cache / 队列状态 / MFU / GPU 利用 / 显存 / Prefix cache / Padding / 抢占率）；Roofline 散点 + 自动结论；TTFT / TPOT / E2E 时序图。每项 KPI 支持 hover 查看公式与解读 |
+| 规则 | 阈值与 condition 可视化编辑；「测试当前数据」按钮预览触发结果；保存后热加载，不需要重启 vLLM |
+| 压测 | 内置 OpenAI 协议静态压测器，配置 endpoint / 调用名 / 并发 / 时长 / prompt 来源，输出 client-side TTFT / TPOT / E2E 分布及 SLO 校验 |
 
-KPI 数据是从 sink 内存 ring 直接读的（实时路径），DuckDB 只用于长窗口归档查询 —— 见 [架构](#架构) 一节。
+实时数据从 Sink 的内存 ring buffer 直读，延迟约等于轮询间隔。
 
 ---
 
@@ -107,140 +107,133 @@ KPI 数据是从 sink 内存 ring 直接读的（实时路径），DuckDB 只用
 
 ### vLLM 版本
 
-| vLLM | 状态 | `SchedulerStats` | `IterationStats` | `cudagraph_stats` | `perf_stats` |
+| vLLM | 状态 | SchedulerStats | IterationStats | cudagraph_stats | perf_stats |
 |:--|:--|:--:|:--:|:--:|:--:|
-| **0.20+** | 推荐 | ✓ | ✓ | ✓ | ✓ |
-| **0.13.x** | 实测可用 | ✓ | ✓ | ✓ (字段名异) | ✗ |
+| 0.20+ | 推荐 | ✓ | ✓ | ✓ | ✓ |
+| 0.13.x | 支持 | ✓ | ✓ | ✓（字段不同） | ✗ |
 | < 0.13 | 不支持 | — | — | — | — |
 
-**`perf_stats` 是 MFU / 显存带宽 / Roofline 的实测数据源**，只 0.20+ 才有。0.13 上：
-- **MFU、padding_ratio** 那两张 KPI 卡会显示 —（vllm 不发不强造）
-- **Roofline 自动切到 analytical 模式** —— 从 `gen_tokens + prompt_tokens` × 模型参数量推算，点形状对、绝对值有 ±20% 误差。卡片顶部 banner 会明示「估算」
-- 其余全部正常：TTFT/TPOT/E2E 全分布、KV cache、prefix hit、preemption、NVML 全套
+`perf_stats` 是 MFU、显存带宽利用率与实测 Roofline 的数据源，仅 0.20+ 提供。在 0.13.x 上：
 
-### 操作系统
+- MFU、padding ratio KPI 显示为空（不进行不可靠的构造）
+- Roofline 自动切换至 analytical 模式，绝对值存在约 ±20% 误差；卡片标识数据来源
+- 其余功能不受影响：TTFT / TPOT / E2E 完整分布、KV cache、prefix cache 命中、preemption、NVML 全套采样、规则诊断
 
-- **Linux 原生** —— `pip install` 即可
-- **Windows** —— vLLM 不原生支持，走 **WSL2 + Ubuntu**。从 Windows 浏览器访问 dashboard 时设 `PPING_LANG_API_HOST=0.0.0.0`，端口跨 WSL 自动转发
+### 运行环境
 
-### 识别的 GPU 列表
+- Linux：原生支持
+- Windows：需通过 WSL2 + Ubuntu。跨子系统访问 dashboard 时需设置 `PPING_LANG_API_HOST=0.0.0.0`
 
-NVML 设备名 → BF16 peak (TFLOPs/s) / 显存带宽 (GB/s)。未识别的 GPU 不影响监控，只跳过 MFU / Roofline 派生。
+### 已识别 GPU 列表
+
+NVML 设备名 → BF16 peak (TFLOPs/s) 与显存带宽 (GB/s)。未识别的 GPU 不影响指标采集，仅跳过依赖峰值的派生量。
 
 ```
-Blackwell      B200 (2250 / 8000)  ·  B100 (1800 / 8000)
-Hopper         H200 (989 / 4800)   ·  H100 SXM/PCIe/NVL  ·  A100 SXM/PCIe
-Ada 数据中心    L40S / L40 / L4
-Ada 桌面/移动  RTX 4090 / 4080 / 4070 Ti / 4070 / 4060 Ti / 4060（含 Laptop GPU）
-旧代           A30 · A10G · A10 · V100 · T4 · RTX 3090
+Blackwell        B200 (2250 / 8000) · B100 (1800 / 8000)
+Hopper           H200 (989 / 4800) · H100 SXM/PCIe/NVL · A100 SXM/PCIe
+Ada 数据中心      L40S · L40 · L4
+Ada 桌面 / 移动   RTX 4090 / 4080 / 4070 Ti / 4070 / 4060 Ti / 4060 (含 Laptop GPU)
+旧代             A30 · A10G · A10 · V100 · T4 · RTX 3090
 ```
 
-补卡只需在 [`src/pping_lang/hardware.py`](src/pping_lang/hardware.py) 的 `_GPU_PEAK_TABLE` 加一行。
+补充设备：在 [`src/pping_lang/hardware.py`](src/pping_lang/hardware.py) 的 `_GPU_PEAK_TABLE` 添加条目。
 
 ---
 
 ## 性能
 
-### Hot-path 开销
-
-vLLM 每个 scheduler step 都会调一次插件的 `record()`。我们的目标是 **<2% 推理吞吐影响**。
+### 热路径开销
 
 | 项目 | 实测 |
 |:--|:--|
-| `push_metric()` per call | <5 μs（O(1) deque + dict assign） |
-| `record()` per call | ~100 μs（含 collector 解析所有 vllm stats 字段） |
-| Sink bg flush 线程 CPU | <1%（默认 5s flush，NVML 100ms 采） |
-| 内存常驻 | ~6 MB（默认 65k 队列 + ring buffer） |
+| `push_metric()` 单次 | <5 μs |
+| `record()` 单次（含 collector 解析） | ≈100 μs |
+| Sink bg flush 线程 CPU | <1% |
+| 常驻内存 | ≈6 MB |
 
-### 实测：4070 Laptop + WSL2 + Qwen2.5-0.5B-Instruct
+### 基准：Qwen2.5-0.5B-Instruct / RTX 4070 Laptop / WSL2 / vLLM 0.13.0
 
-在 WSL2 + RTX 4070 Laptop (33.3 TFLOPS / 256 GB/s) 上跑 Qwen2.5-0.5B + vllm 0.13.0，bench concurrency=3：
+bench concurrency=3，时长 20s：
 
-| 指标 | 值 | 来源 |
+| 指标 | 值 | 数据来源 |
 |:--|:--|:--|
-| TTFT p99 | 305 ms | 实测（client-side） |
-| TPOT p99 | 22 ms（≈ 45 tok/s/req）| 实测 |
-| Output 吞吐（系统聚合） | 28 tok/s | server-side `vllm.iter.gen_tokens` |
-| 单请求 decode 速度 | 138 tok/s | `1000 / TPOT_p50` |
+| TTFT p99 | 305 ms | client-side |
+| TPOT p99 | 22 ms | client-side |
+| Output throughput | 28 tok/s | `vllm.iter.gen_tokens` |
+| 单请求 decode 速度 | 138 tok/s | 1000 / TPOT p50 |
 | 算力利用 | 1.2% | analytical Roofline |
-| 带宽利用 | **51.5%**（132 / 256 GB/s）| analytical Roofline |
-| Bound 判断 | memory-bound | 中位 AI = 3.0 < knee 130 |
+| 带宽利用 | 51.5% (132 / 256 GB/s) | analytical Roofline |
+| Bound 判定 | memory-bound | 中位 AI = 3.0 < knee 130 |
 
-带宽利用 52% 而不是 90%+，说明这台机器上 concurrency 还能再翻倍。这就是 Roofline 解读卡的价值 —— 不只看图，告诉你「你被什么卡住、还有多少头空」。
+### 实时延迟
 
-### Dashboard 实时延迟
-
-实时 tab 的数据从 sink 内存 ring 直接读出，**不经 DuckDB**。从指标在 `record()` 里产生 → dashboard 看见，理论延迟 = HTTP 轮询间隔（默认 2 s）。
-
-旧设计走 DuckDB → fresh conn → SQL 的链路下，启动 bench 后首屏数据出现要 15–20 s，被新架构干掉了。详见 commit `9236c60` 的 message。
+实时面板数据自 Sink 内存层直读，不经 DuckDB。指标自 `record()` 产生至 dashboard 渲染的端到端延迟约等于 HTTP 轮询周期（默认 2s）。
 
 ---
 
 ## 架构
 
 ```
-                ┌─── live 内存层（O(1) 写、O(1) 读、零 IO）
-                │       ↑               ↑
-record() ──push─┤   /api/kpis       /api/metrics/recent  ≤60s
-NVML 100ms ─────┤   /api/snapshot   /api/roofline        ≤60s
-                │   /api/latency_trends                  ≤900s
-                │                       ↑
-                │                  Sink._latest:  name → (value, ts_ns)
-                │                  Sink._recent:  name → 2000-deep ring
+                ┌─── live 内存层（O(1) 写 / O(1) 读）
+                │       ↑                ↑
+record() ──push─┤   /api/kpis        /api/metrics/recent  ≤60s
+NVML 100ms ─────┤   /api/snapshot    /api/roofline        ≤60s
+                │   /api/latency_trends                   ≤900s
                 │
-                └─── bg flush → DuckDB ─── archival 查询
-                                            (>900s 时间窗、报告导出)
+                │   Sink._latest:  name → (value, ts_ns)
+                │   Sink._recent:  name → 2000-deep ring
+                │
+                └─── bg flush ─── DuckDB ─── archival 查询
+                                              (>900s 时间窗)
 ```
 
-热路径**只做 O(1) 入队**，不阻塞 vLLM。规则引擎在自己的线程里跑、查 DuckDB 做窗口聚合 —— 任何插件 bug 都不会拖垮 vLLM 主流程（设计文档 §3.1）。
+热路径仅执行 O(1) 入队，不进行 I/O、序列化或锁等待。规则引擎与 Sink flush 在独立 daemon 线程运行。设计前提：插件任何异常不得影响 vLLM 推理路径。
 
-### 关键设计文件
+### 关键源文件
 
-- [`src/pping_lang/sink/base.py`](src/pping_lang/sink/base.py) — 双路径 Sink 抽象
-- [`src/pping_lang/sink/local.py`](src/pping_lang/sink/local.py) — DuckDB 持久化
-- [`src/pping_lang/collector/vllm_stats.py`](src/pping_lang/collector/vllm_stats.py) — vLLM IterationStats → MetricPoint 流
-- [`src/pping_lang/rules/engine.py`](src/pping_lang/rules/engine.py) — 规则评估循环（默认 1 s）
-- [`src/pping_lang/api/routes.py`](src/pping_lang/api/routes.py) — FastAPI + 所有 endpoint
-- [`src/pping_lang/ui/index.html`](src/pping_lang/ui/index.html) — 单文件 dashboard（Alpine.js + Chart.js）
+- [`src/pping_lang/sink/base.py`](src/pping_lang/sink/base.py) —— 双路径 Sink 抽象与 ring buffer 定义
+- [`src/pping_lang/sink/local.py`](src/pping_lang/sink/local.py) —— DuckDB 持久化实现
+- [`src/pping_lang/collector/vllm_stats.py`](src/pping_lang/collector/vllm_stats.py) —— vLLM IterationStats → MetricPoint 适配
+- [`src/pping_lang/rules/engine.py`](src/pping_lang/rules/engine.py) —— 规则评估循环（默认 1s 周期）
+- [`src/pping_lang/api/routes.py`](src/pping_lang/api/routes.py) —— FastAPI endpoints
+- [`src/pping_lang/ui/index.html`](src/pping_lang/ui/index.html) —— Alpine.js + Chart.js dashboard
 
 ---
 
 ## 配置
 
-大多数情况零配置即用。要调就用环境变量：
-
-| 变量 | 默认 | 作用 |
+| 环境变量 | 默认值 | 说明 |
 |:--|:--|:--|
-| `PPING_LANG_API_PORT` | `8765` | 仪表盘端口 |
-| `PPING_LANG_API_HOST` | `127.0.0.1` | 容器 / WSL 里要设成 `0.0.0.0` |
-| `PPING_LANG_DB_PATH` | `~/.pping-lang/local.duckdb` | 持久化数据库路径 |
-| `PPING_LANG_INSTANCE_ID` | 主机名 | 多实例聚合时区分用 |
-| `PPING_LANG_FLUSH_INTERVAL_S` | `5.0` | sink → DuckDB 的 flush 频率 |
-| `PPING_LANG_SINK_QUEUE_SIZE` | `65536` | sink 内存队列容量；高并发可上调 |
+| `PPING_LANG_API_PORT` | `8765` | dashboard 监听端口 |
+| `PPING_LANG_API_HOST` | `127.0.0.1` | 监听地址（容器 / WSL 场景设为 `0.0.0.0`） |
+| `PPING_LANG_DB_PATH` | `~/.pping-lang/local.duckdb` | DuckDB 文件路径 |
+| `PPING_LANG_INSTANCE_ID` | 主机名 | 多实例聚合时的标识 |
+| `PPING_LANG_FLUSH_INTERVAL_S` | `5.0` | Sink → DuckDB 刷盘周期 |
+| `PPING_LANG_SINK_QUEUE_SIZE` | `65536` | Sink 内存队列容量 |
 | `PPING_LANG_RULE_EVAL_INTERVAL_S` | `1.0` | 规则评估周期 |
-| `PPING_LANG_RULES_PATH` | — | 自定义规则 JSON 路径，覆盖默认 10 条 |
-| `PPING_LANG_DISABLE_NVML` | — | `1` 关闭 NVML 采样（无 GPU 环境） |
-| `PPING_LANG_DISABLE_RULES` | — | `1` 关闭规则引擎 |
-| `PPING_LANG_DISABLE_API` | — | `1` 关闭 dashboard / HTTP API |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | — | 设了就把数据同时发去 OTel 后端（Langfuse / Jaeger / Datadog） |
+| `PPING_LANG_RULES_PATH` | — | 自定义规则 JSON 路径 |
+| `PPING_LANG_DISABLE_NVML` | — | 设为 `1` 关闭 NVML 采样 |
+| `PPING_LANG_DISABLE_RULES` | — | 设为 `1` 关闭规则引擎 |
+| `PPING_LANG_DISABLE_API` | — | 设为 `1` 关闭 HTTP API 与 dashboard |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | — | 配置后将指标同时导出至 OTel 后端 |
 
 ---
 
 ## 路线图
 
-| 版本 | 模式 | 重点 |
+| 版本 | 部署模式 | 重点 |
 |:--|:--|:--|
-| **v0.1**（当前）| Embedded | 单机本地、`pip install` 即用、dashboard + 规则 + bench |
-| v0.2 | + Sidecar / Centralized | 独立 server 进程、Docker 镜像、Helm chart、K8s 多副本聚合 |
-| v0.3 | + Stateless | OTel-native、从已有 Prometheus / Tempo 反查诊断 |
+| v0.1（当前）| Embedded | 单机本地，pip 安装即用，dashboard + 规则引擎 + bench |
+| v0.2 | Sidecar / Centralized | 独立 server 进程、Docker 镜像、Helm chart、K8s 多副本指标聚合 |
+| v0.3 | Stateless | OTel-native，基于已有 Prometheus / Tempo 后端的诊断 |
 
 ---
 
 ## 项目状态
 
-**Pre-alpha** (`v0.1.0a1`)。当前为 **Embedded 模式**，面向单机本地开发、单卡 / 单 Pod 场景。Sidecar、K8s 多副本聚合等生产部署模式在 v0.2 规划。
+Pre-alpha (`v0.1.0a1`)。当前为 Embedded 模式，目标场景为单机本地开发与单卡 / 单 Pod 部署。生产侧的 Sidecar 模式、K8s 多副本聚合在 v0.2 规划。
 
-API 还可能 break。规则 JSON schema 和 dashboard URL 路径保持稳定。
+API 在 0.x 阶段允许不兼容变更；规则 JSON schema 与 dashboard URL 路径承诺向后兼容。
 
 ---
 
@@ -250,21 +243,21 @@ API 还可能 break。规则 JSON schema 和 dashboard URL 路径保持稳定。
 git clone https://github.com/leon-hf/pping-lang.git
 cd pping-lang
 pip install -e ".[dev,bench]"
-bash scripts/setup-hooks.sh    # 一次性激活 git hooks
-pytest                          # 309 个测试
+bash scripts/setup-hooks.sh
+pytest
 ruff check src/ tests/
 ```
 
-贡献流程见 [CONTRIBUTING.md](CONTRIBUTING.md)，变更见 [CHANGELOG.md](CHANGELOG.md)。
+贡献流程见 [CONTRIBUTING.md](CONTRIBUTING.md)，版本变更记录见 [CHANGELOG.md](CHANGELOG.md)。
 
 ---
 
 ## Acknowledgments
 
-- **[vLLM](https://github.com/vllm-project/vllm)** —— 没有它的 `stat_logger_plugins` 入口这个项目根本起不来
-- **[DuckDB](https://duckdb.org/)** —— 嵌入式分析数据库，零运维
-- **[NVIDIA NVML](https://docs.nvidia.com/deploy/nvml-api/)** —— GPU 物理层数据
-- 性能分析理论：Williams et al., *Roofline: An insightful visual performance model* (2009)；Kaplan et al., *Scaling Laws for Neural Language Models* (2020)
+- [vLLM](https://github.com/vllm-project/vllm) —— `stat_logger_plugins` 入口
+- [DuckDB](https://duckdb.org/) —— 嵌入式分析数据库
+- [NVIDIA NVML](https://docs.nvidia.com/deploy/nvml-api/) —— GPU 物理层采样
+- 性能模型参考：Williams et al., *Roofline: An Insightful Visual Performance Model* (CACM 2009)；Kaplan et al., *Scaling Laws for Neural Language Models* (2020)
 
 ---
 
@@ -272,8 +265,6 @@ ruff check src/ tests/
 
 ## License
 
-**[Apache 2.0](LICENSE)** © Leon
-
-<sub>用 vLLM 不该靠猜。</sub>
+[Apache 2.0](LICENSE) © Leon
 
 </div>
