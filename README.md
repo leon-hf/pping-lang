@@ -261,10 +261,19 @@ ruff check src/ tests/
 
 ---
 
-<div align="center">
+## Citation
+
+```bibtex
+@software{pping_lang,
+  title  = {pping-lang: A diagnostic plugin for vLLM},
+  author = {Leon},
+  year   = {2026},
+  url    = {https://github.com/leon-hf/pping-lang},
+}
+```
 
 ## License
 
-[Apache 2.0](LICENSE) © Leon
+This project is licensed under the **Apache License, Version 2.0**. See the [LICENSE](LICENSE) file for the full text.
 
-</div>
+Copyright © 2026 Leon
