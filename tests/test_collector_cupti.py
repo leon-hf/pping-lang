@@ -397,6 +397,20 @@ def test_timeline_buffer_empty_is_none():
     assert TimelineBuffer().snapshot() is None
 
 
+def test_timeline_chrome_trace_format():
+    """Chrome Trace 导出:ph=M 命名 track + ph=X 事件,ts/dur 微秒,归一化到 t0。"""
+    tb = TimelineBuffer()
+    tb.add([KernelEvent("kernel", "flash_fwd", 1000, 1100, 0, None, 7)], KernelClassifier())
+    tr = tb.chrome_trace()
+    assert tr["displayTimeUnit"] == "ms"
+    evs = tr["traceEvents"]
+    assert any(e["ph"] == "M" and e["name"] == "thread_name" and e["args"]["name"] == "stream 7" for e in evs)
+    x = next(e for e in evs if e["ph"] == "X")
+    assert x["name"] == "flash_fwd" and x["tid"] == 7
+    assert x["ts"] == 0.0 and x["dur"] == 0.1   # 1000ns→t0, 100ns=0.1µs
+    assert x["cat"] == "attention"
+
+
 def test_timeline_buffer_bounded():
     tb = TimelineBuffer(maxlen=5)
     clf = KernelClassifier()

@@ -396,6 +396,47 @@ def test_kernels_timeline_unavailable_without_collector(empty_app):
     assert data["available"] is False and data["timeline"] is None
 
 
+def test_kernels_trends_endpoint(tmp_path):
+    """/api/kernels/trends 从内存环返回 kernel 指标时序(给实时趋势图)。"""
+    db = tmp_path / "tr2.duckdb"
+    sink = LocalSink(db_path=db, instance_id="x", flush_interval_s=10.0)
+    base = time.monotonic_ns()
+    for i in range(5):
+        ts = base - int((5 - i) * 2 * 1e9)
+        sink.push_metric(MetricPoint(ts_ns=ts, name=M.KERNEL_GPU_BUSY_PCT, value=60.0 + i))
+        sink.push_metric(MetricPoint(ts_ns=ts, name=M.KERNEL_SHARE_GEMM_PCT, value=80.0))
+    app = build_app(db_path=str(db), instance_id="x", engine_index=0,
+                    sink=sink, rule_store=RuleStore())
+    try:
+        d = TestClient(app).get("/api/kernels/trends?seconds=60").json()
+        assert d["available"] is True
+        assert len(d["series"]["gpu_busy"]) == 5
+        assert d["series"]["gemm"][0]["v"] == 80.0
+    finally:
+        sink.close()
+
+
+def test_kernels_trace_endpoint(tmp_path):
+    """/api/kernels/trace 透出 Chrome Trace JSON。"""
+    db = tmp_path / "tr.duckdb"
+    sink = LocalSink(db_path=db, instance_id="x", flush_interval_s=10.0)
+
+    class _FakeCupti:
+        def chrome_trace(self):
+            return {"displayTimeUnit": "ms", "traceEvents": [
+                {"ph": "X", "name": "flash_fwd", "cat": "attention", "pid": 0, "tid": 7,
+                 "ts": 0.0, "dur": 0.1, "args": {}}]}
+
+    app = build_app(db_path=str(db), instance_id="x", engine_index=0,
+                    sink=sink, rule_store=RuleStore(), cupti=_FakeCupti())
+    try:
+        data = TestClient(app).get("/api/kernels/trace").json()
+        assert data["available"] is True
+        assert data["trace"]["traceEvents"][0]["name"] == "flash_fwd"
+    finally:
+        sink.close()
+
+
 def test_kernels_endpoint_disabled_when_no_data(empty_app):
     """无 kernel 数据(CUPTI 未启用 / 无 GPU)→ enabled=False,不 500。"""
     client, _, _ = empty_app

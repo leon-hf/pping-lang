@@ -359,6 +359,33 @@ class TimelineBuffer:
         ]
         return {"span_ns": span, "streams": streams, "count": len(evs), "events": evs}
 
+    def chrome_trace(self) -> dict[str, Any] | None:
+        """导出 Chrome Trace Event 格式(Perfetto / chrome://tracing 直接打开)。
+
+        对齐 PyTorch Kineto 的写法:ph=M 元数据命名 track(stream),ph=X 完整事件,
+        ts/dur 单位微秒。专业 trace 查看器(缩放/搜索/测量)直接用,不自己画。
+        """
+        with self._lock:
+            items = [i for i in self._buf if i[1] >= i[0]]
+        if not items:
+            return None
+        t0 = min(i[0] for i in items)
+        streams = sorted({i[4] for i in items})
+        events: list[dict[str, Any]] = [
+            {"ph": "M", "name": "process_name", "pid": 0, "tid": 0,
+             "args": {"name": "GPU kernels (CUPTI)"}},
+        ]
+        for s in streams:
+            events.append({"ph": "M", "name": "thread_name", "pid": 0, "tid": s,
+                           "args": {"name": f"stream {s}"}})
+        for start, end, cls, kind, stream, ingraph, name in items:
+            events.append({
+                "ph": "X", "name": name, "cat": cls, "pid": 0, "tid": stream,
+                "ts": (start - t0) / 1000.0, "dur": (end - start) / 1000.0,
+                "args": {"class": cls, "kind": kind, "in_graph": bool(ingraph)},
+            })
+        return {"displayTimeUnit": "ms", "traceEvents": events}
+
 
 # === collector(编排:source → classifier → aggregator → sink) =========
 
@@ -416,6 +443,10 @@ class CuptiKernelCollector:
     def timeline(self, max_events: int = 800) -> dict[str, Any] | None:
         """最近 max_events 条 kernel 的执行时间线(start/end/stream)。供时间线视图。"""
         return self._timeline.snapshot(max_events)
+
+    def chrome_trace(self) -> dict[str, Any] | None:
+        """最近 kernel 的 Chrome Trace JSON(Perfetto/chrome://tracing 打开)。"""
+        return self._timeline.chrome_trace()
 
     @property
     def last_snapshot_ts(self) -> int | None:

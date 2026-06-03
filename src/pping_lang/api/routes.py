@@ -612,6 +612,34 @@ def build_app(
         tl = cupti.timeline(max_events) if cupti is not None else None
         return {"available": tl is not None, "timeline": tl}
 
+    # === GET /api/kernels/trends — kernel 聚合指标的实时时序(给趋势图,读内存环)===
+    @app.get("/api/kernels/trends")
+    def kernels_trends(
+        seconds: int = Query(180, ge=10, le=3600),
+    ) -> dict[str, Any]:
+        cmap = {
+            "gpu_busy": M.KERNEL_GPU_BUSY_PCT, "sync": M.KERNEL_SYNC_SHARE_PCT,
+            "memcpy": M.KERNEL_MEMCPY_SHARE_PCT,
+            "attention": M.KERNEL_SHARE_ATTENTION_PCT, "gemm": M.KERNEL_SHARE_GEMM_PCT,
+            "comm": M.KERNEL_SHARE_COMM_PCT, "norm": M.KERNEL_SHARE_NORM_PCT,
+            "activation": M.KERNEL_SHARE_ACTIVATION_PCT, "rotary": M.KERNEL_SHARE_ROTARY_PCT,
+            "other": M.KERNEL_SHARE_OTHER_PCT,
+        }
+        series = {
+            key: [{"t": ts, "v": v} for v, ts in sink.recent(m, seconds)]
+            for key, m in cmap.items()
+        }
+        return {
+            "seconds": seconds, "now_ns": time.monotonic_ns(),
+            "available": any(series[k] for k in series), "series": series,
+        }
+
+    # === GET /api/kernels/trace — Chrome Trace Event JSON(Perfetto/chrome://tracing)===
+    @app.get("/api/kernels/trace")
+    def kernels_trace() -> dict[str, Any]:
+        tr = cupti.chrome_trace() if cupti is not None else None
+        return {"available": tr is not None, "trace": tr}
+
     # === GET /api/latency_trends — TTFT / TPOT / E2E bucketed p50+p99 over time ===
     # Same dual-path strategy as /api/kpis: ≤200s windows served from the live
     # ring buffer (per-metric ring holds ~2000 points; at typical req rates
