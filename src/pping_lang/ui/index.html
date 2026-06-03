@@ -2268,7 +2268,7 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
                   </template>
                 </div>
                 <div id="tl-scroll" style="overflow-x: auto; flex: 1;">
-                  <div :style="`width:${Math.max(timelineView().innerPx, 100)}px; min-width:100%;`">
+                  <div :style="timelineView().zoomed ? `width:${Math.max(timelineView().innerPx, 100)}px` : 'width:100%'">
                     <template x-for="(s, ri) in timelineView().streams" :key="s">
                       <div style="position: relative; height: 22px; margin-bottom: 5px; background: var(--surface-alt); border-radius: 3px;">
                         <template x-for="(b, i) in timelineView().blocks.filter(x => x.row === ri)" :key="i">
@@ -3320,7 +3320,7 @@ function dashboard() {
     _tlFitPx(spanMs) {
       const el = document.getElementById('tl-scroll');
       const w = (el && el.clientWidth) ? el.clientWidth : 900;
-      return Math.max(2, w / Math.max(0.001, spanMs));
+      return Math.max(2, (w - 3) / Math.max(0.001, spanMs));  // 留 3px 余量,免最小块 1px 溢出触发滚动条
     },
     timelineView() {
       const tl = this.timeline;
