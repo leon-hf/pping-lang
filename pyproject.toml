@@ -55,6 +55,8 @@ packages = ["src/pping_lang"]
 include = [
   "src/pping_lang/bench/prompts/data/*.jsonl",
   "src/pping_lang/ui/*.html",
+  "src/pping_lang/ui/*.css",
+  "src/pping_lang/ui/*.js",
 ]
 
 [tool.pytest.ini_options]

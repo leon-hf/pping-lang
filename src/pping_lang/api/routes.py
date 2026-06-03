@@ -36,7 +36,16 @@ from pping_lang.metrics_catalog import ALLOWED_METRICS, M
 from pping_lang.rules.engine import evaluate_condition_against_db
 from pping_lang.rules.schema import Condition, Rule
 
-_UI_INDEX = Path(__file__).parent.parent / "ui" / "index.html"
+_UI_DIR = Path(__file__).parent.parent / "ui"
+_UI_INDEX = _UI_DIR / "index.html"
+
+
+def _read_ui(name: str, fallback: str = "") -> str:
+    try:
+        return (_UI_DIR / name).read_text(encoding="utf-8")
+    except FileNotFoundError:
+        logger.warning("[pping-lang] UI asset not found: %s", name)
+        return fallback
 
 
 def _percentile(values: list[float], q: float) -> float | None:
@@ -255,16 +264,23 @@ def build_app(
         allow_headers=["*"],
     )
 
-    try:
-        ui_html = _UI_INDEX.read_text(encoding="utf-8")
-    except FileNotFoundError:
-        ui_html = "<h1>pping-lang UI missing</h1>"
-        logger.warning("[pping-lang] UI file not found at %s", _UI_INDEX)
+    # 拆出 vendor 资源:CSS/JS 单独文件,index.html 只剩 markup(读进闭包,启动时一次)
+    ui_html = _read_ui("index.html", "<h1>pping-lang UI missing</h1>")
+    ui_css = _read_ui("dashboard.css")
+    ui_js = _read_ui("dashboard.js")
 
     # === GET / — dashboard ===
     @app.get("/", response_class=HTMLResponse)
     def index() -> HTMLResponse:
         return HTMLResponse(ui_html)
+
+    @app.get("/dashboard.css")
+    def dashboard_css() -> Response:
+        return Response(ui_css, media_type="text/css; charset=utf-8")
+
+    @app.get("/dashboard.js")
+    def dashboard_js() -> Response:
+        return Response(ui_js, media_type="application/javascript; charset=utf-8")
 
     # === GET /api/health ===
     @app.get("/api/health")

@@ -44,7 +44,7 @@ def test_root_references_known_api_endpoints(client):
     KPI/Roofline/latency_trends 出来后聚合工作移到 server 端，前端不再直接
     call snapshot/recent；指标名也在 server 端组装好。
     """
-    body = client.get("/").text
+    body = client.get("/").text + client.get("/dashboard.js").text  # UI 拆成 html+js
     for endpoint in [
         "/api/health",
         "/api/system",
@@ -67,18 +67,36 @@ def test_root_references_marquee_kpi_labels(client):
         assert label in body, f"UI missing marquee KPI label {label!r}"
 
 
-def test_ui_file_under_size_budget():
-    """单文件 HTML。已破单文件舒适区(~143KB,含实时趋势图)。
-    ⚠️ 临时预算 148KB —— 不再继续抬。下一步必须:① 删冗余的页内时间线(已被
-    实时趋势 + Perfetto 导出取代)把体积降回来,或 ② 拆 vendor CSS/JS / 上构建。"""
-    ui = Path(__file__).parent.parent / "src" / "pping_lang" / "ui" / "index.html"
-    size = ui.stat().st_size
-    assert size < 148_000, f"UI file is {size} bytes, exceeds 148KB budget"
+def test_ui_assets_split_and_under_budget():
+    """CSS/JS 已拆出单文件。index.html 只剩 markup,预算 90KB;
+    CSS/JS 各自有独立预算。再大就该上构建/压缩。"""
+    ui = Path(__file__).parent.parent / "src" / "pping_lang" / "ui"
+    html = (ui / "index.html").stat().st_size
+    css = (ui / "dashboard.css").stat().st_size
+    js = (ui / "dashboard.js").stat().st_size
+    assert html < 90_000, f"index.html is {html} bytes, exceeds 90KB"
+    assert css < 70_000, f"dashboard.css is {css} bytes, exceeds 70KB"
+    assert js < 60_000, f"dashboard.js is {js} bytes, exceeds 60KB"
+
+
+def test_css_and_js_served(client):
+    """拆出的 CSS/JS 由路由提供,content-type 正确。"""
+    css = client.get("/dashboard.css")
+    assert css.status_code == 200 and "text/css" in css.headers["content-type"]
+    assert ".kfinding" in css.text or ".tl-block" in css.text
+    js = client.get("/dashboard.js")
+    assert js.status_code == 200 and "javascript" in js.headers["content-type"]
+    assert "function dashboard()" in js.text
+
+
+def test_index_references_split_assets(client):
+    body = client.get("/").text
+    assert "/dashboard.css" in body and "/dashboard.js" in body
 
 
 def test_rules_tab_has_crud_endpoints_referenced(client):
     """规则 tab 的 JS 必须引用 CRUD + test 端点。"""
-    body = client.get("/").text
+    body = client.get("/").text + client.get("/dashboard.js").text  # UI 拆成 html+js
     # All four CRUD verbs + test
     assert "/api/rules/" in body  # PUT/DELETE/test patterns use this prefix
     assert "method: 'PUT'" in body or "method:\"PUT\"" in body or "PUT" in body
