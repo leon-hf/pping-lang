@@ -68,11 +68,12 @@ def test_root_references_marquee_kpi_labels(client):
 
 
 def test_ui_file_under_size_budget():
-    """单文件 HTML 应该轻。加完压测 tab + 各种 hint 文案 + Roofline 解读卡后到
-    ~112KB；预算放到 120KB；超过这条就该考虑拆 vendor CSS/JS 出去或上 esbuild。"""
+    """单文件 HTML。Kernel tab(诊断结论 + 原始明细 + 调用栈火焰图)后到 ~129KB。
+    预算放到 140KB —— 但已到临界点:下次再大就该拆 vendor CSS/JS 出去或上 esbuild,
+    而不是继续抬预算。"""
     ui = Path(__file__).parent.parent / "src" / "pping_lang" / "ui" / "index.html"
     size = ui.stat().st_size
-    assert size < 120_000, f"UI file is {size} bytes, exceeds 120KB budget"
+    assert size < 140_000, f"UI file is {size} bytes, exceeds 140KB budget"
 
 
 def test_rules_tab_has_crud_endpoints_referenced(client):

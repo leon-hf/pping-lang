@@ -1,0 +1,715 @@
+"""CUPTI kernel 级采集 — 阶段 1a，部署级调优(见 _design-notes/phase-1a-采集设计.md)。
+
+把 GPU kernel 的时间分解采集进现有 Sink/DuckDB 管道,填上"层级 2"空缺:
+不只是"MFU 低 / padding 多",而是"attention kernel 占 step 42%"。
+
+架构基石 —— 语言边界:
+    采集源藏在 `KernelActivitySource` 接口后面,可替换。
+    1a:   `CuptiPythonSource`(进程内 cupti-python,纯 Python,Linux-only)
+    1b/2: 未来换成原生 libppingcupti.so 经共享内存喂同一聚合层,本文件其余部分不动。
+    所以本模块除 `CuptiPythonSource` 那段绑定外,都是会长期沉淀的 Python 逻辑,
+    在 Windows 上也能写 + 跑单测(用 `FakeActivitySource` 喂合成记录)。
+
+故障隔离(design §3.1):source 不可用(Win / 无 cupti / 无 GPU)→ 优雅 no-op + warning,
+永不阻塞 vLLM。回调里的任何异常被吞掉并计数,不向上传播。
+
+5% 预算自守:回调里只做记忆化分类 + 累加(O(1)/条),周期 roll-up 才 push 派生标量。
+丢弃数与回调耗时作为自我观测指标暴露;后续可据此自动降级(拉长 rollup / 砍 kind)。
+"""
+from __future__ import annotations
+
+import logging
+import sys
+import time
+from collections import defaultdict, deque
+from collections.abc import Callable
+from dataclasses import dataclass
+from threading import Event, Lock
+from typing import Any, Protocol, runtime_checkable
+
+from pping_lang.metrics_catalog import M
+from pping_lang.sink.base import Sink
+from pping_lang.types import MetricPoint
+
+logger = logging.getLogger(__name__)
+
+DEFAULT_ROLLUP_INTERVAL_S = 1.0
+
+# kernel 语义类 → 占比 metric 名。分类器产出的 class 必须 ∈ 这些 key。
+KERNEL_CLASS_TO_METRIC: dict[str, str] = {
+    "attention": M.KERNEL_SHARE_ATTENTION_PCT,
+    "gemm": M.KERNEL_SHARE_GEMM_PCT,
+    "norm": M.KERNEL_SHARE_NORM_PCT,
+    "rotary": M.KERNEL_SHARE_ROTARY_PCT,
+    "activation": M.KERNEL_SHARE_ACTIVATION_PCT,
+    "comm": M.KERNEL_SHARE_COMM_PCT,
+    "other": M.KERNEL_SHARE_OTHER_PCT,
+}
+KERNEL_CLASSES: tuple[str, ...] = tuple(KERNEL_CLASS_TO_METRIC)
+
+
+# === 采集源接口(可替换边界) =========================================
+
+@dataclass(slots=True, frozen=True)
+class KernelEvent:
+    """一条 GPU 活动记录,从采集源传给聚合层的最小载荷。
+
+    对应 cupti `ActivityKernel10` / `ActivityMemcpy6` / `ActivitySynchronization2`
+    的字段子集 —— 只保留 1a 部署级诊断真正用到的。kind 区分三类活动。
+    """
+
+    kind: str          # "kernel" | "memcpy" | "sync"
+    name: str          # kernel 名(mangled);memcpy/sync 为方向/类型字符串
+    start_ns: int      # GPU 时钟时间戳(ns)
+    end_ns: int
+    graph_id: int = 0  # CUDA Graph 归因;0 = 非 graph 内 launch
+    # 发起该 kernel 的 Python 调用栈(root→leaf 帧名),火焰图用。
+    # 仅在 capture_stacks 模式下填充(贵,on-demand);否则 None。
+    stack: tuple[str, ...] | None = None
+    stream_id: int = 0  # GPU stream;时间线按 stream 分行(看并发/通信重叠)
+
+
+# 采集源在自己的线程(CUPTI worker)里,每个 flush 周期回调一次,传一批 KernelEvent。
+RecordsCallback = Callable[[list[KernelEvent]], None]
+
+
+@runtime_checkable
+class KernelActivitySource(Protocol):
+    """kernel 活动采集源。1a=cupti-python;1b/2=原生 .so。"""
+
+    def available(self) -> bool:
+        """本环境能否采集(Linux + cupti + GPU)。False → collector 优雅禁用。"""
+        ...
+
+    def start(self, on_records: RecordsCallback) -> None:
+        """开始采集,记录成批回调到 on_records。"""
+        ...
+
+    def stop(self) -> None:
+        """停止采集并 flush 残留记录。幂等。"""
+        ...
+
+    def dropped_records(self) -> int:
+        """累计丢弃记录数(缓冲溢出),供预算自守判断。无则返回 0。"""
+        ...
+
+
+# === kernel 名 → 语义类(vLLM 语义层,带记忆化) =======================
+
+# (子串列表, 类名)。小写子串匹配,首个命中胜出 —— 顺序敏感:
+# 先 comm(nccl 含 reduce)再 gemm,先 attention 再其它。未命中 → "other"。
+DEFAULT_CLASSIFY_RULES: list[tuple[tuple[str, ...], str]] = [
+    (("flash", "attention", "paged_attn", "paged_attention", "fmha", "mha"), "attention"),
+    (("nccl", "allreduce", "all_reduce", "reduce_scatter", "all_gather", "reducescatter",
+      "allgather", "sendrecv"), "comm"),
+    (("gemm", "cutlass", "s16816", "wgmma", "cublas", "matmul", "sm80_", "sm90_",
+      "ampere_", "hopper_", "_mm_", "linear"), "gemm"),
+    (("rms_norm", "rmsnorm", "layernorm", "layer_norm", "fused_add_rms"), "norm"),
+    (("rotary", "rope"), "rotary"),
+    (("silu", "swiglu", "geglu", "gelu", "act_and_mul", "activation"), "activation"),
+]
+
+
+class KernelClassifier:
+    """mangled kernel 名 → 语义类,结果按名记忆化。
+
+    记忆化是 5% 预算的关键:同批就那 ~20 个 kernel 反复出现,首次分类后退化成
+    一次 dict 命中(~80ns/条),避免每条都跑子串匹配(见采集设计 §0)。
+    """
+
+    def __init__(self, rules: list[tuple[tuple[str, ...], str]] | None = None) -> None:
+        self._rules = rules if rules is not None else DEFAULT_CLASSIFY_RULES
+        self._cache: dict[str, str] = {}
+
+    def classify(self, name: str) -> str:
+        cls = self._cache.get(name)
+        if cls is None:
+            cls = self._match(name)
+            self._cache[name] = cls
+        return cls
+
+    def _match(self, name: str) -> str:
+        low = name.lower()
+        for needles, cls in self._rules:
+            for n in needles:
+                if n in low:
+                    return cls
+        return "other"
+
+    @property
+    def cache_size(self) -> int:
+        return len(self._cache)
+
+
+# === 滚动窗聚合 → 派生标量 ============================================
+
+class WindowAggregator:
+    """累加一个时间窗内的 kernel 时间,roll-up 时算出派生占比指标。
+
+    线程安全:add() 在采集源线程调用,snapshot_and_reset() 在 collector 调用,
+    用一把锁护住(都很轻)。tumbling 窗(roll-up 即清零),非滑动窗 —— 1a 够用。
+    """
+
+    def __init__(self, classifier: KernelClassifier) -> None:
+        self._clf = classifier
+        self._lock = Lock()
+        self._reset_locked()
+
+    def _reset_locked(self) -> None:
+        self._class_ns: dict[str, int] = defaultdict(int)
+        # per-kernel 原始明细:raw name → [count, total_ns, in_graph_ns]。
+        # 这是"未洗过"的钻取数据,kernel_table() 读它出原始表。
+        self._kernel_stats: dict[str, list[int]] = defaultdict(lambda: [0, 0, 0])
+        self._memcpy_ns = 0
+        self._sync_ns = 0
+        self._in_graph_ns = 0
+        self._launch_count = 0
+        self._has_data = False
+
+    @property
+    def has_data(self) -> bool:
+        """本窗自上次 reset 以来是否收到过有效活动。bool 读 GIL 原子,无需锁。"""
+        return self._has_data
+
+    def add(self, events: list[KernelEvent]) -> None:
+        with self._lock:
+            for e in events:
+                dur = e.end_ns - e.start_ns
+                if dur < 0:
+                    continue  # 时钟乱序/坏记录,跳过
+                self._has_data = True
+                if e.kind == "kernel":
+                    self._class_ns[self._clf.classify(e.name)] += dur
+                    self._launch_count += 1
+                    ks = self._kernel_stats[e.name]
+                    ks[0] += 1
+                    ks[1] += dur
+                    if e.graph_id:
+                        self._in_graph_ns += dur
+                        ks[2] += dur
+                elif e.kind == "memcpy":
+                    self._memcpy_ns += dur
+                elif e.kind == "sync":
+                    self._sync_ns += dur
+
+    def snapshot_and_reset(self, wall_ns: int) -> dict[str, float]:
+        """算出派生指标(metric 名 → 值)并清零。wall_ns = 本窗墙钟跨度。"""
+        with self._lock:
+            total_kernel_ns = sum(self._class_ns.values())
+            out: dict[str, float] = {}
+
+            # kernel 类占比:占总 kernel 计算时间(各类相加 ≈ 100)
+            for cls in KERNEL_CLASSES:
+                pct = 100.0 * self._class_ns.get(cls, 0) / total_kernel_ns if total_kernel_ns else 0.0
+                out[KERNEL_CLASS_TO_METRIC[cls]] = pct
+
+            # memcpy / sync / gpu_busy:占墙钟窗口
+            wall = wall_ns if wall_ns > 0 else 0
+            if wall:
+                out[M.KERNEL_MEMCPY_SHARE_PCT] = 100.0 * self._memcpy_ns / wall
+                out[M.KERNEL_SYNC_SHARE_PCT] = 100.0 * self._sync_ns / wall
+                # busy 可能因多 stream 并发 Σ 时长 >wall,夹到 100
+                out[M.KERNEL_GPU_BUSY_PCT] = min(100.0, 100.0 * total_kernel_ns / wall)
+                out[M.KERNEL_LAUNCH_COUNT_PER_S] = self._launch_count / (wall / 1e9)
+            else:
+                out[M.KERNEL_MEMCPY_SHARE_PCT] = 0.0
+                out[M.KERNEL_SYNC_SHARE_PCT] = 0.0
+                out[M.KERNEL_GPU_BUSY_PCT] = 0.0
+                out[M.KERNEL_LAUNCH_COUNT_PER_S] = 0.0
+
+            out[M.KERNEL_MEAN_DUR_US] = (
+                (total_kernel_ns / self._launch_count) / 1e3 if self._launch_count else 0.0
+            )
+            out[M.KERNEL_IN_GRAPH_PCT] = (
+                100.0 * self._in_graph_ns / total_kernel_ns if total_kernel_ns else 0.0
+            )
+
+            self._reset_locked()
+            return out
+
+    def kernel_table(self, limit: int = 25) -> list[dict[str, Any]]:
+        """当前窗的 per-kernel 原始明细(未聚合),按占比降序取 top-N。
+
+        只读,不 reset —— collector 在 snapshot_and_reset 前调它快照本窗明细。
+        每行:raw name(未洗的 mangled 名)+ 分类 + 调用次数 + 总/平均耗时 + 占比。
+        """
+        with self._lock:
+            total = sum(v[1] for v in self._kernel_stats.values())
+            rows: list[dict[str, Any]] = []
+            for name, (count, total_ns, in_graph_ns) in self._kernel_stats.items():
+                rows.append({
+                    "name": name,
+                    "cls": self._clf.classify(name),
+                    "count": count,
+                    "total_ms": total_ns / 1e6,
+                    "mean_us": (total_ns / count / 1e3) if count else 0.0,
+                    "pct": (100.0 * total_ns / total) if total else 0.0,
+                    "in_graph_pct": (100.0 * in_graph_ns / total_ns) if total_ns else 0.0,
+                })
+            rows.sort(key=lambda r: r["pct"], reverse=True)
+            return rows[:limit]
+
+
+# === 火焰图聚合(on-demand 深度模式) ==================================
+
+class FlamegraphAggregator:
+    """把 (Python 调用栈 + kernel) → GPU 时间 累成火焰图前缀树。
+
+    仅消费带 stack 的 kernel 事件(capture_stacks 模式)。tumbling 窗。
+    对标 zymtrace 的 Python→kernel 火焰图(graph 内 kernel 归到 replay 调用点)。
+    """
+
+    def __init__(self) -> None:
+        self._lock = Lock()
+        self._reset_locked()
+
+    @staticmethod
+    def _node(name: str, kind: str) -> dict[str, Any]:
+        return {"name": name, "kind": kind, "value": 0, "children": {}}
+
+    def _reset_locked(self) -> None:
+        self._root = self._node("root", "root")
+        self._total = 0
+
+    def add(self, events: list[KernelEvent]) -> None:
+        with self._lock:
+            for e in events:
+                if e.kind != "kernel" or e.stack is None:
+                    continue
+                dur = e.end_ns - e.start_ns
+                if dur < 0:
+                    continue
+                self._total += dur
+                self._root["value"] += dur
+                node = self._root
+                for frame in e.stack:                       # Python 帧 root→leaf
+                    child = node["children"].get(frame)
+                    if child is None:
+                        child = self._node(frame, "python")
+                        node["children"][frame] = child
+                    child["value"] += dur
+                    node = child
+                leaf = node["children"].get(e.name)          # kernel 叶子
+                if leaf is None:
+                    leaf = self._node(e.name, "kernel")
+                    node["children"][e.name] = leaf
+                leaf["value"] += dur
+
+    @property
+    def has_data(self) -> bool:
+        return self._total > 0
+
+    def snapshot_and_reset(self, min_share: float = 0.004) -> dict[str, Any] | None:
+        """转嵌套 list 树并清零。裁掉占比 < min_share 的小分支(降噪+控体积)。"""
+        with self._lock:
+            total = self._total
+            if total <= 0:
+                self._reset_locked()
+                return None
+
+            def conv(node: dict[str, Any]) -> dict[str, Any]:
+                kids = [
+                    conv(c) for c in sorted(node["children"].values(), key=lambda n: -n["value"])
+                    if c["value"] / total >= min_share
+                ]
+                return {"name": node["name"], "kind": node["kind"],
+                        "value": node["value"], "children": kids}
+
+            tree = conv(self._root)
+            self._reset_locked()
+            return tree
+
+
+# === 执行时间线(Nsight-style:保留最近 N 条原始 kernel 的时间戳) =========
+
+class TimelineBuffer:
+    """最近 N 条 kernel/memcpy 的有界环,带 GPU 时间戳。时间线视图用。
+
+    不聚合 —— 时间线要的是单个 kernel 的 start/end/stream,看串行/空隙/通信重叠。
+    """
+
+    def __init__(self, maxlen: int = 2000) -> None:
+        self._lock = Lock()
+        self._buf: deque[tuple[int, int, str, str, int, int, str]] = deque(maxlen=maxlen)
+
+    def add(self, events: list[KernelEvent], classifier: KernelClassifier) -> None:
+        with self._lock:
+            for e in events:
+                if e.kind == "kernel":
+                    self._buf.append((e.start_ns, e.end_ns, classifier.classify(e.name),
+                                      "kernel", e.stream_id, 1 if e.graph_id else 0, e.name))
+                elif e.kind == "memcpy":
+                    self._buf.append((e.start_ns, e.end_ns, "memcpy", "memcpy",
+                                      e.stream_id, 0, "memcpy"))
+
+    def snapshot(self, max_events: int = 800) -> dict[str, Any] | None:
+        """最近 max_events 条,归一化到 [0, span]。空 → None。"""
+        with self._lock:
+            items = list(self._buf)[-max_events:]
+        items = [i for i in items if i[1] >= i[0]]  # 丢坏记录
+        if not items:
+            return None
+        t0 = min(i[0] for i in items)
+        span = max(i[1] for i in items) - t0
+        streams = sorted({i[4] for i in items})
+        evs = [
+            {"start": i[0] - t0, "dur": i[1] - i[0], "cls": i[2], "kind": i[3],
+             "stream": i[4], "in_graph": i[5], "name": i[6]}
+            for i in items
+        ]
+        return {"span_ns": span, "streams": streams, "count": len(evs), "events": evs}
+
+
+# === collector(编排:source → classifier → aggregator → sink) =========
+
+class CuptiKernelCollector:
+    """编排 kernel 采集。镜像 NvmlSampler 的生命周期与故障隔离哲学。
+
+    roll-up 在采集源回调线程里按 clock 节奏触发(无额外线程):每批记录累加进
+    aggregator,距上次 roll-up ≥ interval 就 snapshot + push 派生指标。
+    """
+
+    def __init__(
+        self,
+        sink: Sink,
+        engine_index: int = 0,
+        source: KernelActivitySource | None = None,
+        classifier: KernelClassifier | None = None,
+        rollup_interval_s: float = DEFAULT_ROLLUP_INTERVAL_S,
+        clock: Callable[[], int] = time.monotonic_ns,
+        top_n: int = 100,
+        capture_stacks: bool = False,
+    ) -> None:
+        self._sink = sink
+        self._engine_index = engine_index
+        self._source = source if source is not None else _default_source(capture_stacks)
+        self._classifier = classifier or KernelClassifier()
+        self._agg = WindowAggregator(self._classifier)
+        self._flame = FlamegraphAggregator()           # 火焰图(仅 capture_stacks 模式有数据)
+        self._timeline = TimelineBuffer()              # 执行时间线(最近 N 条原始 kernel)
+        self._rollup_interval_ns = int(rollup_interval_s * 1e9)
+        self._clock = clock
+        self._top_n = top_n
+        self._enabled = False
+        self._started = Event()
+        self._last_rollup_ns: int | None = None
+        self._cb_total_ns = 0  # 本窗回调累计耗时(自我观测)
+        # 最近一窗的 per-kernel 原始明细(API 直接读,不走 metric 管道)
+        self._last_kernels: list[dict[str, Any]] = []
+        self._last_flame: dict[str, Any] | None = None   # 最近一窗火焰图树
+        # 这一窗快照的时刻(monotonic ns)+ 窗宽,让前端能显示"X 秒前 / 最近 Ys 窗口"
+        self._last_kernels_ts: int | None = None
+        self._last_window_ns = 0
+
+    @property
+    def enabled(self) -> bool:
+        return self._enabled
+
+    def top_kernels(self) -> list[dict[str, Any]]:
+        """最近一窗的 per-kernel 原始明细表(未聚合)。供 API / dashboard 钻取。"""
+        return self._last_kernels
+
+    def flamegraph(self) -> dict[str, Any] | None:
+        """最近一窗的 Python 调用栈 → kernel 火焰图树。None=未开 capture_stacks 或无数据。"""
+        return self._last_flame
+
+    def timeline(self, max_events: int = 800) -> dict[str, Any] | None:
+        """最近 max_events 条 kernel 的执行时间线(start/end/stream)。供时间线视图。"""
+        return self._timeline.snapshot(max_events)
+
+    @property
+    def last_snapshot_ts(self) -> int | None:
+        """最近一次"有数据"的 rollup 快照时刻(monotonic ns)。None=从未有过。
+        注意:空窗(无流量)会被跳过,所以这个时间戳只在有 GPU 活动时推进 ——
+        前端据此判断数据是实时还是"无流量后停在最后一窗"。"""
+        return self._last_kernels_ts
+
+    @property
+    def last_window_ns(self) -> int:
+        """最近快照覆盖的窗宽(ns)。"""
+        return self._last_window_ns
+
+    def start(self) -> None:
+        if self._source is None or not self._source.available():
+            logger.warning(
+                "[pping-lang] CUPTI source unavailable; kernel tracing disabled "
+                "(needs Linux + cupti-python + GPU)"
+            )
+            return
+        if self._started.is_set():
+            return
+        try:
+            self._source.start(self._on_records)
+            self._started.set()
+            self._enabled = True
+            logger.info("[pping-lang] CUPTI kernel tracing started")
+        except Exception as e:
+            logger.warning("[pping-lang] CUPTI start failed, kernel tracing disabled: %s", e)
+            self._enabled = False
+
+    def stop(self) -> None:
+        if not self._started.is_set():
+            return
+        try:
+            self._source.stop()
+        except Exception:
+            logger.exception("[pping-lang] CUPTI source stop failed")
+        # 最后一窗 flush 出去,别丢
+        if self._last_rollup_ns is not None:
+            try:
+                self._rollup(self._clock())
+            except Exception:
+                logger.exception("[pping-lang] CUPTI final rollup failed")
+        self._started.clear()
+        self._enabled = False
+
+    # === 采集源回调(运行在 CUPTI worker 线程) ===
+
+    def _on_records(self, events: list[KernelEvent]) -> None:
+        try:
+            t0 = self._clock()
+            self._agg.add(events)
+            self._flame.add(events)
+            self._timeline.add(events, self._classifier)
+            self._cb_total_ns += self._clock() - t0
+            now = self._clock()
+            if self._last_rollup_ns is None:
+                self._last_rollup_ns = now
+                return
+            if now - self._last_rollup_ns >= self._rollup_interval_ns:
+                self._rollup(now)
+        except Exception:
+            # 回调异常绝不传播给 CUPTI / vLLM
+            logger.exception("[pping-lang] CUPTI record handling failed")
+
+    def _rollup(self, now: int) -> None:
+        # 显式 None 判断,不能用 `or`:last_rollup 合法地可能为 0(单调时钟起点)
+        if self._last_rollup_ns is None:
+            self._last_rollup_ns = now
+            return
+        wall_ns = now - self._last_rollup_ns
+        if wall_ns <= 0:
+            # 零跨度窗(如 rollup 后立即 stop)无意义,跳过 —— 别用空窗 0 覆盖真值
+            self._last_rollup_ns = now
+            return
+        if not self._agg.has_data:
+            # 窗内无任何 GPU 活动(stop 收尾的空窗 / 纯 idle):不 push 误导性全 0
+            self._last_rollup_ns = now
+            return
+        # 先快照 per-kernel 原始明细(读,不 reset),再 snapshot_and_reset 出标量指标
+        self._last_kernels = self._agg.kernel_table(self._top_n)
+        if self._flame.has_data:
+            self._last_flame = self._flame.snapshot_and_reset()
+        self._last_kernels_ts = now      # 只在"有数据"时推进 → 前端可判断是否过期
+        self._last_window_ns = wall_ns
+        stats = self._agg.snapshot_and_reset(wall_ns)
+        push = self._sink.push_metric
+        ei = self._engine_index
+        for name, value in stats.items():
+            push(MetricPoint(now, name, value, ei))
+        # 自我观测:回调耗时 + 累计丢弃(预算自守的输入)
+        push(MetricPoint(now, M.PPING_LANG_CUPTI_CB_MS, self._cb_total_ns / 1e6, ei))
+        try:
+            dropped = self._source.dropped_records()
+        except Exception:
+            dropped = 0
+        push(MetricPoint(now, M.PPING_LANG_CUPTI_DROPPED_TOTAL, float(dropped), ei))
+        self._cb_total_ns = 0
+        self._last_rollup_ns = now
+
+
+# === 采集源实现 ======================================================
+
+class FakeActivitySource:
+    """测试 / 开发用采集源 —— 手动 emit 合成记录。让全部聚合逻辑在无 GPU
+    的机器(如 Windows)上可测。"""
+
+    def __init__(self, available: bool = True) -> None:
+        self._available = available
+        self._cb: RecordsCallback | None = None
+        self._dropped = 0
+
+    def available(self) -> bool:
+        return self._available
+
+    def start(self, on_records: RecordsCallback) -> None:
+        self._cb = on_records
+
+    def stop(self) -> None:
+        self._cb = None
+
+    def dropped_records(self) -> int:
+        return self._dropped
+
+    # --- 测试钩子 ---
+    def emit(self, events: list[KernelEvent]) -> None:
+        if self._cb is not None:
+            self._cb(events)
+
+    def set_dropped(self, n: int) -> None:
+        self._dropped = n
+
+
+class CuptiPythonSource:
+    """进程内 cupti-python Activity API 采集源(阶段 1a)。
+
+    Linux x86_64 only。import 失败(Windows / 无包)→ available() False → 优雅禁用。
+    真实采集只能在 Linux/WSL/远程 GPU 验证(见采集设计 §7 烟雾测试)。
+    """
+
+    # 抓 Python 栈的 launch API（运行时 + 驱动）。capture_stacks 模式才订阅。
+    _RUNTIME_LAUNCH_CBIDS = ("cudaLaunchKernel_v13000", "cudaGraphLaunch_v10000",
+                             "cudaLaunchKernelExC_v11060")
+    _DRIVER_LAUNCH_CBIDS = ("cuLaunchKernel", "cuGraphLaunch", "cuLaunchKernelEx")
+
+    def __init__(self, buffer_size: int = 8 * 1024 * 1024,
+                 capture_stacks: bool = False, stack_depth: int = 32) -> None:
+        self._buffer_size = buffer_size
+        self._capture_stacks = capture_stacks
+        self._stack_depth = stack_depth
+        self._cb: RecordsCallback | None = None
+        self._cupti = _import_cupti()
+        # correlation_id → 发起 kernel 的 Python 栈(callback 线程写,buffer 线程消费)
+        self._pending: dict[int, tuple[str, ...]] = {}
+        self._pending_lock = Lock()
+        self._subscriber: int | None = None
+        self._cb_fn: Any = None     # 保活:cupti 持有回调引用
+        self._enter_site: Any = None
+
+    def available(self) -> bool:
+        return self._cupti is not None
+
+    def start(self, on_records: RecordsCallback) -> None:
+        if self._cupti is None:
+            raise RuntimeError("cupti-python not importable")
+        self._cb = on_records
+        c = self._cupti
+        for kind in (
+            c.ActivityKind.CONCURRENT_KERNEL,
+            c.ActivityKind.MEMCPY,
+            c.ActivityKind.SYNCHRONIZATION,
+        ):
+            c.activity_enable(kind)
+        c.activity_register_callbacks(self._buffer_requested, self._buffer_completed)
+        c.activity_flush_period(1000)  # ~1s 自动 flush,贴合实时
+        if self._capture_stacks:
+            self._start_stack_capture()
+
+    def _start_stack_capture(self) -> None:
+        c = self._cupti
+        self._enter_site = c.ApiCallbackSite.API_ENTER
+        self._cb_fn = self._launch_callback
+        self._subscriber = c.subscribe(self._cb_fn, 0)
+        for nm in self._RUNTIME_LAUNCH_CBIDS:
+            cbid = getattr(c.runtime_api_trace_cbid, nm, None)
+            if cbid is not None:
+                c.enable_callback(1, self._subscriber, c.CallbackDomain.RUNTIME_API, int(cbid))
+        for nm in self._DRIVER_LAUNCH_CBIDS:
+            cbid = getattr(c.driver_api_trace_cbid, nm, None)
+            if cbid is not None:
+                c.enable_callback(1, self._subscriber, c.CallbackDomain.DRIVER_API, int(cbid))
+
+    def stop(self) -> None:
+        if self._cupti is None:
+            return
+        c = self._cupti
+        c.activity_flush_all(1)  # flag 1 = forced:强制交付未满 buffer 的残留记录,别丢尾部
+        for kind in (
+            c.ActivityKind.CONCURRENT_KERNEL,
+            c.ActivityKind.MEMCPY,
+            c.ActivityKind.SYNCHRONIZATION,
+        ):
+            try:
+                c.activity_disable(kind)
+            except Exception:
+                pass
+        if self._subscriber is not None:
+            try:
+                c.unsubscribe(self._subscriber)
+            except Exception:
+                pass
+            self._subscriber = None
+        self._cb = None
+
+    def dropped_records(self) -> int:
+        # TODO(1a 验证): cupti.activity_get_num_dropped_records 需要 context/stream
+        # 句柄,接线时补。原型先返回 0。
+        return 0
+
+    # --- Callback API:在 launch 处抓 Python 栈(launch 线程,同步) ---
+    def _launch_callback(self, userdata, domain, cbid, cbdata) -> None:  # noqa: ANN001
+        try:
+            if cbdata.callback_site != self._enter_site:
+                return
+            # sys._getframe(1) = 调 launch 的 Python 帧;沿 f_back 走到 root。
+            # 用 co_name 而非 traceback.extract_stack(避免读源码,开销低很多)。
+            frames: list[str] = []
+            f: Any = sys._getframe(1)
+            depth = self._stack_depth
+            while f is not None and len(frames) < depth:
+                frames.append(f.f_code.co_name)
+                f = f.f_back
+            frames.reverse()  # root→leaf
+            with self._pending_lock:
+                if len(self._pending) > 300_000:  # 安全上限:防未匹配栈无限涨
+                    self._pending.clear()
+                self._pending[cbdata.correlation_id] = tuple(frames)
+        except Exception:
+            pass
+
+    # --- cupti 回调(CUPTI worker 线程) ---
+    def _buffer_requested(self) -> tuple[int, int]:
+        return self._buffer_size, 0  # (size, max_records=0 不限)
+
+    def _buffer_completed(self, activities: list) -> None:
+        if self._cb is None:
+            return
+        c = self._cupti
+        kernel_kinds = (c.ActivityKind.CONCURRENT_KERNEL, c.ActivityKind.KERNEL)
+        events: list[KernelEvent] = []
+        pending = self._pending
+        max_cid = 0
+        for a in activities:
+            kind = a.kind
+            if kind in kernel_kinds:
+                stack = None
+                cid = a.correlation_id
+                if cid > max_cid:
+                    max_cid = cid
+                if self._capture_stacks:
+                    # .get 不 pop:一次 cuGraphLaunch 下的所有 kernel 共享同一个
+                    # correlation_id,pop 会让除第一个外的 graph kernel 全丢栈。
+                    with self._pending_lock:
+                        stack = pending.get(cid)
+                events.append(KernelEvent(
+                    "kernel", a.name, a.start, a.end,
+                    getattr(a, "graph_id", 0) or 0, stack, getattr(a, "stream_id", 0) or 0,
+                ))
+            elif kind == c.ActivityKind.MEMCPY:
+                events.append(KernelEvent(
+                    "memcpy", "memcpy", a.start, a.end, getattr(a, "graph_id", 0) or 0,
+                    None, getattr(a, "stream_id", 0) or 0,
+                ))
+            elif kind == c.ActivityKind.SYNCHRONIZATION:
+                events.append(KernelEvent("sync", "sync", a.start, a.end))
+        # 批末清理:本批已消费的 launch(cid <= 本批最大 kernel cid)删掉,防膨胀;
+        # cid > max 的留着(其 kernel 还没交付)。比 pop 安全,又不无限涨。
+        if self._capture_stacks and max_cid:
+            with self._pending_lock:
+                stale = [k for k in self._pending if k <= max_cid]
+                for k in stale:
+                    del self._pending[k]
+        self._cb(events)
+
+
+def _import_cupti():  # noqa: ANN202 - 动态模块
+    try:
+        from cupti import cupti
+        return cupti
+    except Exception:
+        return None
+
+
+def _default_source(capture_stacks: bool = False) -> KernelActivitySource:
+    # 总是返回实例;collector.start() 用 available() 决定启用还是优雅禁用。
+    return CuptiPythonSource(capture_stacks=capture_stacks)

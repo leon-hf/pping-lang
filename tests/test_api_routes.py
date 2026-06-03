@@ -231,6 +231,182 @@ def test_instances_list(app_with_data):
     assert "test-inst" in body["instances"]
 
 
+def test_kernels_endpoint_with_data(tmp_path):
+    """/api/kernels 打包 kernel 分解;class_shares 按占比降序。"""
+    db = tmp_path / "k.duckdb"
+    sink = LocalSink(db_path=db, instance_id="x", flush_interval_s=10.0)
+    base = time.monotonic_ns()
+    for name, val in [
+        (M.KERNEL_SHARE_ATTENTION_PCT, 42.0),
+        (M.KERNEL_SHARE_GEMM_PCT, 31.0),
+        (M.KERNEL_SHARE_OTHER_PCT, 27.0),
+        (M.KERNEL_GPU_BUSY_PCT, 88.0),
+        (M.KERNEL_LAUNCH_COUNT_PER_S, 4128.0),
+        (M.KERNEL_MEAN_DUR_US, 12.5),
+        (M.KERNEL_IN_GRAPH_PCT, 89.0),
+        (M.PPING_LANG_CUPTI_CB_MS, 0.06),
+    ]:
+        sink.push_metric(MetricPoint(ts_ns=base, name=name, value=val))
+    app = build_app(
+        db_path=str(db), instance_id="x", engine_index=0,
+        sink=sink, rule_store=RuleStore(),
+    )
+    client = TestClient(app)
+    try:
+        r = client.get("/api/kernels")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["enabled"] is True
+        # 降序:attention(42) > gemm(31) > other(27)
+        shares = data["class_shares"]
+        assert [c["cls"] for c in shares] == ["attention", "gemm", "other"]
+        assert data["gpu_busy_pct"] == 88.0
+        assert data["launch_count_per_s"] == 4128.0
+        assert data["in_graph_pct"] == 89.0
+        assert data["overhead_cb_ms"] == 0.06
+    finally:
+        sink.close()
+
+
+def test_kernels_endpoint_top_kernels_from_collector(tmp_path):
+    """/api/kernels 透出 collector 的原始 per-kernel 明细(未洗的 mangled 名)。"""
+    db = tmp_path / "kd.duckdb"
+    sink = LocalSink(db_path=db, instance_id="x", flush_interval_s=10.0)
+
+    class _FakeCupti:
+        last_snapshot_ts = time.monotonic_ns()
+        last_window_ns = int(1.0 * 1e9)
+
+        def top_kernels(self):
+            return [
+                {"name": "flash_fwd_kernel", "cls": "attention", "count": 120,
+                 "total_ms": 5.2, "mean_us": 43.0, "pct": 42.0, "in_graph_pct": 100.0},
+                {"name": "cutlass_80_tensorop_s16816gemm_f16", "cls": "gemm", "count": 96,
+                 "total_ms": 3.8, "mean_us": 39.6, "pct": 31.0, "in_graph_pct": 100.0},
+            ]
+
+    app = build_app(
+        db_path=str(db), instance_id="x", engine_index=0,
+        sink=sink, rule_store=RuleStore(), cupti=_FakeCupti(),
+    )
+    client = TestClient(app)
+    try:
+        data = client.get("/api/kernels").json()
+        assert data["enabled"] is True  # 有原始明细即算启用
+        tk = data["top_kernels"]
+        assert tk[0]["name"] == "flash_fwd_kernel"
+        assert tk[1]["name"] == "cutlass_80_tensorop_s16816gemm_f16"
+        assert tk[0]["count"] == 120
+        # 数据时刻字段:刚 stamp 的 ts → age 很小;窗宽 1s
+        assert data["snapshot_age_s"] is not None and data["snapshot_age_s"] < 5.0
+        assert abs(data["rollup_window_s"] - 1.0) < 0.01
+    finally:
+        sink.close()
+
+
+def test_kernel_findings_logic():
+    """诊断结论:从 kernel 指标派生人话结论(GEMM-bound / 单kernel / launch-bound / 碎片化)。"""
+    from pping_lang.api.routes import _kernel_findings
+    class_shares = [{"cls": "gemm", "pct": 87.0}, {"cls": "attention", "pct": 6.0}]
+    top_kernels = [{"name": "cutlass_x", "cls": "gemm", "pct": 50.0}] + [
+        {"name": f"gemm_{i}", "cls": "gemm", "pct": 1.0} for i in range(10)
+    ]
+    findings = _kernel_findings(
+        class_shares=class_shares, top_kernels=top_kernels,
+        sync_share=27.0, memcpy_share=0.1, in_graph=76.0,
+        launch_rate=47000.0, overhead_cb_ms=80.0, window_s=2.0,
+    )
+    titles = " | ".join(f["title"] for f in findings)
+    assert "bound" in titles  # GEMM-bound
+    assert "单 kernel" in titles
+    assert "Launch-bound" in titles
+    assert "碎片化" in titles
+    assert "采集开销" in titles  # 80ms/2s = 4% ≥ 3%
+    assert all(f["level"] in ("info", "warning", "critical") for f in findings)
+
+
+def test_kernel_findings_quiet_when_healthy():
+    """没有明显瓶颈时不硬凑结论。"""
+    from pping_lang.api.routes import _kernel_findings
+    findings = _kernel_findings(
+        class_shares=[{"cls": "gemm", "pct": 35.0}, {"cls": "attention", "pct": 30.0}],
+        top_kernels=[{"name": "k", "cls": "gemm", "pct": 20.0}],
+        sync_share=3.0, memcpy_share=1.0, in_graph=90.0,
+        launch_rate=2000.0, overhead_cb_ms=2.0, window_s=2.0,
+    )
+    assert findings == []
+
+
+def test_kernels_flamegraph_endpoint(tmp_path):
+    """/api/kernels/flamegraph 透出 collector 的 Python→kernel 火焰图树。"""
+    db = tmp_path / "fg.duckdb"
+    sink = LocalSink(db_path=db, instance_id="x", flush_interval_s=10.0)
+
+    class _FakeCupti:
+        def flamegraph(self):
+            return {"name": "root", "kind": "root", "value": 100, "children": [
+                {"name": "step", "kind": "python", "value": 100, "children": [
+                    {"name": "flash_fwd", "kind": "kernel", "value": 100, "children": []},
+                ]},
+            ]}
+
+    app = build_app(db_path=str(db), instance_id="x", engine_index=0,
+                    sink=sink, rule_store=RuleStore(), cupti=_FakeCupti())
+    try:
+        data = TestClient(app).get("/api/kernels/flamegraph").json()
+        assert data["available"] is True
+        assert data["tree"]["name"] == "root"
+        assert data["tree"]["children"][0]["name"] == "step"
+    finally:
+        sink.close()
+
+
+def test_kernels_flamegraph_unavailable_without_collector(empty_app):
+    client, _, _ = empty_app
+    data = client.get("/api/kernels/flamegraph").json()
+    assert data["available"] is False
+    assert data["tree"] is None
+
+
+def test_kernels_timeline_endpoint(tmp_path):
+    """/api/kernels/timeline 透出 collector 的执行时间线。"""
+    db = tmp_path / "tl.duckdb"
+    sink = LocalSink(db_path=db, instance_id="x", flush_interval_s=10.0)
+
+    class _FakeCupti:
+        def timeline(self, max_events=800):
+            return {"span_ns": 450, "streams": [7], "count": 1,
+                    "events": [{"start": 50, "dur": 100, "cls": "attention",
+                                "kind": "kernel", "stream": 7, "in_graph": 1, "name": "flash_fwd"}]}
+
+    app = build_app(db_path=str(db), instance_id="x", engine_index=0,
+                    sink=sink, rule_store=RuleStore(), cupti=_FakeCupti())
+    try:
+        data = TestClient(app).get("/api/kernels/timeline").json()
+        assert data["available"] is True
+        assert data["timeline"]["count"] == 1
+        assert data["timeline"]["events"][0]["name"] == "flash_fwd"
+    finally:
+        sink.close()
+
+
+def test_kernels_timeline_unavailable_without_collector(empty_app):
+    client, _, _ = empty_app
+    data = client.get("/api/kernels/timeline").json()
+    assert data["available"] is False and data["timeline"] is None
+
+
+def test_kernels_endpoint_disabled_when_no_data(empty_app):
+    """无 kernel 数据(CUPTI 未启用 / 无 GPU)→ enabled=False,不 500。"""
+    client, _, _ = empty_app
+    r = client.get("/api/kernels")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["enabled"] is False
+    assert data["class_shares"] == []
+    assert data["gpu_busy_pct"] is None
+
+
 def test_diagnoses_empty_when_no_db_tables(tmp_path):
     """API should not 500 when DuckDB file/tables don't exist yet."""
     db = tmp_path / "empty.duckdb"

@@ -69,10 +69,29 @@ class M:
     VLLM_SPEC_ACCEPTED_TOKENS = "vllm.spec.accepted_tokens"
     VLLM_SPEC_DRAFT_TOKENS = "vllm.spec.draft_tokens"
 
+    # GPU kernel 级 (CUPTI Activity, 阶段 1a) — 派生时间占比
+    # kernel 类占比是"占总 kernel 计算时间"(各类相加 ≈ 100)；
+    # memcpy/sync/gpu_busy 是"占墙钟窗口"(memcpy 可与 kernel 异步重叠)。
+    KERNEL_SHARE_ATTENTION_PCT = "kernel.time_share.attention_pct"
+    KERNEL_SHARE_GEMM_PCT = "kernel.time_share.gemm_pct"
+    KERNEL_SHARE_NORM_PCT = "kernel.time_share.norm_pct"
+    KERNEL_SHARE_ROTARY_PCT = "kernel.time_share.rotary_pct"
+    KERNEL_SHARE_ACTIVATION_PCT = "kernel.time_share.activation_pct"
+    KERNEL_SHARE_COMM_PCT = "kernel.time_share.comm_pct"
+    KERNEL_SHARE_OTHER_PCT = "kernel.time_share.other_pct"
+    KERNEL_MEMCPY_SHARE_PCT = "kernel.memcpy_share_pct"
+    KERNEL_SYNC_SHARE_PCT = "kernel.sync_share_pct"
+    KERNEL_GPU_BUSY_PCT = "kernel.gpu_busy_pct"
+    KERNEL_LAUNCH_COUNT_PER_S = "kernel.launch_count_per_s"
+    KERNEL_MEAN_DUR_US = "kernel.mean_dur_us"
+    KERNEL_IN_GRAPH_PCT = "kernel.in_graph_pct"
+
     # pping-lang 自我观测
     PPING_LANG_SINK_DROPPED_TOTAL = "pping_lang.sink.dropped_total"
     PPING_LANG_RECORD_OVERHEAD_US = "pping_lang.overhead.record_us"
     PPING_LANG_RULE_EVAL_MS = "pping_lang.overhead.rule_eval_ms"
+    PPING_LANG_CUPTI_DROPPED_TOTAL = "pping_lang.cupti.dropped_total"
+    PPING_LANG_CUPTI_CB_MS = "pping_lang.overhead.cupti_cb_ms"
 
 
 def _collect_metric_names() -> frozenset[str]:

@@ -35,6 +35,7 @@ dependencies = [
 [project.optional-dependencies]
 # vllm 是 runtime 依赖，但安装它需要 CUDA + 体积大，dev/test 通过 fallback 解耦
 vllm = ["vllm>=0.20.0,<0.22.0"]
+cupti = ["cupti-python>=13.0.0"]                  # 阶段 1a kernel 级采集 (Linux x86_64/aarch64 only)
 server = ["grpcio>=1.60.0", "protobuf>=4.0.0"]   # v0.2
 analyzer = ["prometheus-api-client>=0.5.0"]       # v0.3
 bench = ["httpx>=0.27.0"]                         # bench module HTTP client

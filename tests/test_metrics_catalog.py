@@ -96,8 +96,12 @@ def test_naming_unit_suffix_or_whitelisted():
 
 
 def test_naming_starts_with_known_domain():
-    """domain 必须是 gpu / vllm / pping_lang 之一。"""
-    domains = ("gpu.", "vllm.", "pping_lang.")
+    """domain 必须是 gpu / kernel / vllm / pping_lang 之一。
+
+    kernel.* 是阶段 1a 引入的新观测域(层级 2:GPU kernel 计时),
+    区别于 gpu.*(NVML 物理层,层级 0)。
+    """
+    domains = ("gpu.", "kernel.", "vllm.", "pping_lang.")
     for name in ALLOWED_METRICS:
         assert name.startswith(domains), (
             f"{name!r} 的 domain 未知。允许: {domains}"

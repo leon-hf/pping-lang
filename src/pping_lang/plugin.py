@@ -11,6 +11,9 @@ Day 3 status：完整数据流通了。
 - PPING_LANG_INSTANCE_ID          默认 local-{engine_index}
 - PPING_LANG_NVML_INTERVAL_S      默认 0.1（NVML 采样间隔，秒）
 - PPING_LANG_DISABLE_NVML         设为 1 关闭 NVML 采样
+- PPING_LANG_ENABLE_CUPTI         设为 1 开启 CUPTI kernel 级采集（默认关；仅 Linux x86_64/aarch64）
+- PPING_LANG_CUPTI_ROLLUP_S       默认 1.0（CUPTI kernel 指标 roll-up 间隔，秒）
+- PPING_LANG_CUPTI_TOP_N          默认 100（每窗保留的 per-kernel 明细行数上限）
 - PPING_LANG_FLUSH_INTERVAL_S     默认 5.0（Sink → DuckDB 批量写间隔）
 - PPING_LANG_RULE_EVAL_INTERVAL_S 默认 1.0
 - PPING_LANG_DISABLE_RULES        设为 1 关闭规则引擎
@@ -33,6 +36,7 @@ from typing import TYPE_CHECKING
 
 from pping_lang.api.routes import build_app
 from pping_lang.api.server import ApiServer
+from pping_lang.collector.cupti import CuptiKernelCollector
 from pping_lang.collector.nvml import NvmlSampler, detect_first_gpu_name
 from pping_lang.collector.vllm_stats import VllmStatsCollector
 from pping_lang.hardware import GPUPeak, lookup_peak
@@ -135,6 +139,7 @@ class PpingLangStatLogger(StatLoggerBase):
         self.vllm_config = vllm_config
         self._sink: Sink | None = None
         self._nvml: NvmlSampler | None = None
+        self._cupti: CuptiKernelCollector | None = None
         self._collector: VllmStatsCollector | None = None
         self._rule_engine: RuleEngine | None = None
         self._api: ApiServer | None = None
@@ -218,6 +223,19 @@ class PpingLangStatLogger(StatLoggerBase):
             self._nvml.start()
             atexit.register(self._nvml.stop)
 
+        # 4b) CUPTI kernel 级采集（opt-in，默认关；Linux-only，非 Linux 自动降级 no-op）
+        if os.environ.get("PPING_LANG_ENABLE_CUPTI") == "1":
+            rollup_s = float(os.environ.get("PPING_LANG_CUPTI_ROLLUP_S", "1.0"))
+            top_n = int(os.environ.get("PPING_LANG_CUPTI_TOP_N", "100"))
+            self._cupti = CuptiKernelCollector(
+                self._sink,
+                engine_index=self.engine_index,
+                rollup_interval_s=rollup_s,
+                top_n=top_n,
+            )
+            self._cupti.start()  # source 不可用时内部优雅禁用 + warning
+            atexit.register(self._cupti.stop)
+
         # 5) Rule store (defaults + optional user JSON overrides)
         rules_path = os.environ.get("PPING_LANG_RULES_PATH")
         self._rule_store = RuleStore(
@@ -261,6 +279,7 @@ class PpingLangStatLogger(StatLoggerBase):
                 rule_store=self._rule_store,
                 rule_engine=self._rule_engine,
                 nvml=self._nvml,
+                cupti=self._cupti,
                 version=_version,
                 vllm_config=self.vllm_config,
                 gpu_peak=gpu_peak,
@@ -273,10 +292,11 @@ class PpingLangStatLogger(StatLoggerBase):
             atexit.register(self._api.stop)
 
         logger.info(
-            "[pping-lang] ready: db=%s instance=%s engine=%d nvml=%s gpu_peak=%s "
+            "[pping-lang] ready: db=%s instance=%s engine=%d nvml=%s cupti=%s gpu_peak=%s "
             "rules=%d api=%s",
             db_path, instance_id, self.engine_index,
             self._nvml.enabled if self._nvml else False,
+            self._cupti.enabled if self._cupti else False,
             gpu_peak,
             self._rule_engine.num_rules if self._rule_engine else 0,
             self._api.url if self._api else "disabled",

@@ -80,3 +80,33 @@ def test_overhead_value_is_nonnegative(tmp_path, monkeypatch):
     ).fetchone()[0]
     conn.close()
     assert value >= 0.0
+
+
+def test_cupti_disabled_by_default(tmp_path, monkeypatch):
+    """CUPTI 是 opt-in：不设 PPING_LANG_ENABLE_CUPTI 时不应创建采集器。"""
+    monkeypatch.setenv("PPING_LANG_DB_PATH", str(tmp_path / "test.duckdb"))
+    monkeypatch.delenv("PPING_LANG_ENABLE_CUPTI", raising=False)
+
+    plugin = PpingLangStatLogger(vllm_config=None, engine_index=0)
+    plugin.log_engine_initialized()
+    try:
+        assert plugin._cupti is None
+    finally:
+        plugin._sink.close()
+
+
+def test_cupti_enabled_creates_collector_and_degrades_gracefully(tmp_path, monkeypatch):
+    """设 PPING_LANG_ENABLE_CUPTI=1 应创建采集器；无 cupti/GPU 的环境(如 CI/Windows)
+    下应优雅禁用(enabled=False)而非崩溃。"""
+    monkeypatch.setenv("PPING_LANG_DB_PATH", str(tmp_path / "test.duckdb"))
+    monkeypatch.setenv("PPING_LANG_ENABLE_CUPTI", "1")
+
+    plugin = PpingLangStatLogger(vllm_config=None, engine_index=0)
+    plugin.log_engine_initialized()
+    try:
+        assert plugin._cupti is not None
+        # 本测试环境无 cupti-python/GPU → 优雅禁用,record() 仍正常
+        assert plugin._cupti.enabled is False
+        plugin.record(None, None)  # must not raise
+    finally:
+        plugin._sink.close()

@@ -134,6 +134,81 @@ def _summary(values: list[float]) -> dict[str, float | int | None]:
         "n":   n,
     }
 
+def _kernel_findings(
+    *,
+    class_shares: list[dict[str, Any]],
+    top_kernels: list[dict[str, Any]],
+    sync_share: float | None,
+    memcpy_share: float | None,
+    in_graph: float | None,
+    launch_rate: float | None,
+    overhead_cb_ms: float | None,
+    window_s: float | None,
+) -> list[dict[str, Any]]:
+    """把 kernel 指标翻译成人话结论 —— pping-lang 的命根子:给结论不给数字。
+
+    全部从阶段 1a 已采集的量派生(无需 PC Sampling)。每条 {level, title, detail}。
+    """
+    findings: list[dict[str, Any]] = []
+    _label = {"gemm": "GEMM(矩阵乘)", "attention": "Attention", "comm": "通信(NCCL)",
+              "norm": "Norm", "activation": "Activation", "rotary": "Rotary", "other": "其它"}
+
+    # 1. 哪类 kernel 主导 → X-bound
+    if class_shares and class_shares[0]["pct"] >= 60:
+        c = class_shares[0]
+        findings.append({
+            "level": "info", "title": f"{_label.get(c['cls'], c['cls'])}-bound",
+            "detail": f"GPU 计算时间 {c['pct']:.0f}% 集中在 {_label.get(c['cls'], c['cls'])}，"
+                      f"典型 compute-bound 形态。提速方向:增大 batch 摊薄、检查 tiling、或量化。",
+        })
+    # 2. 单个 kernel 主导 → 优化它收益最大
+    if top_kernels and top_kernels[0]["pct"] >= 40:
+        k = top_kernels[0]
+        findings.append({
+            "level": "info", "title": "单 kernel 主导",
+            "detail": f"单个 kernel 占 GPU 时间 {k['pct']:.0f}%（{k['name'][:46]}），"
+                      f"优化或替换它收益最大。",
+        })
+    # 3. 同步等待高 → launch-bound
+    if sync_share is not None and sync_share >= 15:
+        findings.append({
+            "level": "warning", "title": "Launch-bound（同步等待高）",
+            "detail": f"同步等待占墙钟 {sync_share:.0f}%，GPU 在等 CPU 派发 kernel。"
+                      f"增大 batch / 提高 CUDA graph 覆盖可缓解。",
+        })
+    # 4. GEMM 碎片化(kernel zoo)—— 对标 zymtrace 那张图的观察
+    gemm_variants = [k for k in top_kernels if k.get("cls") == "gemm"]
+    if len(gemm_variants) >= 8:
+        findings.append({
+            "level": "info", "title": "GEMM kernel 碎片化",
+            "detail": f"出现 {len(gemm_variants)} 种不同 GEMM 变体(kernel zoo)，"
+                      f"tiling 可能次优 —— 同一矩阵乘被拆成多种形状。",
+        })
+    # 5. 内存拷贝偏多
+    if memcpy_share is not None and memcpy_share >= 10:
+        findings.append({
+            "level": "warning", "title": "内存拷贝开销",
+            "detail": f"memcpy 占墙钟 {memcpy_share:.0f}%，数据搬运偏多(H2D/D2H)。",
+        })
+    # 6. CUDA Graph 覆盖低 + launch 频繁 → launch 开销
+    if in_graph is not None and in_graph < 40 and launch_rate and launch_rate > 5000:
+        findings.append({
+            "level": "info", "title": "CUDA Graph 覆盖低",
+            "detail": f"仅 {in_graph:.0f}% kernel 在 graph 内、每秒 {launch_rate:.0f} 次 launch，"
+                      f"launch 开销可能偏高。",
+        })
+    # 7. 吃自己狗粮:采集器自身开销
+    if overhead_cb_ms is not None and window_s and window_s > 0:
+        ov_pct = 100.0 * (overhead_cb_ms / 1000.0) / window_s
+        if ov_pct >= 3:
+            findings.append({
+                "level": "warning", "title": "采集开销偏高",
+                "detail": f"本采集器开销约占 {ov_pct:.1f}%（进程内 Python，高 kernel 率下变贵)。"
+                          f"建议降采样;阶段 1b 注入式可消除。",
+            })
+    return findings
+
+
 _BUILTIN_DESCRIPTIONS: dict[str, str] = {
     "mixed-short": "短问答 + 闲聊 + 简单指令（每条 50–180 tokens）",
     "mixed-long":  "长上下文：文档摘要 / 长指令 / 转录稿（每条 1000–3000 tokens）",
@@ -143,6 +218,7 @@ _BUILTIN_DESCRIPTIONS: dict[str, str] = {
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
+    from pping_lang.collector.cupti import CuptiKernelCollector
     from pping_lang.collector.nvml import NvmlSampler
     from pping_lang.rules.engine import RuleEngine
     from pping_lang.rules.store import RuleStore
@@ -158,6 +234,7 @@ def build_app(
     rule_store: RuleStore,
     rule_engine: RuleEngine | None = None,
     nvml: NvmlSampler | None = None,
+    cupti: CuptiKernelCollector | None = None,
     version: str = "0.0.1.dev0",
     vllm_config: Any = None,
     gpu_peak: GPUPeak | None = None,
@@ -433,6 +510,107 @@ def build_app(
                 "gpu_mem_bw_pct": latest_val(M.GPU_MEM_UTIL_PCT),
             },
         }
+
+    # === GET /api/kernels — CUPTI kernel 级时间分解 (阶段 1a) ===
+    # 一个 round-trip 喂 dashboard 的 kernel 面板。全部走 Sink 内存实时环,
+    # 无 DuckDB。enabled=False 表示 CUPTI 未启用 / 无 GPU / 还没数据。
+    @app.get("/api/kernels")
+    def kernels(
+        window: int = Query(60, ge=5, le=3600, description="latest 取值窗口 (s)"),
+    ) -> dict[str, Any]:
+        cutoff_ns = time.monotonic_ns() - int(window * 1e9)
+
+        def fresh_val(name: str) -> float | None:
+            row = sink.latest(name)
+            if row is None:
+                return None
+            value, ts_ns = row
+            return value if ts_ns >= cutoff_ns else None
+
+        # kernel 类占比(占总 kernel 计算时间);按占比降序便于 UI 直接画条形
+        class_metrics = {
+            "attention": M.KERNEL_SHARE_ATTENTION_PCT,
+            "gemm": M.KERNEL_SHARE_GEMM_PCT,
+            "norm": M.KERNEL_SHARE_NORM_PCT,
+            "rotary": M.KERNEL_SHARE_ROTARY_PCT,
+            "activation": M.KERNEL_SHARE_ACTIVATION_PCT,
+            "comm": M.KERNEL_SHARE_COMM_PCT,
+            "other": M.KERNEL_SHARE_OTHER_PCT,
+        }
+        _shares: list[tuple[str, float]] = []
+        for cls, metric in class_metrics.items():
+            pct = fresh_val(metric)
+            if pct is not None:
+                _shares.append((cls, pct))
+        _shares.sort(key=lambda t: t[1], reverse=True)
+        class_shares = [{"cls": cls, "pct": pct} for cls, pct in _shares]
+
+        gpu_busy = fresh_val(M.KERNEL_GPU_BUSY_PCT)
+        launch_rate = fresh_val(M.KERNEL_LAUNCH_COUNT_PER_S)
+        # per-kernel 原始明细(未聚合 mangled 名)直接读 collector,不走 metric 管道
+        top_kernels = cupti.top_kernels() if cupti is not None else []
+        # 数据时刻:这批 kernel 数据是哪一窗的、采集于多久前。让前端能说清
+        # "实时 / X 秒前 / 无流量已过期",而不是把陈旧数据当现状。
+        snapshot_age_s: float | None = None
+        rollup_window_s: float | None = None
+        if cupti is not None and cupti.last_snapshot_ts is not None:
+            snapshot_age_s = max(0.0, (time.monotonic_ns() - cupti.last_snapshot_ts) / 1e9)
+            if cupti.last_window_ns > 0:
+                rollup_window_s = cupti.last_window_ns / 1e9
+        # enabled：任一 kernel 指标在窗口内有值,或有原始明细
+        enabled = (
+            bool(class_shares) or gpu_busy is not None
+            or launch_rate is not None or bool(top_kernels)
+        )
+
+        memcpy_share = fresh_val(M.KERNEL_MEMCPY_SHARE_PCT)
+        sync_share = fresh_val(M.KERNEL_SYNC_SHARE_PCT)
+        in_graph = fresh_val(M.KERNEL_IN_GRAPH_PCT)
+        overhead_cb_ms = fresh_val(M.PPING_LANG_CUPTI_CB_MS)
+        # 结论层:把数字翻译成人话(诊断不止观测)
+        findings = _kernel_findings(
+            class_shares=class_shares, top_kernels=top_kernels,
+            sync_share=sync_share, memcpy_share=memcpy_share, in_graph=in_graph,
+            launch_rate=launch_rate, overhead_cb_ms=overhead_cb_ms,
+            window_s=rollup_window_s,
+        )
+
+        return {
+            "window_seconds": window,
+            "enabled": enabled,
+            "snapshot_age_s": snapshot_age_s,        # 这批数据采集于多少秒前(None=无 collector)
+            "rollup_window_s": rollup_window_s,      # 这批数据聚合的窗宽(秒)
+            "findings": findings,                    # [{level, title, detail}] 诊断结论
+            "class_shares": class_shares,            # [{cls, pct}], 降序, 占 kernel 计算时间
+            "top_kernels": top_kernels,              # [{name, cls, count, total_ms, mean_us, pct, in_graph_pct}]
+            "memcpy_share_pct": memcpy_share,                           # 占墙钟
+            "sync_share_pct": sync_share,                               # 占墙钟
+            "gpu_busy_pct": gpu_busy,                                   # 占墙钟
+            "launch_count_per_s": launch_rate,
+            "mean_dur_us": fresh_val(M.KERNEL_MEAN_DUR_US),
+            "in_graph_pct": in_graph,
+            # 自我观测：回调开销 + 丢弃数(5% 预算守护的可见性)
+            "overhead_cb_ms": overhead_cb_ms,
+            "dropped_total": fresh_val(M.PPING_LANG_CUPTI_DROPPED_TOTAL),
+        }
+
+    # === GET /api/kernels/flamegraph — Python 调用栈 → kernel 火焰图 (on-demand) ===
+    # 仅 capture_stacks 模式有数据。对标 zymtrace 的 Python→kernel 火焰图。
+    @app.get("/api/kernels/flamegraph")
+    def kernels_flamegraph() -> dict[str, Any]:
+        tree = cupti.flamegraph() if cupti is not None else None
+        return {
+            "available": tree is not None,
+            "tree": tree,   # {name, kind, value(ns), children:[...]} 或 None
+        }
+
+    # === GET /api/kernels/timeline — Nsight-style 执行时间线 (最近 N 条 kernel) ===
+    @app.get("/api/kernels/timeline")
+    def kernels_timeline(
+        max_events: int = Query(800, ge=50, le=4000),
+    ) -> dict[str, Any]:
+        tl = cupti.timeline(max_events) if cupti is not None else None
+        return {"available": tl is not None, "timeline": tl}
 
     # === GET /api/latency_trends — TTFT / TPOT / E2E bucketed p50+p99 over time ===
     # Same dual-path strategy as /api/kpis: ≤200s windows served from the live

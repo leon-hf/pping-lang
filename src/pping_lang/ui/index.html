@@ -1284,6 +1284,91 @@
     font-size: 11.5px;
     word-break: break-all;
   }
+  /* === Kernel 明细表 === */
+  .kernel-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12.5px;
+  }
+  .kernel-table th {
+    text-align: left;
+    font-weight: 600;
+    color: var(--muted);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 7px 10px;
+    border-bottom: 1px solid var(--border-strong);
+    white-space: nowrap;
+  }
+  .kernel-table td {
+    padding: 7px 10px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text);
+    vertical-align: middle;
+  }
+  .kernel-table tbody tr:hover { background: var(--surface-tint); }
+  .kernel-table code.kname {
+    font-family: ui-monospace, Consolas, monospace;
+    font-size: 11.5px;
+    color: var(--text-strong);
+    background: transparent;
+    display: block;
+    max-width: 420px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .kernel-table .kcls {
+    display: inline-block;
+    padding: 1px 8px;
+    border-radius: 10px;
+    font-size: 10.5px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .kernel-freshness {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 8px 13px;
+    border-radius: 8px;
+    font-size: 12.5px;
+    margin-bottom: 16px;
+  }
+  .kernel-freshness.live {
+    background: var(--teal-soft);
+    color: var(--teal);
+    border: 1px solid color-mix(in srgb, var(--teal) 22%, transparent);
+  }
+  .kernel-freshness.stale {
+    background: var(--amber-soft);
+    color: var(--amber);
+    border: 1px solid color-mix(in srgb, var(--amber) 28%, transparent);
+  }
+  .kfinding {
+    padding: 11px 14px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--muted-2);
+    background: var(--surface-alt);
+  }
+  .kfinding.info { border-left-color: var(--teal); }
+  .kfinding.warning { border-left-color: var(--amber); background: var(--amber-soft); }
+  .kfinding.critical { border-left-color: var(--coral); background: var(--coral-soft); }
+  .kfinding .kf-title { font-weight: 600; font-size: 13px; color: var(--text-strong); margin-bottom: 3px; }
+  .kfinding .kf-detail { font-size: 12.5px; color: var(--text); line-height: 1.55; }
+  /* === 执行时间线 === */
+  .tl-block {
+    position: absolute;
+    top: 0;
+    height: 20px;
+    min-width: 1px;
+    border-radius: 1px;
+    cursor: default;
+    box-sizing: border-box;
+  }
+  .tl-block:hover { outline: 1.5px solid var(--text-strong); z-index: 3; filter: brightness(1.1); }
   @media (max-width: 720px) {
     .slo-row {
       grid-template-columns: 1fr 1fr;
@@ -1608,6 +1693,10 @@
 
   <nav class="tabs">
     <button :class="{ active: tab === 'live' }" @click="tab = 'live'">实时</button>
+    <button :class="{ active: tab === 'kernel' }" @click="tab = 'kernel'">
+      Kernel
+      <span x-show="kernels.enabled" class="tab-badge" style="background: var(--teal-soft); color: var(--teal);">CUPTI</span>
+    </button>
     <button :class="{ active: tab === 'rules' }" @click="tab = 'rules'">
       规则
       <span x-show="diagnoses.length > 0" class="tab-badge"
@@ -2048,6 +2137,194 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
         </template>
       </div>
 
+    </div>
+
+    <!-- ===== Kernel tab (CUPTI 阶段 1a) ===== -->
+    <div x-show="tab === 'kernel'">
+      <div class="section-head" style="margin-top: 0;">
+        <h2>Kernel 级 Profiling<span class="hint" style="margin-left: 10px;">CUPTI 实测 · 每个 GPU kernel 的真实耗时(层级 2，无需 Nsight、性能无损)</span></h2>
+      </div>
+
+      <!-- 未启用 / 无数据 -->
+      <template x-if="!kernels.enabled">
+        <div class="chart-card">
+          <div class="roofline-verdict empty" style="margin: 0;">
+            CUPTI kernel 采集未启用或暂无数据。<br>
+            设环境变量 <code>PPING_LANG_ENABLE_CUPTI=1</code> 启用（仅 Linux x86_64/aarch64，需 NVIDIA GPU）。
+          </div>
+        </div>
+      </template>
+
+      <template x-if="kernels.enabled">
+        <div>
+          <!-- 数据新鲜度:这批数据是哪一窗的、多久前采的 -->
+          <div x-show="kernels.snapshot_age_s != null" class="kernel-freshness" :class="kernelFresh() ? 'live' : 'stale'">
+            <template x-if="kernelFresh()">
+              <span>🟢 实时 · 每 <span x-text="fmt(kernels.rollup_window_s, 0)"></span>s 聚合一次,当前数据采集于 <strong x-text="kernelAgeText()"></strong></span>
+            </template>
+            <template x-if="!kernelFresh()">
+              <span>⏸ 当前无 GPU 活动 —— 下面是 <strong x-text="kernelAgeText()"></strong> 最后一次有 kernel 运行时(最近 <span x-text="fmt(kernels.rollup_window_s, 0)"></span>s 窗口)的数据,<u>不是当前值</u></span>
+            </template>
+          </div>
+
+          <!-- 诊断结论:把数字翻译成人话(诊断不止观测) -->
+          <div x-show="kernels.findings && kernels.findings.length" style="margin-bottom: 18px;">
+            <div style="font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 10px;">诊断结论</div>
+            <div style="display: flex; flex-direction: column; gap: 9px;">
+              <template x-for="(f, i) in kernels.findings" :key="i">
+                <div class="kfinding" :class="f.level">
+                  <div class="kf-title" x-text="f.title"></div>
+                  <div class="kf-detail" x-text="f.detail"></div>
+                </div>
+              </template>
+            </div>
+          </div>
+
+          <!-- 概览卡片行 -->
+          <div class="kpis" style="margin-bottom: 18px;">
+            <div class="kpi teal">
+              <div class="label">GPU busy <span class="kpi-sub-label">占墙钟</span></div>
+              <div class="value"><span x-text="fmt(kernels.gpu_busy_pct, 1)"></span><span class="unit">%</span></div>
+            </div>
+            <div class="kpi indigo">
+              <div class="label">Kernel 启动频率</div>
+              <div class="value"><span x-text="fmt(kernels.launch_count_per_s, 0)"></span><span class="unit">/s</span></div>
+            </div>
+            <div class="kpi">
+              <div class="label">平均 kernel 时长</div>
+              <div class="value"><span x-text="fmt(kernels.mean_dur_us, 2)"></span><span class="unit">µs</span></div>
+            </div>
+            <div class="kpi">
+              <div class="label">CUDA Graph 内</div>
+              <div class="value"><span x-text="fmt(kernels.in_graph_pct, 0)"></span><span class="unit">%</span></div>
+            </div>
+            <div class="kpi">
+              <div class="label">memcpy <span class="kpi-sub-label">占墙钟</span></div>
+              <div class="value"><span x-text="fmt(kernels.memcpy_share_pct, 1)"></span><span class="unit">%</span></div>
+            </div>
+            <div class="kpi">
+              <div class="label">同步等待 <span class="kpi-sub-label">占墙钟</span></div>
+              <div class="value"><span x-text="fmt(kernels.sync_share_pct, 1)"></span><span class="unit">%</span></div>
+            </div>
+          </div>
+
+          <!-- 语义分类分段条 -->
+          <div class="chart-card" style="margin-bottom: 18px;">
+            <div class="head">
+              <div><h3>按语义类聚合</h3>
+                <div style="margin-top: 4px; font-size: 11.5px; color: var(--muted-2);">占总 kernel 计算时间 · 把原始 kernel 归到 attention / GEMM / norm 等</div>
+              </div>
+            </div>
+            <div style="margin-top: 14px;">
+              <div style="display: flex; height: 22px; border-radius: 6px; overflow: hidden; background: var(--surface-alt);">
+                <template x-for="c in kernels.class_shares" :key="c.cls">
+                  <div :style="`width:${c.pct}%;background:${kernelColor(c.cls)}`" :title="`${kernelLabel(c.cls)} ${c.pct.toFixed(1)}%`"></div>
+                </template>
+              </div>
+              <div style="display: flex; flex-wrap: wrap; gap: 8px 20px; margin-top: 14px;">
+                <template x-for="c in kernels.class_shares" :key="c.cls">
+                  <div style="display: flex; align-items: center; gap: 7px; font-size: 12.5px;">
+                    <span :style="`width:10px;height:10px;border-radius:2px;flex:none;background:${kernelColor(c.cls)}`"></span>
+                    <span style="color: var(--text);" x-text="kernelLabel(c.cls)"></span>
+                    <span style="color: var(--muted);" x-text="c.pct.toFixed(1) + '%'"></span>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </div>
+
+          <!-- 执行时间线(Nsight-style:x=时间,行=stream,块=kernel)-->
+          <template x-if="timelineView()">
+            <div class="chart-card" style="margin-bottom: 18px;">
+              <div class="head">
+                <div>
+                  <h3>执行时间线 <span style="color: var(--muted-2); font-weight: 400; font-size: 12px;">最近 <span x-text="timelineView().count"></span> 个 kernel · 跨度 <span x-text="timelineView().spanMs.toFixed(1)"></span> ms</span></h3>
+                  <div style="margin-top: 4px; font-size: 11.5px; color: var(--muted-2);">x 轴=时间 · 每行一个 GPU stream · 块=kernel(宽与耗时成正比,按语义类着色) · 块间空白=GPU 空闲 · 悬停看详情</div>
+                </div>
+                <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap; font-size: 11px; color: var(--muted);">
+                  <template x-for="c in ['gemm','attention','comm','norm','activation','memcpy']" :key="c">
+                    <span style="display: inline-flex; align-items: center; gap: 4px;"><span :style="`width:9px;height:9px;border-radius:2px;background:${kernelColor(c)}`"></span><span x-text="kernelLabel(c)"></span></span>
+                  </template>
+                </div>
+              </div>
+              <div style="margin-top: 14px;">
+                <template x-for="(s, ri) in timelineView().streams" :key="s">
+                  <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 5px;">
+                    <span style="width: 64px; flex: none; font-size: 10px; color: var(--muted); text-align: right; font-family: ui-monospace, monospace;">stream <span x-text="s"></span></span>
+                    <div style="position: relative; flex: 1; height: 20px; background: var(--surface-alt); border-radius: 3px; overflow: hidden;">
+                      <template x-for="(b, i) in timelineView().blocks.filter(x => x.row === ri)" :key="i">
+                        <div class="tl-block" :style="`left:${b.x}%;width:${b.w}%;background:${kernelColor(b.cls)}`"
+                             :title="`${b.name}  —  ${b.durus.toFixed(1)} µs  [${kernelLabel(b.cls)}]${b.ingraph ? ' · in graph' : ''}`"></div>
+                      </template>
+                    </div>
+                  </div>
+                </template>
+                <div style="margin-top: 6px; font-size: 10.5px; color: var(--muted-2); padding-left: 72px;">← 0 ms　　窗口跨度 <span x-text="timelineView().spanMs.toFixed(1)"></span> ms　　<span x-text="timelineView().spanMs.toFixed(1)"></span> ms →</div>
+              </div>
+            </div>
+          </template>
+          <template x-if="!timelineView()">
+            <div class="chart-card" style="margin-bottom: 18px;">
+              <div class="roofline-verdict empty" style="margin: 0;">CUPTI 执行时间线暂无数据(需采集器在采集 kernel)。</div>
+            </div>
+          </template>
+
+          <!-- 原始 per-kernel 明细表(未洗) -->
+          <div class="chart-card">
+            <div class="head">
+              <div><h3>原始 Kernel 明细<span style="color: var(--muted-2); font-weight: 400; font-size: 13px;">（共 <span x-text="kernels.top_kernels.length"></span> 个）</span></h3>
+                <div style="margin-top: 4px; font-size: 11.5px; color: var(--muted-2);">
+                  真实 mangled 名 + GPU 硬件实测耗时(<code>end−start</code>),按占比降序 ·
+                  <strong>所有数值均为最近一个聚合窗口（约 <span x-text="fmt(kernels.rollup_window_s, 0)"></span>s）内的量,每窗刷新</strong>
+                </div>
+              </div>
+            </div>
+            <div style="overflow-x: auto; margin-top: 12px;">
+              <table class="kernel-table">
+                <thead>
+                  <tr>
+                    <th style="width: 44%;">Kernel 名（原始）</th>
+                    <th>类</th>
+                    <th style="text-align: right;">调用</th>
+                    <th style="text-align: right;">总耗时</th>
+                    <th style="text-align: right;">平均</th>
+                    <th style="text-align: right;">占比</th>
+                    <th style="text-align: right;">Graph</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template x-for="(k, i) in (kernelShowAll ? kernels.top_kernels : kernels.top_kernels.slice(0, kernelCollapsed))" :key="i">
+                    <tr>
+                      <td><code class="kname" x-text="k.name" :title="k.name"></code></td>
+                      <td><span class="kcls" :style="`background:${kernelColor(k.cls)}1a;color:${kernelColor(k.cls)}`" x-text="kernelLabel(k.cls)"></span></td>
+                      <td style="text-align: right;" x-text="k.count.toLocaleString()"></td>
+                      <td style="text-align: right;" x-text="fmt(k.total_ms, 2) + ' ms'"></td>
+                      <td style="text-align: right;" x-text="fmt(k.mean_us, 1) + ' µs'"></td>
+                      <td style="text-align: right;">
+                        <span style="font-weight: 600; color: var(--text);" x-text="fmt(k.pct, 1) + '%'"></span>
+                      </td>
+                      <td style="text-align: right; color: var(--muted-2);" x-text="fmt(k.in_graph_pct, 0) + '%'"></td>
+                    </tr>
+                  </template>
+                  <template x-if="!kernels.top_kernels.length">
+                    <tr><td colspan="7" style="text-align: center; color: var(--muted-2); padding: 18px;">暂无 per-kernel 明细（需注入式采集器在采,或本窗无 kernel）</td></tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
+            <!-- 展示更多 / 收起 -->
+            <div x-show="kernels.top_kernels.length > kernelCollapsed" style="margin-top: 12px; text-align: center;">
+              <button class="btn" @click="kernelShowAll = !kernelShowAll"
+                      x-text="kernelShowAll ? '收起 ▴' : ('展示全部 ' + kernels.top_kernels.length + ' 个 ▾')"></button>
+            </div>
+            <!-- 自我观测 -->
+            <div style="margin-top: 12px; font-size: 11px; color: var(--muted-2);">
+              采集开销 <span x-text="fmt(kernels.overhead_cb_ms, 3)"></span> ms/窗（守 5% 预算）
+              <template x-if="kernels.dropped_total"><span> · 丢弃 <span x-text="fmt(kernels.dropped_total, 0)"></span> 条（已自动降级）</span></template>
+            </div>
+          </div>
+        </div>
+      </template>
     </div>
 
     <!-- ===== 规则 tab ===== -->
@@ -2861,6 +3138,17 @@ function dashboard() {
       gpu_util: null, gpu_mem_used_pct: null, gpu_mem_bw_pct: null,
     },
     gpu_util_pct: 0,
+    // CUPTI kernel 时间分解 (阶段 1a)
+    kernels: {
+      enabled: false, class_shares: [], top_kernels: [], findings: [],
+      gpu_busy_pct: null, launch_count_per_s: null, mean_dur_us: null,
+      in_graph_pct: null, memcpy_share_pct: null, sync_share_pct: null,
+      overhead_cb_ms: null, dropped_total: null,
+      snapshot_age_s: null, rollup_window_s: null,
+    },
+    kernelShowAll: false,        // Kernel 明细表:false=只显示前 N 行
+    kernelCollapsed: 10,         // 收起时显示的行数
+    timeline: null,              // 执行时间线(最近 N 条 kernel 的 start/end/stream)
     tpotSource: 'tpot',
     rooflineSource: 'measured',
     rooflineFormula: '',
@@ -2879,6 +3167,51 @@ function dashboard() {
     fmt(v, digits) {
       if (v == null || isNaN(v)) return '—';
       return Number(v).toFixed(digits);
+    },
+
+    // kernel 语义类 → 颜色 / 中文标签(分段条 + 图例)
+    kernelColor(cls) {
+      return {
+        attention: '#0d8b80', gemm: '#5147c8', norm: '#c2660d',
+        rotary: '#be1556', activation: '#5a8f1f', comm: '#dc4d3e',
+        memcpy: '#7a6e63', other: '#a8998a',
+      }[cls] || '#a8998a';
+    },
+    kernelLabel(cls) {
+      return {
+        attention: 'Attention', gemm: 'GEMM', norm: 'Norm',
+        rotary: 'Rotary', activation: 'Activation', comm: '通信 (NCCL)',
+        other: '其它',
+      }[cls] || cls;
+    },
+    // kernel 数据是否"实时"(采集时刻够近),用于新鲜度横幅
+    kernelFresh() {
+      const a = this.kernels.snapshot_age_s;
+      if (a == null) return true;  // 无 collector 信息时不显示过期
+      const w = this.kernels.rollup_window_s || 1;
+      return a <= Math.max(3, w * 2.5);
+    },
+    kernelAgeText() {
+      const a = this.kernels.snapshot_age_s;
+      if (a == null) return '';
+      if (a < 1.5) return '刚刚';
+      if (a < 90) return Math.round(a) + ' 秒前';
+      return Math.round(a / 60) + ' 分钟前';
+    },
+    // 火焰图:把树拍平成绝对定位的矩形(top-down icicle),支持点击缩放。
+    // 执行时间线:最近 N 条 kernel 算成按 stream 分行的色块(x=时间,宽与耗时成正比)。
+    timelineView() {
+      const tl = this.timeline;
+      if (!tl || !tl.events || !tl.events.length) return null;
+      const span = tl.span_ns || 1;
+      const rowOf = {}; tl.streams.forEach((st, i) => { rowOf[st] = i; });
+      const blocks = tl.events.map(e => ({
+        row: rowOf[e.stream],
+        x: e.start / span * 100,
+        w: Math.max(0.12, e.dur / span * 100),
+        cls: e.cls, name: e.name, durus: e.dur / 1000, ingraph: e.in_graph,
+      }));
+      return {blocks, streams: tl.streams, spanMs: span / 1e6, count: tl.count};
     },
 
     // ===== Roofline verdict (plain-language interpretation) =====
@@ -3115,18 +3448,22 @@ function dashboard() {
 
     async refresh() {
       try {
-        const [healthR, kpisR, rooflineR, trendsR, diagR, benchStatusR] = await Promise.all([
+        const [healthR, kpisR, rooflineR, trendsR, diagR, benchStatusR, kernelsR, tlR] = await Promise.all([
           fetch('/api/health').then(r => r.json()),
           fetch('/api/kpis?window=60').then(r => r.json()),
           fetch('/api/roofline?seconds=60').then(r => r.json()),
           fetch('/api/latency_trends?seconds=300&buckets=30').then(r => r.json()),
           fetch('/api/diagnoses?seconds=300').then(r => r.json()),
           fetch('/api/bench/status').then(r => r.json()).catch(() => ({running: []})),
+          fetch('/api/kernels?window=60').then(r => r.json()).catch(() => ({enabled: false, class_shares: []})),
+          fetch('/api/kernels/timeline?max_events=800').then(r => r.json()).catch(() => ({timeline: null})),
         ]);
         this.benchRunning = (benchStatusR.running || []).length;
         this.health = healthR;
         this.kpis = kpisR.kpis || this.kpis;
         this.gpu_util_pct = this.kpis.gpu_util ?? 0;
+        this.kernels = kernelsR;
+        this.timeline = tlR.timeline;
 
         const seen = new Set();
         this.diagnoses = (diagR.diagnoses || []).filter(d => {
