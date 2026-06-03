@@ -1362,13 +1362,14 @@
   .tl-block {
     position: absolute;
     top: 0;
-    height: 20px;
+    height: 22px;
     min-width: 1px;
     border-radius: 1px;
-    cursor: default;
+    cursor: pointer;
     box-sizing: border-box;
   }
   .tl-block:hover { outline: 1.5px solid var(--text-strong); z-index: 3; filter: brightness(1.1); }
+  .tl-block.tl-sel { outline: 2px solid var(--text-strong); z-index: 4; box-shadow: 0 0 0 2px var(--surface); }
   @media (max-width: 720px) {
     .slo-row {
       grid-template-columns: 1fr 1fr;
@@ -2237,7 +2238,7 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
               <div class="head">
                 <div>
                   <h3>执行时间线 <span style="color: var(--muted-2); font-weight: 400; font-size: 12px;">最近 <span x-text="timelineView().total"></span> 个 kernel · 跨度 <span x-text="timelineView().spanMs.toFixed(1)"></span> ms</span></h3>
-                  <div style="margin-top: 4px; font-size: 11.5px; color: var(--muted-2);">x=时间 · 行=GPU stream · 块=kernel(宽∝耗时) · 空白=GPU 空闲 · <b>在下方概览尺上拖拽框选放大</b></div>
+                  <div style="margin-top: 4px; font-size: 11.5px; color: var(--muted-2);">x=时间 · 行=GPU stream · 块=kernel(宽∝耗时) · 空白=GPU 空闲 · <b>点 ＋ 放大、拖滚动条平移</b></div>
                 </div>
                 <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap; font-size: 11px; color: var(--muted);">
                   <template x-for="c in ['gemm','attention','comm','norm','activation','memcpy']" :key="c">
@@ -2252,43 +2253,55 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
                 <button class="btn" @click="tlToggleFreeze()"
                         :style="tlFrozen ? 'background:var(--amber-soft);color:var(--amber);border-color:var(--amber)' : ''"
                         x-text="tlFrozen ? '⏸ 已冻结' : '🔴 实时'"></button>
-                <button class="btn" x-show="timelineView().zoomed" @click="tlResetZoom()">复位缩放</button>
-                <span style="color: var(--muted); white-space: nowrap;" x-show="timelineView().zoomed">
-                  <b x-text="timelineView().viewStartMs.toFixed(2)"></b>–<b x-text="(timelineView().viewStartMs+timelineView().viewSpanMs).toFixed(2)"></b> ms · <b x-text="timelineView().shown"></b>/<span x-text="timelineView().total"></span>
+                <span style="display: inline-flex; align-items: center; gap: 4px;">
+                  <button class="btn" @click="tlZoom(0.5)" title="缩小">−</button>
+                  <button class="btn" @click="tlFit()" title="适应宽度">适应</button>
+                  <button class="btn" @click="tlZoom(2)" title="放大(围绕选中块)">＋</button>
                 </span>
+                <span x-show="tlSelName" style="white-space: nowrap; color: var(--teal); font-weight: 600;">▸ 选中 <span x-text="tlSelName.slice(0,28)"></span>(点 ＋ 放大它)</span>
               </div>
-              <!-- 主时间线:按 stream 分行(受缩放视窗控制)-->
-              <div style="margin-top: 12px;">
-                <template x-for="(s, ri) in timelineView().streams" :key="s">
-                  <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 5px;">
-                    <span style="width: 64px; flex: none; font-size: 10px; color: var(--muted); text-align: right; font-family: ui-monospace, monospace;">stream <span x-text="s"></span></span>
-                    <div style="position: relative; flex: 1; height: 22px; background: var(--surface-alt); border-radius: 3px; overflow: hidden;">
-                      <template x-for="(b, i) in timelineView().blocks.filter(x => x.row === ri)" :key="i">
-                        <div class="tl-block" style="height:22px" :style="`left:${b.x}%;width:${b.w}%;background:${kernelColor(b.cls)}`"
-                             :title="`${b.name}  —  ${b.durus.toFixed(1)} µs  [${kernelLabel(b.cls)}]${b.ingraph ? ' · in graph' : ''}`"></div>
-                      </template>
+              <!-- 主时间线:左固定 stream 标签 + 右横向滚动条带(放大=内层变宽,平移=滚动)-->
+              <div style="display: flex; gap: 8px; margin-top: 12px;">
+                <div style="flex: none; width: 60px; padding-top: 0;">
+                  <template x-for="s in timelineView().streams" :key="s">
+                    <div style="height: 22px; margin-bottom: 5px; line-height: 22px; font-size: 10px; color: var(--muted); text-align: right; font-family: ui-monospace, monospace;">str <span x-text="s"></span></div>
+                  </template>
+                </div>
+                <div id="tl-scroll" style="overflow-x: auto; flex: 1;">
+                  <div :style="`width:${Math.max(timelineView().innerPx, 100)}px; min-width:100%;`">
+                    <template x-for="(s, ri) in timelineView().streams" :key="s">
+                      <div style="position: relative; height: 22px; margin-bottom: 5px; background: var(--surface-alt); border-radius: 3px;">
+                        <template x-for="(b, i) in timelineView().blocks.filter(x => x.row === ri)" :key="i">
+                          <div class="tl-block" :class="{ 'tl-sel': b.idx === tlSelIdx }" @click="tlSelectBlock(b)"
+                               :style="`left:${b.leftPx}px;width:${b.widthPx}px;background:${kernelColor(b.cls)}`"
+                               :title="`${b.name}  —  ${b.durus.toFixed(1)} µs  [${kernelLabel(b.cls)}]${b.ingraph ? ' · in graph' : ''}`"></div>
+                        </template>
+                      </div>
+                    </template>
+                    <div style="position: relative; height: 13px; font-size: 9px; color: var(--muted-2);">
+                      <span style="position: absolute; left: 0;">0 ms</span>
+                      <span style="position: absolute; right: 0;" x-text="timelineView().spanMs.toFixed(1) + ' ms'"></span>
                     </div>
                   </div>
-                </template>
-                <div style="font-size: 10px; color: var(--muted-2); padding-left: 72px; margin-top: 2px;">
-                  <span x-text="timelineView().viewStartMs.toFixed(2)"></span> ms
-                  <span style="float:right;" x-text="(timelineView().viewStartMs+timelineView().viewSpanMs).toFixed(2)+' ms'"></span>
                 </div>
               </div>
-              <!-- 概览尺:全 span 迷你图,拖拽框选放大 -->
-              <div style="display: flex; align-items: center; gap: 8px; margin-top: 12px;">
-                <span style="width: 64px; flex: none; font-size: 9.5px; color: var(--muted-2); text-align: right;">概览·拖拽</span>
-                <div style="position: relative; flex: 1; height: 16px; background: var(--surface-alt); border-radius: 3px; overflow: hidden; cursor: crosshair;"
-                     @mousedown.prevent="tlDragStart($event)" @mousemove="tlDragMove($event)" @mouseup="tlDragEnd()" @mouseleave="tlDragEnd()">
-                  <template x-for="(b, i) in timelineOverview()" :key="i">
-                    <div style="position:absolute;top:0;height:16px;min-width:1px;" :style="`left:${b.x}%;width:${b.w}%;background:${kernelColor(b.cls)};opacity:0.55`"></div>
-                  </template>
-                  <template x-if="tlSelRect()">
-                    <div style="position:absolute;top:0;height:16px;background:rgba(28,20,16,0.12);border:1.5px solid var(--text-strong);box-sizing:border-box;"
-                         :style="`left:${tlSelRect().x}%;width:${tlSelRect().w}%`"></div>
-                  </template>
+              <!-- 选中 kernel 详情 -->
+              <template x-if="tlSelectedBlock()">
+                <div style="margin-top: 12px; padding: 11px 14px; border: 1px solid var(--border-strong); border-left: 3px solid var(--text-strong); border-radius: 8px; background: var(--surface-tint);">
+                  <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 7px;">
+                    <span class="kcls" :style="`background:${kernelColor(tlSelectedBlock().cls)}1a;color:${kernelColor(tlSelectedBlock().cls)}`" x-text="kernelLabel(tlSelectedBlock().cls)"></span>
+                    <span style="font-weight: 600; font-size: 12.5px; color: var(--text-strong);">选中 kernel 详情</span>
+                    <button class="btn" style="margin-left: auto; padding: 2px 9px; font-size: 11px;" @click="tlSelIdx = null; tlSelMs = null; tlSelName = ''">取消选中</button>
+                  </div>
+                  <code style="display: block; font-family: ui-monospace, Consolas, monospace; font-size: 11.5px; color: var(--text-strong); word-break: break-all; line-height: 1.5; margin-bottom: 9px;" x-text="tlSelectedBlock().name"></code>
+                  <div style="display: flex; flex-wrap: wrap; gap: 7px 26px; font-size: 12px; color: var(--muted);">
+                    <div>耗时 <b style="color: var(--text);" x-text="tlSelectedBlock().durus.toFixed(2) + ' µs'"></b></div>
+                    <div>起始 <b style="color: var(--text);" x-text="tlSelectedBlock().startMs.toFixed(3) + ' ms'"></b></div>
+                    <div>stream <b style="color: var(--text);" x-text="tlSelectedBlock().stream"></b></div>
+                    <div>CUDA Graph 内 <b style="color: var(--text);" x-text="tlSelectedBlock().ingraph ? '是' : '否'"></b></div>
+                  </div>
                 </div>
-              </div>
+              </template>
             </div>
           </template>
           <template x-if="!timelineView()">
@@ -2300,7 +2313,7 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
           <!-- 原始 per-kernel 明细表(未洗) -->
           <div class="chart-card">
             <div class="head">
-              <div><h3>原始 Kernel 明细<span style="color: var(--muted-2); font-weight: 400; font-size: 13px;">（共 <span x-text="kernels.top_kernels.length"></span> 个）</span></h3>
+              <div><h3>原始 Kernel 明细<span style="color: var(--muted-2); font-weight: 400; font-size: 13px;" title="本窗口出现的不同 kernel 名数量(去重)。模型每步跑同一套 kernel,所以通常稳定;换模型/配置会变。上限 100。">（去重 <span x-text="kernels.top_kernels.length"></span> 种 kernel）</span></h3>
                 <div style="margin-top: 4px; font-size: 11.5px; color: var(--muted-2);">
                   真实 mangled 名 + GPU 硬件实测耗时(<code>end−start</code>),按占比降序 ·
                   <strong>所有数值均为最近一个聚合窗口（约 <span x-text="fmt(kernels.rollup_window_s, 0)"></span>s）内的量,每窗刷新</strong>
@@ -3249,9 +3262,10 @@ function dashboard() {
     kernelCollapsed: 10,         // 收起时显示的行数
     timeline: null,              // 执行时间线(最近 N 条 kernel 的 start/end/stream)
     tlFrozen: false,             // 冻结:停 2s 刷新,便于缩放/读
-    tlViewStart: null,           // 缩放窗起点(ns,相对 t0);null=全览
-    tlViewEnd: null,
-    tlSel: null,                 // 概览尺上拖拽中的选择 {a,b}(分数)
+    tlPxPerMs: null,             // 时间线缩放:每毫秒像素;null=适应容器宽度
+    tlSelIdx: null,              // 选中块索引(高亮)
+    tlSelMs: null,               // 选中块中心时间(ms),缩放锚点
+    tlSelName: '',               // 选中块名(显示)
     tpotSource: 'tpot',
     rooflineSource: 'measured',
     rooflineFormula: '',
@@ -3301,71 +3315,58 @@ function dashboard() {
       if (a < 90) return Math.round(a) + ' 秒前';
       return Math.round(a / 60) + ' 分钟前';
     },
-    // 火焰图:把树拍平成绝对定位的矩形(top-down icicle),支持点击缩放。
-    // 执行时间线:按 stream 分行的色块(x=时间,宽∝耗时),支持缩放视窗。
-    // tlViewStart/End(ns,相对 t0)= 当前缩放窗;null = 全览。
+    // 执行时间线:px-based,横向滚动 + 缩放按钮。放大=每毫秒像素翻倍(内层变宽),
+    // 平移=容器原生横向滚动。tlPxPerMs=每毫秒像素;null=适应容器宽度。
+    _tlFitPx(spanMs) {
+      const el = document.getElementById('tl-scroll');
+      const w = (el && el.clientWidth) ? el.clientWidth : 900;
+      return Math.max(2, w / Math.max(0.001, spanMs));
+    },
     timelineView() {
       const tl = this.timeline;
       if (!tl || !tl.events || !tl.events.length) return null;
-      const span = tl.span_ns || 1;
-      const vs = this.tlViewStart ?? 0;
-      const ve = this.tlViewEnd ?? span;
-      const vspan = Math.max(1, ve - vs);
+      const spanMs = (tl.span_ns || 1) / 1e6;
+      const pxPerMs = this.tlPxPerMs || this._tlFitPx(spanMs);
       const rowOf = {}; tl.streams.forEach((st, i) => { rowOf[st] = i; });
-      const blocks = [];
-      for (const e of tl.events) {
-        if (e.start + e.dur < vs || e.start > ve) continue;   // 视窗外裁掉
-        blocks.push({
-          row: rowOf[e.stream],
-          x: (e.start - vs) / vspan * 100,
-          w: Math.max(0.2, e.dur / vspan * 100),
-          cls: e.cls, name: e.name, durus: e.dur / 1000, ingraph: e.in_graph,
-        });
-      }
+      const blocks = tl.events.map((e, idx) => ({
+        idx, row: rowOf[e.stream], stream: e.stream,
+        leftPx: e.start / 1e6 * pxPerMs,
+        widthPx: Math.max(1, e.dur / 1e6 * pxPerMs),
+        centerMs: (e.start + e.dur / 2) / 1e6, startMs: e.start / 1e6,
+        cls: e.cls, name: e.name, durus: e.dur / 1000, ingraph: e.in_graph,
+      }));
       return {
-        blocks, streams: tl.streams, spanMs: span / 1e6,
-        viewStartMs: vs / 1e6, viewSpanMs: vspan / 1e6,
-        shown: blocks.length, total: tl.count, zoomed: this.tlViewStart != null,
+        blocks, streams: tl.streams, spanMs, total: tl.count,
+        pxPerMs, innerPx: Math.round(spanMs * pxPerMs), zoomed: this.tlPxPerMs != null,
       };
     },
-    // 概览尺:全 span 的迷你色块(合并所有 stream 成一行),拖拽框选用
-    timelineOverview() {
-      const tl = this.timeline;
-      if (!tl || !tl.events) return [];
-      const span = tl.span_ns || 1;
-      return tl.events.map(e => ({
-        x: e.start / span * 100, w: Math.max(0.1, e.dur / span * 100), cls: e.cls,
-      }));
+    // 缩放:以"选中块中心"为锚点(没选则以当前视口中心),缩放后调滚动位置让锚点居中。
+    tlZoom(factor) {
+      const v = this.timelineView(); if (!v) return;
+      const old = v.pxPerMs;
+      const next = Math.max(2, Math.min(40000, old * factor));
+      const sc = document.getElementById('tl-scroll');
+      let anchorMs = this.tlSelMs;
+      if (anchorMs == null && sc) anchorMs = (sc.scrollLeft + sc.clientWidth / 2) / old;
+      this.tlPxPerMs = next;
+      this.$nextTick(() => {
+        const s = document.getElementById('tl-scroll');
+        if (s && anchorMs != null) s.scrollLeft = anchorMs * next - s.clientWidth / 2;
+      });
     },
-    // 当前视窗/拖拽选择 在概览尺上的高亮区间(% 左 + % 宽)
-    tlSelRect() {
-      const span = (this.timeline && this.timeline.span_ns) || 1;
-      if (this.tlSel) {
-        const a = Math.min(this.tlSel.a, this.tlSel.b), b = Math.max(this.tlSel.a, this.tlSel.b);
-        return {x: a * 100, w: (b - a) * 100};
-      }
-      if (this.tlViewStart != null) {
-        return {x: this.tlViewStart / span * 100, w: (this.tlViewEnd - this.tlViewStart) / span * 100};
-      }
-      return null;
+    tlFit() { this.tlPxPerMs = null; },
+    tlToggleFreeze() { this.tlFrozen = !this.tlFrozen; },
+    // 点块选中 = 设缩放锚点(并冻结,免得数据跳走);再点 ＋ 就围着它放大
+    tlSelectBlock(b) {
+      if (this.tlSelIdx === b.idx) { this.tlSelIdx = null; this.tlSelMs = null; this.tlSelName = ''; return; }
+      this.tlSelIdx = b.idx; this.tlSelMs = b.centerMs; this.tlSelName = b.name;
+      this.tlFrozen = true;
     },
-    _tlFrac(ev) {
-      const r = ev.currentTarget.getBoundingClientRect();
-      if (!r.width) return null;
-      return Math.min(1, Math.max(0, (ev.clientX - r.left) / r.width));
+    tlSelectedBlock() {
+      if (this.tlSelIdx == null) return null;
+      const v = this.timelineView(); if (!v) return null;
+      return v.blocks.find(b => b.idx === this.tlSelIdx) || null;
     },
-    tlDragStart(ev) { const f = this._tlFrac(ev); if (f == null) return; this.tlSel = {a: f, b: f}; this.tlFrozen = true; },
-    tlDragMove(ev) { if (this.tlSel) { const f = this._tlFrac(ev); if (f != null) this.tlSel = {a: this.tlSel.a, b: f}; } },
-    tlDragEnd() {
-      if (!this.tlSel || !this.timeline) { this.tlSel = null; return; }
-      const span = this.timeline.span_ns || 1;
-      const a = Math.min(this.tlSel.a, this.tlSel.b), b = Math.max(this.tlSel.a, this.tlSel.b);
-      this.tlSel = null;
-      if (isNaN(a) || isNaN(b) || b - a < 0.01) return;   // NaN/太小 → 忽略
-      this.tlViewStart = a * span; this.tlViewEnd = b * span;
-    },
-    tlResetZoom() { this.tlViewStart = null; this.tlViewEnd = null; },
-    tlToggleFreeze() { this.tlFrozen = !this.tlFrozen; if (!this.tlFrozen) this.tlResetZoom(); },
     // 导出 Chrome Trace JSON → 用 Perfetto / chrome://tracing 看(专业 trace 查看器)
     async downloadTrace() {
       try {
