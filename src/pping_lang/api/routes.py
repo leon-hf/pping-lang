@@ -218,6 +218,72 @@ def _kernel_findings(
     return findings
 
 
+_STALL_LABEL: dict[str, str] = {
+    "memory_dependency": "访存依赖", "shared_dependency": "shared/MIO 依赖",
+    "memory_throttle": "访存子系统压力", "math_pipe": "计算管线",
+    "exec_dependency": "执行依赖", "sync": "同步", "fetch_control": "取指/控制流",
+    "dispatch": "调度分发", "scheduler_slack": "调度余量", "other": "其它",
+}
+_STALL_ADVICE: dict[str, str] = {
+    "memory_dependency": "kernel 大量时间在等全局/本地内存返回。结合 batch/shape 判断是延迟还是带宽"
+                         " —— 增大 batch 摊薄、改 tiling、提高 L2 命中。",
+    "math_pipe": "数学/Tensor 管线接近饱和(compute-bound)。可量化/降精度;Tensor Core kernel 别一概归为算力不足。",
+    "shared_dependency": "shared memory 依赖 —— 查 tiling、bank conflict、MMA pipeline。",
+    "memory_throttle": "内存子系统资源入口被塞(MIO/LG/常量缓存),区别于单纯依赖等待。",
+    "exec_dependency": "指令级执行依赖链长 —— 看能否打散依赖、提高 ILP。",
+    "sync": "同步/屏障开销偏高 —— 查 tile/block 同步粒度。",
+    "fetch_control": "取指/控制流开销 —— fused mega-kernel 或动态分支较多。",
+}
+
+
+def _stall_findings(result: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """把 PC Sampling stall 分解翻成人话结论(Deep Evidence 的"给结论"层)。
+
+    口径遵循设计文档 §11(Codex 评审):不过度归因(访存依赖不单独断言带宽 vs 延迟);
+    scheduler_slack 高是好事(非 latency-starved);真瓶颈排除 slack/other。
+    """
+    findings: list[dict[str, Any]] = []
+    if not result or not result.get("available"):
+        return findings
+    shares: list[dict[str, Any]] = result.get("stall_shares") or []
+    # 1. 真瓶颈主导类(排除调度余量 / 其它)
+    real = [s for s in shares if s["cls"] not in ("scheduler_slack", "other")]
+    if real and real[0]["pct"] >= 35:
+        c = real[0]
+        lbl = _STALL_LABEL.get(c["cls"], c["cls"])
+        findings.append({
+            "level": "info", "title": f"{lbl}主导 stall",
+            "detail": f"stall 样本 {c['pct']:.0f}% 集中在{lbl}。" + _STALL_ADVICE.get(c["cls"], ""),
+        })
+    # 2. scheduler_slack 高 → 非 latency-starved(好事,提示瓶颈在别处)
+    slack = next((s for s in shares if s["cls"] == "scheduler_slack"), None)
+    if slack and slack["pct"] >= 40:
+        findings.append({
+            "level": "info", "title": "调度余量充足(非 latency-starved)",
+            "detail": f"{slack['pct']:.0f}% 的 stall 是 not-selected(warp 就绪但调度器选了别的)——"
+                      f" eligible warp 充足,当前不是延迟瓶颈,真正瓶颈看主导 stall 类。",
+        })
+    # 3. 主导 kernel 的 stall
+    table: list[dict[str, Any]] = result.get("kernel_table") or []
+    if table and table[0].get("dominant_stall"):
+        k = table[0]
+        dom = _STALL_LABEL.get(k["dominant_stall"], k["dominant_stall"])
+        findings.append({
+            "level": "info", "title": "主导 kernel 的 stall",
+            "detail": f"采样最多的 kernel（{k['kernel'][:46]}）主要卡在 {dom}"
+                      f"（{k['dominant_pct']:.0f}%）。",
+        })
+    # 4. 诚实:取证采样有丢样就标注
+    ov: dict[str, Any] = result.get("overhead") or {}
+    if (ov.get("hwfull") or 0) > 0 or (ov.get("dropped") or 0) > 0:
+        findings.append({
+            "level": "warning", "title": "取证采样有丢样",
+            "detail": f"HW 缓冲满 {ov.get('hwfull', 0)} 次、丢样 {ov.get('dropped', 0)} ——"
+                      f" 采样周期可调长;本次分布仍可参考但非全量。",
+        })
+    return findings
+
+
 _BUILTIN_DESCRIPTIONS: dict[str, str] = {
     "mixed-short": "短问答 + 闲聊 + 简单指令（每条 50–180 tokens）",
     "mixed-long":  "长上下文：文档摘要 / 长指令 / 转录稿（每条 1000–3000 tokens）",
@@ -655,6 +721,31 @@ def build_app(
     def kernels_trace() -> dict[str, Any]:
         tr = cupti.chrome_trace() if cupti is not None else None
         return {"available": tr is not None, "trace": tr}
+
+    # === Deep Evidence(阶段 2 PC Sampling 按需取证)===
+    # POST 触发一个短窗取证(阻塞 ~window 秒,FastAPI 在 threadpool 跑 sync def,
+    # 不卡事件循环)。不可用时 fail-closed 返回 available=False + error,不抛。
+    @app.post("/api/kernels/deep_evidence")
+    def deep_evidence(
+        window: float = Query(5.0, ge=0.0, le=30.0, description="取证窗时长(秒)"),
+        period_log2: int = Query(12, ge=5, le=31, description="采样周期 2^N 周期"),
+    ) -> dict[str, Any]:
+        if cupti is None:
+            return {"available": False, "error": "CUPTI collector 未配置", "findings": []}
+        result = cupti.run_deep_evidence(window_s=window, period_log2=period_log2)
+        result["findings"] = _stall_findings(result)
+        return result
+
+    # GET 读最近一次取证结果 + 当前是否可用(给 UI 渲染面板,不触发新采集)。
+    @app.get("/api/kernels/deep_evidence")
+    def deep_evidence_last() -> dict[str, Any]:
+        last = cupti.last_stall_result() if cupti is not None else None
+        available = cupti.pc_sampling_available() if cupti is not None else False
+        return {
+            "available_now": available,
+            "last": last,
+            "findings": _stall_findings(last) if last else [],
+        }
 
     # === GET /api/latency_trends — TTFT / TPOT / E2E bucketed p50+p99 over time ===
     # Same dual-path strategy as /api/kpis: ≤200s windows served from the live

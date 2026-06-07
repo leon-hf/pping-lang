@@ -467,3 +467,50 @@ def test_diagnoses_empty_when_no_db_tables(tmp_path):
         assert r.json()["metrics"] == {}
     finally:
         sink.close()
+
+
+# === Deep Evidence (阶段 2 PC Sampling 按需取证) ===
+
+def test_deep_evidence_endpoint_runs_and_concludes(tmp_path):
+    """POST /api/kernels/deep_evidence 跑取证窗 → stall 分解 + findings。"""
+    from pping_lang.collector.cupti import (
+        CuptiKernelCollector, FakeActivitySource, FakePcSamplingLib,
+        PcSamplingController, StallSample,
+    )
+    db = tmp_path / "de.duckdb"
+    sink = LocalSink(db_path=db, instance_id="x", flush_interval_s=10.0)
+    R = "smsp__pcsamp_warps_issue_stalled_"
+    lib = FakePcSamplingLib(drain_batches=[[
+        StallSample("flash_fwd_kernel", R + "long_scoreboard", 80),
+        StallSample("flash_fwd_kernel", R + "selected", 20),
+    ]])
+    coll = CuptiKernelCollector(
+        sink, source=FakeActivitySource(),
+        pc_sampling=PcSamplingController(lib, sink=sink),
+    )
+    app = build_app(db_path=str(db), instance_id="x", engine_index=0,
+                    sink=sink, rule_store=RuleStore(), cupti=coll)
+    client = TestClient(app)
+    try:
+        # window=0 → 不真睡,只收尾 drain 一次
+        data = client.post("/api/kernels/deep_evidence?window=0&period_log2=12").json()
+        assert data["available"] is True
+        assert data["sample_total"] == 100.0
+        shares = {d["cls"]: d["pct"] for d in data["stall_shares"]}
+        assert abs(shares["memory_dependency"] - 100.0) < 1e-6   # 80 全是 stall,selected=issued
+        titles = [f["title"] for f in data["findings"]]
+        assert any("访存依赖" in t for t in titles)
+        # GET 读最近结果
+        g = client.get("/api/kernels/deep_evidence").json()
+        assert g["available_now"] is True
+        assert g["last"]["sample_total"] == 100.0
+    finally:
+        sink.close()
+
+
+def test_deep_evidence_unavailable_without_collector(empty_app):
+    client, _db, _sink = empty_app
+    data = client.post("/api/kernels/deep_evidence?window=0").json()
+    assert data["available"] is False
+    g = client.get("/api/kernels/deep_evidence").json()
+    assert g["available_now"] is False and g["last"] is None

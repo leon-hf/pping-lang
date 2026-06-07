@@ -460,6 +460,8 @@ function dashboard() {
       overhead_cb_ms: null, dropped_total: null,
       snapshot_age_s: null, rollup_window_s: null,
     },
+    // Deep Evidence(阶段 2 PC Sampling 按需取证):为什么这些 kernel 慢
+    deep: { running: false, available_now: false, result: null, findings: [], error: null },
     kernelShowAll: false,        // Kernel 明细表:false=只显示前 N 行
     kernelCollapsed: 10,         // 收起时显示的行数
     timeline: null,              // 执行时间线(最近 N 条 kernel 的 start/end/stream)
@@ -502,6 +504,50 @@ function dashboard() {
         rotary: 'Rotary', activation: 'Activation', comm: '通信 (NCCL)',
         other: '其它',
       }[cls] || cls;
+    },
+
+    // stall 语义类 → 中文标签 / 颜色(Deep Evidence 分解条)
+    stallLabel(cls) {
+      return {
+        memory_dependency: '访存依赖', shared_dependency: 'shared/MIO 依赖',
+        memory_throttle: '访存子系统压力', math_pipe: '计算管线',
+        exec_dependency: '执行依赖', sync: '同步', fetch_control: '取指/控制流',
+        dispatch: '调度分发', scheduler_slack: '调度余量(非瓶颈)', other: '其它',
+      }[cls] || cls;
+    },
+    stallColor(cls) {
+      return {
+        memory_dependency: '#5147c8', shared_dependency: '#0d8b80',
+        memory_throttle: '#7a5cc8', math_pipe: '#c2660d', exec_dependency: '#be1556',
+        sync: '#dc4d3e', fetch_control: '#5a8f1f', dispatch: '#9a8f1f',
+        scheduler_slack: '#9bb04f', other: '#a8998a',
+      }[cls] || '#a8998a';
+    },
+    // 读最近一次取证结果(开 Kernel tab 时调,不触发新采集)
+    async loadDeepEvidence() {
+      try {
+        const r = await fetch('/api/kernels/deep_evidence').then(x => x.json());
+        this.deep.available_now = !!r.available_now;
+        if (r.last) { this.deep.result = r.last; this.deep.findings = r.findings || []; }
+      } catch (e) { /* fail-closed:静默 */ }
+    },
+    // 触发一个取证短窗(阻塞 ~window 秒)
+    async runDeepEvidence(window) {
+      if (this.deep.running) return;
+      this.deep.running = true; this.deep.error = null;
+      try {
+        const r = await fetch(`/api/kernels/deep_evidence?window=${window || 5}`,
+          { method: 'POST' }).then(x => x.json());
+        if (r.available) {
+          this.deep.result = r; this.deep.findings = r.findings || []; this.deep.available_now = true;
+        } else {
+          this.deep.error = r.error || 'PC Sampling 不可用'; this.deep.available_now = false;
+        }
+      } catch (e) {
+        this.deep.error = '请求失败:' + e;
+      } finally {
+        this.deep.running = false;
+      }
     },
     // kernel 数据是否"实时"(采集时刻够近),用于新鲜度横幅
     kernelFresh() {

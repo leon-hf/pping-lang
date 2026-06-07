@@ -706,6 +706,85 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
           </div>
         </div>
       </template>
+
+      <!-- ===== Deep Evidence(阶段 2 PC Sampling 按需取证)===== -->
+      <div class="chart-card" style="margin-top: 18px;">
+        <div class="head" style="display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;">
+          <div>
+            <h3>🔬 Deep Evidence — 为什么慢 <span style="color: var(--muted-2); font-weight: 400; font-size: 12px;">PC Sampling 取证 · 按需短窗</span></h3>
+            <div style="margin-top: 4px; font-size: 11.5px; color: var(--muted-2);">always-on 给你"哪类 kernel 慢";这里短时间开 PC Sampling 取 stall 证据,回答"<strong>为什么</strong>慢"(访存依赖 / 计算管线 / 同步 …)</div>
+          </div>
+          <div>
+            <button class="btn" :disabled="deep.running" @click="runDeepEvidence(5)">
+              <span x-show="!deep.running">采集 stall 证据(5s)</span>
+              <span x-show="deep.running">采集中…</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- 不可用 -->
+        <template x-if="deep.error">
+          <div class="roofline-verdict empty" style="margin: 12px 0 0;">
+            <strong>PC Sampling 取证不可用</strong> — <span x-text="deep.error"></span><br>
+            <span style="font-size: 11px; color: var(--muted-2);">需 Linux + libppingcupti.so + 放开 GPU 性能计数器权限;与 torch 同进程需 1b 注入式(见设计文档 §12)。</span>
+          </div>
+        </template>
+
+        <!-- 结果 -->
+        <template x-if="deep.result && deep.result.available">
+          <div style="margin-top: 14px;">
+            <div x-show="deep.findings.length" style="display: flex; flex-direction: column; gap: 9px; margin-bottom: 14px;">
+              <template x-for="(f, i) in deep.findings" :key="i">
+                <div class="kfinding" :class="f.level">
+                  <div class="kf-title" x-text="f.title"></div>
+                  <div class="kf-detail" x-text="f.detail"></div>
+                </div>
+              </template>
+            </div>
+
+            <div style="font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 8px;">
+              stall 分解 <span style="font-weight: 400; text-transform: none;">· 占 stall 样本(共 <span x-text="fmt(deep.result.sample_total, 0)"></span> 样本,issued <span x-text="fmt(deep.result.issued_pct, 0)"></span>%)</span>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 6px;">
+              <template x-for="s in deep.result.stall_shares.filter(x => x.pct >= 0.5)" :key="s.cls">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                  <div style="width: 150px; font-size: 12px; color: var(--muted);" x-text="stallLabel(s.cls)"></div>
+                  <div style="flex: 1; background: #e9ebee; border-radius: 4px; height: 16px; overflow: hidden;">
+                    <div :style="`width:${Math.min(100, s.pct)}%;height:100%;background:${stallColor(s.cls)}`"></div>
+                  </div>
+                  <div style="width: 48px; text-align: right; font-size: 12px; font-variant-numeric: tabular-nums;" x-text="fmt(s.pct, 1) + '%'"></div>
+                </div>
+              </template>
+            </div>
+
+            <div x-show="deep.result.kernel_table && deep.result.kernel_table.length" style="margin-top: 16px;">
+              <div style="font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 8px;">per-kernel stall 画像</div>
+              <table class="kernel-table">
+                <thead><tr><th>kernel</th><th style="text-align:right;">样本</th><th>主导 stall</th><th style="text-align:right;">占比</th></tr></thead>
+                <tbody>
+                  <template x-for="(k, i) in deep.result.kernel_table.slice(0, 12)" :key="i">
+                    <tr>
+                      <td style="font-family: ui-monospace, monospace; font-size: 11px;" x-text="k.kernel"></td>
+                      <td style="text-align:right;" x-text="fmt(k.samples, 0)"></td>
+                      <td><span :style="`color:${stallColor(k.dominant_stall)};font-weight:600`" x-text="stallLabel(k.dominant_stall)"></span></td>
+                      <td style="text-align:right;" x-text="fmt(k.dominant_pct, 0) + '%'"></td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
+
+            <div style="margin-top: 12px; font-size: 11px; color: var(--muted-2);">
+              取证窗 <span x-text="fmt(deep.result.window_s, 0)"></span>s · GetData 累计 <span x-text="fmt(deep.result.overhead.getdata_ms, 1)"></span>ms · 丢样 <span x-text="deep.result.overhead.dropped"></span> · HW满 <span x-text="deep.result.overhead.hwfull"></span>
+            </div>
+          </div>
+        </template>
+
+        <!-- 初始 -->
+        <template x-if="!deep.result && !deep.error">
+          <div class="roofline-verdict empty" style="margin: 12px 0 0;">点上面的按钮开一个短窗 PC Sampling,看这些 kernel 内部卡在哪(访存依赖 / 计算管线 / 同步 …)。</div>
+        </template>
+      </div>
     </div>
 
     <!-- ===== 规则 tab ===== -->
