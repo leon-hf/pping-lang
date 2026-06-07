@@ -18,12 +18,15 @@
 """
 from __future__ import annotations
 
+import ctypes
 import logging
+import os
 import sys
 import time
 from collections import defaultdict, deque
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from threading import Event, Lock
 from typing import Any, Protocol, runtime_checkable
 
@@ -579,10 +582,13 @@ class CuptiKernelCollector:
         clock: Callable[[], int] = time.monotonic_ns,
         top_n: int = 100,
         capture_stacks: bool = False,
+        pc_sampling: PcSamplingController | None = None,
     ) -> None:
         self._sink = sink
         self._engine_index = engine_index
         self._source = source if source is not None else _default_source(capture_stacks)
+        # Deep Evidence(阶段 2 PC Sampling)按需取证控制器;None=未配置(优雅缺省)
+        self._pcs = pc_sampling
         self._classifier = classifier or KernelClassifier()
         self._agg = WindowAggregator(self._classifier)
         self._flame = FlamegraphAggregator()           # 火焰图(仅 capture_stacks 模式有数据)
@@ -620,6 +626,23 @@ class CuptiKernelCollector:
     def chrome_trace(self) -> dict[str, Any] | None:
         """最近 kernel 的 Chrome Trace JSON(Perfetto/chrome://tracing 打开)。"""
         return self._timeline.chrome_trace()
+
+    # === Deep Evidence(阶段 2 PC Sampling 按需取证)===
+
+    def pc_sampling_available(self) -> bool:
+        """PC Sampling 取证当前能不能用(需配置 + libppingcupti + 权限)。"""
+        return self._pcs is not None and self._pcs.available
+
+    def run_deep_evidence(self, window_s: float = 5.0, period_log2: int = 12) -> dict[str, Any]:
+        """跑一个 PC Sampling 取证短窗(阻塞 ~window_s),返回 stall 分解结论。
+        未配置 / 不可用 → fail-closed 的 {available: False, error: ...}。"""
+        if self._pcs is None:
+            return {"available": False, "error": "PC Sampling 未配置(Deep Evidence 不可用)"}
+        return self._pcs.run_window(window_s=window_s, period_log2=period_log2)
+
+    def last_stall_result(self) -> dict[str, Any] | None:
+        """最近一次取证结果(给 API 读)。None=从未跑过。"""
+        return self._pcs.last_result() if self._pcs is not None else None
 
     @property
     def last_snapshot_ts(self) -> int | None:
@@ -917,3 +940,268 @@ def _import_cupti():  # noqa: ANN202 - 动态模块
 def _default_source(capture_stacks: bool = False) -> KernelActivitySource:
     # 总是返回实例;collector.start() 用 available() 决定启用还是优雅禁用。
     return CuptiPythonSource(capture_stacks=capture_stacks)
+
+
+# === PC Sampling 原生桥(阶段 2 Deep Evidence)========================
+#
+# 这是 libppingcupti.so 的 ctypes 封装。**Deep Evidence Mode**(设计文档 §11):
+# PC Sampling 不是 always-on,而是操作员/规则按需触发的短窗取证。失败一律 fail-closed
+# (库加载失败 / start 失败 → available()=False),绝不阻塞 always-on 主干。
+#
+# 集成现状(§12):in-process 与 torch 共存时 start 可能失效(torch 占 CUPTI),
+# 彻底解决靠 1b 注入式。这里的 fail-closed 让"不可用"成为优雅降级而非崩溃。
+
+
+class _PpingStallRow(ctypes.Structure):
+    """镜像 native/ppingcupti/ppingcupti.h 的 PpingStallRow(固定 272 字节)。"""
+    _fields_ = [
+        ("stall_reason", ctypes.c_uint),
+        ("_pad", ctypes.c_uint),
+        ("samples", ctypes.c_ulonglong),
+        ("kernel", ctypes.c_char * 256),
+    ]
+
+
+def _default_so_path() -> str:
+    """libppingcupti.so 路径:env 覆盖 > 仓库内 native/ 构建产物。"""
+    env = os.environ.get("PPING_LANG_PCS_SO")
+    if env:
+        return env
+    return str(Path(__file__).resolve().parents[3] / "native" / "ppingcupti" / "libppingcupti.so")
+
+
+class PcSamplingLib(Protocol):
+    """libppingcupti.so 的窄接口。真实=ctypes;测试=FakePcSamplingLib。"""
+
+    def available(self) -> bool: ...
+    def start(self, period_log2: int) -> int: ...        # 0=成功,负=错误码
+    def stop(self) -> int: ...
+    def drain(self) -> list[StallSample]: ...            # 已聚合行(reason 已解析成名)
+    def overhead(self) -> tuple[float, int, int]: ...    # (getdata_ms, dropped, hwfull)
+    def last_error(self) -> str: ...
+
+
+class CtypesPcSamplingLib:
+    """真实 libppingcupti.so via ctypes(RTLD_DEEPBIND)。
+
+    加载失败(非 Linux / 无 .so / 缺 CUPTI)→ available() False,fail-closed。
+    DEEPBIND:进程里可能并存多个 libcupti,让 .so 优先用自己 rpath 的版本(§12)。
+    """
+
+    _MAX_ROWS = 16384
+
+    def __init__(self, so_path: str | None = None) -> None:
+        self._lib: Any = None
+        self._reason_cache: dict[int, str] = {}
+        path = so_path or _default_so_path()
+        try:
+            mode = getattr(os, "RTLD_NOW", 2) | getattr(os, "RTLD_DEEPBIND", 0)
+            self._lib = ctypes.CDLL(path, mode=mode)
+            self._bind()
+        except Exception as e:  # noqa: BLE001 — 加载失败必须优雅降级
+            logger.warning("[pping-lang] libppingcupti 加载失败(PC Sampling 禁用): %s", e)
+            self._lib = None
+
+    def _bind(self) -> None:
+        c = self._lib
+        c.pping_pcs_available.restype = ctypes.c_int
+        c.pping_pcs_start.argtypes = [ctypes.c_int]
+        c.pping_pcs_start.restype = ctypes.c_int
+        c.pping_pcs_stop.restype = ctypes.c_int
+        c.pping_pcs_drain.argtypes = [ctypes.POINTER(_PpingStallRow), ctypes.c_int]
+        c.pping_pcs_drain.restype = ctypes.c_int
+        c.pping_pcs_stall_reason_name.argtypes = [ctypes.c_uint, ctypes.c_char_p, ctypes.c_int]
+        c.pping_pcs_stall_reason_name.restype = ctypes.c_int
+        c.pping_pcs_overhead.argtypes = [
+            ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_ulonglong),
+            ctypes.POINTER(ctypes.c_ulonglong),
+        ]
+        c.pping_pcs_last_error.restype = ctypes.c_char_p
+        self._buf = (_PpingStallRow * self._MAX_ROWS)()
+
+    def available(self) -> bool:
+        if self._lib is None:
+            return False
+        try:
+            return bool(self._lib.pping_pcs_available())
+        except Exception:
+            return False
+
+    def start(self, period_log2: int) -> int:
+        if self._lib is None:
+            return -100
+        return int(self._lib.pping_pcs_start(period_log2))
+
+    def stop(self) -> int:
+        if self._lib is None:
+            return -100
+        return int(self._lib.pping_pcs_stop())
+
+    def _reason_name(self, idx: int) -> str:
+        nm = self._reason_cache.get(idx)
+        if nm is None:
+            buf = ctypes.create_string_buffer(160)
+            self._lib.pping_pcs_stall_reason_name(idx, buf, 160)
+            nm = buf.value.decode(errors="replace") or f"reason_{idx}"
+            self._reason_cache[idx] = nm
+        return nm
+
+    def drain(self) -> list[StallSample]:
+        if self._lib is None:
+            return []
+        n = int(self._lib.pping_pcs_drain(self._buf, self._MAX_ROWS))
+        out: list[StallSample] = []
+        for i in range(max(0, n)):
+            row = self._buf[i]
+            out.append(StallSample(
+                kernel=row.kernel.decode(errors="replace"),
+                reason=self._reason_name(row.stall_reason),
+                samples=int(row.samples),
+            ))
+        return out
+
+    def overhead(self) -> tuple[float, int, int]:
+        if self._lib is None:
+            return (0.0, 0, 0)
+        gd = ctypes.c_double(); dr = ctypes.c_ulonglong(); hf = ctypes.c_ulonglong()
+        self._lib.pping_pcs_overhead(ctypes.byref(gd), ctypes.byref(dr), ctypes.byref(hf))
+        return (gd.value, int(dr.value), int(hf.value))
+
+    def last_error(self) -> str:
+        if self._lib is None:
+            return "libppingcupti not loaded"
+        try:
+            return (self._lib.pping_pcs_last_error() or b"").decode(errors="replace")
+        except Exception:
+            return ""
+
+
+class FakePcSamplingLib:
+    """测试 / 无 GPU 用的 PC Sampling 库替身。脚本化 drain 返回的合成行。"""
+
+    def __init__(self, *, available: bool = True, start_rc: int = 0,
+                 drain_batches: list[list[StallSample]] | None = None) -> None:
+        self._available = available
+        self._start_rc = start_rc
+        self._batches = list(drain_batches or [])
+        self._overhead = (0.0, 0, 0)
+        self.started = False
+
+    def available(self) -> bool:
+        return self._available
+
+    def start(self, period_log2: int) -> int:
+        if self._start_rc == 0:
+            self.started = True
+        return self._start_rc
+
+    def stop(self) -> int:
+        self.started = False
+        return 0
+
+    def drain(self) -> list[StallSample]:
+        return self._batches.pop(0) if self._batches else []
+
+    def overhead(self) -> tuple[float, int, int]:
+        return self._overhead
+
+    def set_overhead(self, getdata_ms: float, dropped: int, hwfull: int) -> None:
+        self._overhead = (getdata_ms, dropped, hwfull)
+
+    def last_error(self) -> str:
+        return "" if self._start_rc == 0 else f"fake start_rc={self._start_rc}"
+
+
+class PcSamplingController:
+    """Deep Evidence 编排:按需开一个短窗采 stall,聚合成"为什么慢"的结论数据。
+
+    run_window 是一次完整取证:start → 周期 drain → stop → 快照 stall 分解 + per-kernel
+    画像 + 自我观测开销。所有失败 fail-closed 成 {available: False, error: ...}。
+    """
+
+    def __init__(
+        self,
+        lib: PcSamplingLib | None = None,
+        *,
+        classifier: StallClassifier | None = None,
+        sink: Sink | None = None,
+        engine_index: int = 0,
+        top_n: int = 50,
+    ) -> None:
+        self._lib = lib if lib is not None else CtypesPcSamplingLib()
+        self._classifier = classifier or StallClassifier()
+        self._sink = sink
+        self._engine_index = engine_index
+        self._top_n = top_n
+        self._busy = Lock()
+        self._last_result: dict[str, Any] | None = None
+
+    @property
+    def available(self) -> bool:
+        return self._lib.available()
+
+    def last_result(self) -> dict[str, Any] | None:
+        return self._last_result
+
+    def run_window(
+        self,
+        *,
+        window_s: float = 5.0,
+        period_log2: int = 12,
+        drain_interval_s: float = 0.5,
+        clock: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], None] = time.sleep,
+    ) -> dict[str, Any]:
+        """跑一个取证窗,返回结论数据。同一时刻只允许一个窗(busy 锁)。"""
+        if not self._busy.acquire(blocking=False):
+            return {"available": False, "error": "another deep-evidence window is running"}
+        try:
+            if not self._lib.available():
+                return self._fail("PC Sampling 不可用(需 Linux + libppingcupti + 放开 profiling 权限)")
+            rc = self._lib.start(period_log2)
+            if rc != 0:
+                return self._fail(f"start 失败 rc={rc}: {self._lib.last_error()}")
+            agg = StallAggregator(self._classifier)
+            try:
+                t0 = clock()
+                while clock() - t0 < window_s:
+                    sleep(drain_interval_s)
+                    agg.add(self._lib.drain())
+                agg.add(self._lib.drain())  # 收尾再 drain 一次
+            finally:
+                self._lib.stop()
+            getdata_ms, dropped, hwfull = self._lib.overhead()
+            table = agg.kernel_stall_table(self._top_n)
+            stats = agg.snapshot_and_reset()
+            shares = sorted(
+                ({"cls": cls, "pct": stats[STALL_CLASS_TO_METRIC[cls]]} for cls in STALL_CLASSES),
+                key=lambda d: d["pct"], reverse=True,
+            )
+            result: dict[str, Any] = {
+                "available": True,
+                "window_s": window_s,
+                "period_log2": period_log2,
+                "sample_total": stats[M.KERNEL_STALL_SAMPLE_TOTAL],
+                "issued_pct": stats[M.KERNEL_STALL_ISSUED_PCT],
+                "stall_shares": shares,
+                "kernel_table": table,
+                "overhead": {"getdata_ms": getdata_ms, "dropped": dropped, "hwfull": hwfull},
+                "error": None,
+            }
+            self._push_metrics(stats)
+            self._last_result = result
+            return result
+        finally:
+            self._busy.release()
+
+    def _push_metrics(self, stats: dict[str, float]) -> None:
+        if self._sink is None:
+            return
+        now = time.monotonic_ns()
+        for name, value in stats.items():
+            self._sink.push_metric(MetricPoint(now, name, value, self._engine_index))
+
+    def _fail(self, msg: str) -> dict[str, Any]:
+        res = {"available": False, "error": msg}
+        self._last_result = res
+        return res

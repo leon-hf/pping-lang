@@ -8,9 +8,11 @@ from __future__ import annotations
 from pping_lang.collector.cupti import (
     CuptiKernelCollector,
     FakeActivitySource,
+    FakePcSamplingLib,
     FlamegraphAggregator,
     KernelClassifier,
     KernelEvent,
+    PcSamplingController,
     StallAggregator,
     StallClassifier,
     StallSample,
@@ -559,6 +561,86 @@ def test_stall_aggregator_kernel_table_dominant_excludes_slack_and_issued():
     # attn 总样本最多(70+25+200=295)→ 排第一
     assert table[0]["kernel"] == "attn"
     assert by["gemm"]["dominant_stall"] == "math_pipe"
+
+
+# === PcSamplingController(Deep Evidence,fake lib + 注入时钟)===
+
+class _FakeClockSleep:
+    """sleep 推进时钟 —— run_window 的取证窗循环完全可控,无真实等待。"""
+
+    def __init__(self) -> None:
+        self.t = 0.0
+
+    def clock(self) -> float:
+        return self.t
+
+    def sleep(self, s: float) -> None:
+        self.t += s
+
+
+def test_pc_sampling_controller_window_aggregates_and_pushes():
+    sink = _CollectingSink(flush_interval_s=10.0)
+    lib = FakePcSamplingLib(drain_batches=[
+        [_s("attn", "long_scoreboard", 60), _s("attn", "selected", 40)],
+        [_s("attn", "long_scoreboard", 40)],
+        [_s("gemm", "math_pipe_throttle", 50)],
+    ])
+    lib.set_overhead(3.5, 0, 0)
+    fc = _FakeClockSleep()
+    ctl = PcSamplingController(lib, sink=sink)
+    res = ctl.run_window(window_s=1.0, drain_interval_s=0.5, clock=fc.clock, sleep=fc.sleep)
+
+    assert res["available"] is True
+    shares = {d["cls"]: d["pct"] for d in res["stall_shares"]}
+    # stall 样本 = attn long_scoreboard 100 + gemm math 50 = 150;attn selected 40 = issued
+    assert abs(shares["memory_dependency"] - (100 / 150 * 100)) < 1e-6
+    assert abs(shares["math_pipe"] - (50 / 150 * 100)) < 1e-6
+    assert res["sample_total"] == 190.0          # 60+40+40+50
+    assert res["overhead"]["getdata_ms"] == 3.5
+    assert lib.started is False                   # 窗结束已 stop
+    # stall 指标已 push 进 sink(close 触发 flush 后才进 flushed_metrics)
+    sink.close()
+    names = {m.name for m in sink.flushed_metrics}
+    assert M.KERNEL_STALL_MEMORY_DEP_PCT in names
+    assert M.KERNEL_STALL_SAMPLE_TOTAL in names
+
+
+def test_pc_sampling_controller_fail_closed_when_unavailable():
+    ctl = PcSamplingController(FakePcSamplingLib(available=False))
+    res = ctl.run_window(window_s=0.1)
+    assert res["available"] is False
+    assert res["error"]
+
+
+def test_pc_sampling_controller_fail_closed_on_start_error():
+    ctl = PcSamplingController(FakePcSamplingLib(start_rc=-7))
+    res = ctl.run_window(window_s=0.1)
+    assert res["available"] is False
+    assert "rc=-7" in res["error"]
+
+
+def test_collector_deep_evidence_unconfigured_is_safe():
+    sink = _CollectingSink(flush_interval_s=10.0)
+    coll = CuptiKernelCollector(sink, source=FakeActivitySource())
+    assert coll.pc_sampling_available() is False
+    res = coll.run_deep_evidence(window_s=0.0)
+    assert res["available"] is False
+    assert coll.last_stall_result() is None
+    sink.close()
+
+
+def test_collector_deep_evidence_delegates():
+    sink = _CollectingSink(flush_interval_s=10.0)
+    lib = FakePcSamplingLib(drain_batches=[[_s("k", "wait", 30)]])
+    coll = CuptiKernelCollector(
+        sink, source=FakeActivitySource(), pc_sampling=PcSamplingController(lib, sink=sink),
+    )
+    assert coll.pc_sampling_available() is True
+    res = coll.run_deep_evidence(window_s=0.0)   # 窗=0 → 只收尾 drain 一次,不真睡
+    assert res["available"] is True
+    assert res["sample_total"] == 30.0
+    assert coll.last_stall_result() is res
+    sink.close()
 
 
 def test_collector_reports_dropped_records():
