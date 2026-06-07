@@ -47,6 +47,22 @@ KERNEL_CLASS_TO_METRIC: dict[str, str] = {
 }
 KERNEL_CLASSES: tuple[str, ...] = tuple(KERNEL_CLASS_TO_METRIC)
 
+# stall 语义类 → 占比 metric 名(阶段 2 PC Sampling)。"issued" 不在此(非 stall,
+# 单独走 KERNEL_STALL_ISSUED_PCT)。各类相加 ≈ 100(占 stall 样本)。映射见设计文档 §11。
+STALL_CLASS_TO_METRIC: dict[str, str] = {
+    "memory_dependency": M.KERNEL_STALL_MEMORY_DEP_PCT,
+    "shared_dependency": M.KERNEL_STALL_SHARED_DEP_PCT,
+    "memory_throttle": M.KERNEL_STALL_MEMORY_THROTTLE_PCT,
+    "math_pipe": M.KERNEL_STALL_MATH_PIPE_PCT,
+    "exec_dependency": M.KERNEL_STALL_EXEC_DEP_PCT,
+    "sync": M.KERNEL_STALL_SYNC_PCT,
+    "fetch_control": M.KERNEL_STALL_FETCH_CONTROL_PCT,
+    "dispatch": M.KERNEL_STALL_DISPATCH_PCT,
+    "scheduler_slack": M.KERNEL_STALL_SCHEDULER_SLACK_PCT,
+    "other": M.KERNEL_STALL_OTHER_PCT,
+}
+STALL_CLASSES: tuple[str, ...] = tuple(STALL_CLASS_TO_METRIC)
+
 
 # === 采集源接口(可替换边界) =========================================
 
@@ -130,6 +146,59 @@ class KernelClassifier:
 
     def _match(self, name: str) -> str:
         low = name.lower()
+        for needles, cls in self._rules:
+            for n in needles:
+                if n in low:
+                    return cls
+        return "other"
+
+    @property
+    def cache_size(self) -> int:
+        return len(self._cache)
+
+
+# === stall reason → 语义类(阶段 2 PC Sampling,带记忆化) ==============
+
+# (子串列表, 语义类)。小写子串匹配,首个命中胜出 —— **顺序敏感**。
+# 输入是 Ada/sm_89 的 PerfWorks 名,如 `smsp__pcsamp_warps_issue_stalled_long_scoreboard`;
+# `_not_issued` 变体(同 reason 但该 cycle 未发射)由子串自然归到同类。
+# 归类口径见设计文档 §11(Codex 评审细化):
+#   - long_scoreboard=访存依赖;short_scoreboard 不并入(shared/MIO);throttle/miss=子系统压力;
+#   - not_selected 必须在 selected 之前(前者含后者子串);selected=已发射,非 stall。
+DEFAULT_STALL_RULES: list[tuple[tuple[str, ...], str]] = [
+    (("not_selected",), "scheduler_slack"),          # 必须先于 selected
+    (("selected",), "issued"),                        # 非 stall:已发射指令
+    (("long_scoreboard",), "memory_dependency"),
+    (("short_scoreboard",), "shared_dependency"),
+    (("mio_throttle", "lg_throttle", "tex_throttle", "imc_miss"), "memory_throttle"),
+    (("math_pipe", "fma", "alu", "tensor"), "math_pipe"),
+    (("barrier", "membar", "sync"), "sync"),
+    (("wait",), "exec_dependency"),
+    (("no_instruction", "inst_fetch", "branch_resolving"), "fetch_control"),
+    (("dispatch",), "dispatch"),
+    (("drain", "sleeping", "misc"), "other"),
+]
+
+
+class StallClassifier:
+    """PerfWorks stall reason 名 → 语义类,记忆化(同 KernelClassifier 套路)。
+
+    产出的类 ∈ STALL_CLASSES ∪ {"issued"}。未命中 → "other"。
+    """
+
+    def __init__(self, rules: list[tuple[tuple[str, ...], str]] | None = None) -> None:
+        self._rules = rules if rules is not None else DEFAULT_STALL_RULES
+        self._cache: dict[str, str] = {}
+
+    def classify(self, reason: str) -> str:
+        cls = self._cache.get(reason)
+        if cls is None:
+            cls = self._match(reason)
+            self._cache[reason] = cls
+        return cls
+
+    def _match(self, reason: str) -> str:
+        low = reason.lower()
         for needles, cls in self._rules:
             for n in needles:
                 if n in low:
@@ -247,6 +316,110 @@ class WindowAggregator:
                     "in_graph_pct": (100.0 * in_graph_ns / total_ns) if total_ns else 0.0,
                 })
             rows.sort(key=lambda r: r["pct"], reverse=True)
+            return rows[:limit]
+
+
+# === stall 聚合(阶段 2 PC Sampling / Deep Evidence) ===================
+
+@dataclass(slots=True, frozen=True)
+class StallSample:
+    """一条已聚合的 stall 记录 —— 原生 .so 每次 drain 在库内预聚合后吐过来的最小载荷。
+
+    不是单个 PC 样本(那是百万/s,绝不过桥);而是 (kernel, reason) 在本批的累计样本数。
+    这就是 5% 预算的命门:原生侧聚合,Python 只收这种小行。
+    """
+
+    kernel: str       # kernel 名(mangled / demangled)
+    reason: str       # 原始 PerfWorks stall reason 名(如 ..._long_scoreboard)
+    samples: int      # 该 (kernel, reason) 本批样本数
+
+
+class StallAggregator:
+    """累加一窗内的 stall 样本,roll-up 时算出语义类占比 + per-kernel stall 画像。
+
+    口径(设计文档 §11):各语义类占 **stall 样本**(= 总样本 − issued);`issued`(selected)
+    是已发射、非 stall,单独占总样本。线程安全同 WindowAggregator。
+    """
+
+    def __init__(self, classifier: StallClassifier | None = None) -> None:
+        self._clf = classifier or StallClassifier()
+        self._lock = Lock()
+        self._reset_locked()
+
+    def _reset_locked(self) -> None:
+        self._cat_samples: dict[str, int] = defaultdict(int)  # 语义类(不含 issued)→ 样本
+        self._issued = 0                                      # selected
+        self._total = 0
+        # per-kernel:kernel → {语义类/issued → 样本, "_total" → 样本}
+        self._kernel: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+        self._has_data = False
+
+    @property
+    def has_data(self) -> bool:
+        return self._has_data
+
+    def add(self, samples: list[StallSample]) -> None:
+        with self._lock:
+            for s in samples:
+                if s.samples <= 0:
+                    continue
+                self._has_data = True
+                cat = self._clf.classify(s.reason)
+                self._total += s.samples
+                if cat == "issued":
+                    self._issued += s.samples
+                else:
+                    self._cat_samples[cat] += s.samples
+                k = self._kernel[s.kernel]
+                k[cat] += s.samples
+                k["_total"] += s.samples
+
+    def snapshot_and_reset(self) -> dict[str, float]:
+        """语义类占比(占 stall 样本)+ issued 占比(占总样本)+ 总样本数,然后清零。"""
+        with self._lock:
+            stall_total = sum(self._cat_samples.values())     # = total − issued
+            out: dict[str, float] = {}
+            for cls in STALL_CLASSES:
+                pct = 100.0 * self._cat_samples.get(cls, 0) / stall_total if stall_total else 0.0
+                out[STALL_CLASS_TO_METRIC[cls]] = pct
+            out[M.KERNEL_STALL_ISSUED_PCT] = (
+                100.0 * self._issued / self._total if self._total else 0.0
+            )
+            out[M.KERNEL_STALL_SAMPLE_TOTAL] = float(self._total)
+            self._reset_locked()
+            return out
+
+    def kernel_stall_table(self, limit: int = 25) -> list[dict[str, Any]]:
+        """per-kernel stall 画像(未 reset):每行含样本数 + 主导 stall 类 + 明细。
+
+        主导类**排除** issued(非 stall)与 scheduler_slack(高值常是好事,非瓶颈),
+        这样"主导"指的是真正值得动手的 stall。按总样本降序。
+        """
+        with self._lock:
+            rows: list[dict[str, Any]] = []
+            for kname, cats in self._kernel.items():
+                ktotal = cats.get("_total", 0)
+                if ktotal <= 0:
+                    continue
+                stall_total = ktotal - cats.get("issued", 0)
+                dom: str | None = None
+                dom_pct = 0.0
+                for cls, n in cats.items():
+                    if cls in ("_total", "issued", "scheduler_slack"):
+                        continue
+                    pct = 100.0 * n / stall_total if stall_total else 0.0
+                    if pct > dom_pct:
+                        dom_pct = pct
+                        dom = cls
+                rows.append({
+                    "kernel": kname,
+                    "samples": ktotal,
+                    "stall_samples": stall_total,
+                    "dominant_stall": dom,
+                    "dominant_pct": dom_pct,
+                    "breakdown": {c: v for c, v in cats.items() if c != "_total"},
+                })
+            rows.sort(key=lambda r: r["samples"], reverse=True)
             return rows[:limit]
 
 

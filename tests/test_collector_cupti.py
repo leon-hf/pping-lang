@@ -11,6 +11,9 @@ from pping_lang.collector.cupti import (
     FlamegraphAggregator,
     KernelClassifier,
     KernelEvent,
+    StallAggregator,
+    StallClassifier,
+    StallSample,
     TimelineBuffer,
     WindowAggregator,
 )
@@ -450,6 +453,112 @@ def test_collector_exposes_top_kernels():
     assert coll.last_window_ns > 0
     coll.stop()
     sink.close()
+
+
+# === StallClassifier(阶段 2 PC Sampling)===
+
+def _reason(short: str) -> str:
+    """构造 Ada/sm_89 PerfWorks 全名,如 long_scoreboard → smsp__...long_scoreboard。"""
+    return f"smsp__pcsamp_warps_issue_stalled_{short}"
+
+
+def test_stall_classifier_maps_perfworks_reasons():
+    clf = StallClassifier()
+    assert clf.classify(_reason("long_scoreboard")) == "memory_dependency"
+    assert clf.classify(_reason("short_scoreboard")) == "shared_dependency"
+    assert clf.classify(_reason("mio_throttle")) == "memory_throttle"
+    assert clf.classify(_reason("lg_throttle")) == "memory_throttle"
+    assert clf.classify(_reason("imc_miss")) == "memory_throttle"
+    assert clf.classify(_reason("math_pipe_throttle")) == "math_pipe"
+    assert clf.classify(_reason("wait")) == "exec_dependency"
+    assert clf.classify(_reason("barrier")) == "sync"
+    assert clf.classify(_reason("membar")) == "sync"
+    assert clf.classify(_reason("no_instructions")) == "fetch_control"
+    assert clf.classify(_reason("branch_resolving")) == "fetch_control"
+    assert clf.classify(_reason("dispatch_stall")) == "dispatch"
+
+
+def test_stall_classifier_not_selected_before_selected():
+    """顺序敏感:not_selected 含 selected 子串,必须先命中 scheduler_slack。"""
+    clf = StallClassifier()
+    assert clf.classify(_reason("not_selected")) == "scheduler_slack"
+    assert clf.classify(_reason("selected")) == "issued"  # 已发射,非 stall
+
+
+def test_stall_classifier_not_issued_variants_same_class():
+    """`_not_issued` 变体归到与基 reason 同类。"""
+    clf = StallClassifier()
+    assert clf.classify(_reason("math_pipe_throttle_not_issued")) == "math_pipe"
+    assert clf.classify(_reason("long_scoreboard_not_issued")) == "memory_dependency"
+
+
+def test_stall_classifier_unknown_and_memoize():
+    clf = StallClassifier()
+    assert clf.classify(_reason("brand_new_reason_xyz")) == "other"
+    assert clf.cache_size == 1
+    clf.classify(_reason("brand_new_reason_xyz"))
+    assert clf.cache_size == 1
+
+
+# === StallAggregator ===
+
+def _s(kernel: str, short: str, n: int) -> StallSample:
+    return StallSample(kernel, _reason(short), n)
+
+
+def test_stall_aggregator_categories_sum_to_100_excluding_issued():
+    agg = StallAggregator()
+    agg.add([
+        _s("flash_fwd", "long_scoreboard", 50),   # memory_dependency
+        _s("flash_fwd", "math_pipe_throttle", 30),  # math_pipe
+        _s("flash_fwd", "wait", 20),                # exec_dependency
+        _s("flash_fwd", "selected", 100),           # issued — 不进 stall 分母
+    ])
+    out = agg.snapshot_and_reset()
+    assert abs(out[M.KERNEL_STALL_MEMORY_DEP_PCT] - 50.0) < 1e-6   # 50/100 stall
+    assert abs(out[M.KERNEL_STALL_MATH_PIPE_PCT] - 30.0) < 1e-6
+    assert abs(out[M.KERNEL_STALL_EXEC_DEP_PCT] - 20.0) < 1e-6
+    total = sum(out[STALL_METRIC] for STALL_METRIC in (
+        M.KERNEL_STALL_MEMORY_DEP_PCT, M.KERNEL_STALL_SHARED_DEP_PCT,
+        M.KERNEL_STALL_MEMORY_THROTTLE_PCT, M.KERNEL_STALL_MATH_PIPE_PCT,
+        M.KERNEL_STALL_EXEC_DEP_PCT, M.KERNEL_STALL_SYNC_PCT,
+        M.KERNEL_STALL_FETCH_CONTROL_PCT, M.KERNEL_STALL_DISPATCH_PCT,
+        M.KERNEL_STALL_SCHEDULER_SLACK_PCT, M.KERNEL_STALL_OTHER_PCT,
+    ))
+    assert abs(total - 100.0) < 1e-6
+    # issued 占总样本 100/200 = 50%
+    assert abs(out[M.KERNEL_STALL_ISSUED_PCT] - 50.0) < 1e-6
+    assert out[M.KERNEL_STALL_SAMPLE_TOTAL] == 200.0
+
+
+def test_stall_aggregator_empty_is_safe():
+    out = StallAggregator().snapshot_and_reset()
+    assert out[M.KERNEL_STALL_MEMORY_DEP_PCT] == 0.0
+    assert out[M.KERNEL_STALL_ISSUED_PCT] == 0.0
+    assert out[M.KERNEL_STALL_SAMPLE_TOTAL] == 0.0
+
+
+def test_stall_aggregator_skips_nonpositive():
+    agg = StallAggregator()
+    agg.add([_s("k", "long_scoreboard", 0), _s("k", "wait", -5)])
+    assert not agg.has_data
+
+
+def test_stall_aggregator_kernel_table_dominant_excludes_slack_and_issued():
+    """主导 stall 类排除 issued 与 scheduler_slack(高 not_selected 非瓶颈)。"""
+    agg = StallAggregator()
+    agg.add([
+        _s("attn", "not_selected", 70),       # scheduler_slack(占比最大但不算主导)
+        _s("attn", "long_scoreboard", 25),    # memory_dependency → 应是主导
+        _s("attn", "selected", 200),          # issued
+        _s("gemm", "math_pipe_throttle", 40),
+    ])
+    table = agg.kernel_stall_table()
+    by = {r["kernel"]: r for r in table}
+    assert by["attn"]["dominant_stall"] == "memory_dependency"
+    # attn 总样本最多(70+25+200=295)→ 排第一
+    assert table[0]["kernel"] == "attn"
+    assert by["gemm"]["dominant_stall"] == "math_pipe"
 
 
 def test_collector_reports_dropped_records():
