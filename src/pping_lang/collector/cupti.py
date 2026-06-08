@@ -1113,10 +1113,13 @@ class FakePcSamplingLib:
 
 
 class PcSamplingController:
-    """Deep Evidence 编排:按需开一个短窗采 stall,聚合成"为什么慢"的结论数据。
+    """Deep Evidence 编排:**早 prime 一次** + 按需 drain 短窗,聚合成"为什么慢"的结论。
 
-    run_window 是一次完整取证:start → 周期 drain → stop → 快照 stall 分解 + per-kernel
-    画像 + 自我观测开销。所有失败 fail-closed 成 {available: False, error: ...}。
+    ★ 关键(真机验证,设计文档 §12):PC Sampling 的 enable 必须在 workload 干重活**之前**
+    调(否则 `getNumStallReasons` 返 0)。所以模型不是"按需晚 start/stop",而是:
+      prime()  —— 早期(vLLM 启动前/warmup 后)enable+start 一次,drain 线程持续累。
+      run_window() —— 按需 drain 一段时间,取这段窗的 stall 分解;**不重新 start、不 stop**。
+    所有失败 fail-closed 成 {available: False, error: ...}。
     """
 
     def __init__(
@@ -1134,14 +1137,40 @@ class PcSamplingController:
         self._engine_index = engine_index
         self._top_n = top_n
         self._busy = Lock()
+        self._started = False
         self._last_result: dict[str, Any] | None = None
 
     @property
     def available(self) -> bool:
         return self._lib.available()
 
+    @property
+    def started(self) -> bool:
+        return self._started
+
     def last_result(self) -> dict[str, Any] | None:
         return self._last_result
+
+    def prime(self, period_log2: int = 12) -> dict[str, Any]:
+        """早期 enable+start 一次(幂等)。必须在 workload 干重活前调。"""
+        if self._started:
+            return {"available": True}
+        if not self._lib.available():
+            return self._fail("PC Sampling 不可用(需 Linux + libppingcupti + 放开 profiling 权限)")
+        rc = self._lib.start(period_log2)
+        if rc != 0:
+            return self._fail(f"start 失败 rc={rc}: {self._lib.last_error()}(enable 须早于 workload 重活)")
+        self._started = True
+        return {"available": True}
+
+    def close(self) -> None:
+        """停止采样(进程收尾)。幂等。"""
+        if self._started:
+            try:
+                self._lib.stop()
+            except Exception:
+                pass
+            self._started = False
 
     def run_window(
         self,
@@ -1152,24 +1181,22 @@ class PcSamplingController:
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
     ) -> dict[str, Any]:
-        """跑一个取证窗,返回结论数据。同一时刻只允许一个窗(busy 锁)。"""
+        """drain 一段窗,返回这段的 stall 结论。同一时刻只允许一个窗(busy 锁)。
+        若尚未 prime 则懒 prime(注意:晚 prime 在 vLLM 已跑重活时会失败)。"""
         if not self._busy.acquire(blocking=False):
             return {"available": False, "error": "another deep-evidence window is running"}
         try:
-            if not self._lib.available():
-                return self._fail("PC Sampling 不可用(需 Linux + libppingcupti + 放开 profiling 权限)")
-            rc = self._lib.start(period_log2)
-            if rc != 0:
-                return self._fail(f"start 失败 rc={rc}: {self._lib.last_error()}")
+            if not self._started:
+                p = self.prime(period_log2)
+                if not p.get("available"):
+                    return p
             agg = StallAggregator(self._classifier)
-            try:
-                t0 = clock()
-                while clock() - t0 < window_s:
-                    sleep(drain_interval_s)
-                    agg.add(self._lib.drain())
-                agg.add(self._lib.drain())  # 收尾再 drain 一次
-            finally:
-                self._lib.stop()
+            self._lib.drain()  # 清掉窗开始前已累计的,只取本窗
+            t0 = clock()
+            while clock() - t0 < window_s:
+                sleep(drain_interval_s)
+                agg.add(self._lib.drain())
+            agg.add(self._lib.drain())  # 收尾再 drain 一次
             getdata_ms, dropped, hwfull = self._lib.overhead()
             table = agg.kernel_stall_table(self._top_n)
             stats = agg.snapshot_and_reset()

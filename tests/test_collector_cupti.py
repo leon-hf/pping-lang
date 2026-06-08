@@ -581,6 +581,7 @@ class _FakeClockSleep:
 def test_pc_sampling_controller_window_aggregates_and_pushes():
     sink = _CollectingSink(flush_interval_s=10.0)
     lib = FakePcSamplingLib(drain_batches=[
+        [],   # baseline drain(窗开始前清零,被丢弃)
         [_s("attn", "long_scoreboard", 60), _s("attn", "selected", 40)],
         [_s("attn", "long_scoreboard", 40)],
         [_s("gemm", "math_pipe_throttle", 50)],
@@ -597,7 +598,7 @@ def test_pc_sampling_controller_window_aggregates_and_pushes():
     assert abs(shares["math_pipe"] - (50 / 150 * 100)) < 1e-6
     assert res["sample_total"] == 190.0          # 60+40+40+50
     assert res["overhead"]["getdata_ms"] == 3.5
-    assert lib.started is False                   # 窗结束已 stop
+    assert lib.started is True                    # 采样保持运行(不 stop),窗只 drain
     # stall 指标已 push 进 sink(close 触发 flush 后才进 flushed_metrics)
     sink.close()
     names = {m.name for m in sink.flushed_metrics}
@@ -631,12 +632,12 @@ def test_collector_deep_evidence_unconfigured_is_safe():
 
 def test_collector_deep_evidence_delegates():
     sink = _CollectingSink(flush_interval_s=10.0)
-    lib = FakePcSamplingLib(drain_batches=[[_s("k", "wait", 30)]])
+    lib = FakePcSamplingLib(drain_batches=[[], [_s("k", "wait", 30)]])  # baseline + 收尾
     coll = CuptiKernelCollector(
         sink, source=FakeActivitySource(), pc_sampling=PcSamplingController(lib, sink=sink),
     )
     assert coll.pc_sampling_available() is True
-    res = coll.run_deep_evidence(window_s=0.0)   # 窗=0 → 只收尾 drain 一次,不真睡
+    res = coll.run_deep_evidence(window_s=0.0)   # 窗=0 → baseline drain + 收尾 drain 一次
     assert res["available"] is True
     assert res["sample_total"] == 30.0
     assert coll.last_stall_result() is res

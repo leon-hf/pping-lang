@@ -480,10 +480,13 @@ def test_deep_evidence_endpoint_runs_and_concludes(tmp_path):
     db = tmp_path / "de.duckdb"
     sink = LocalSink(db_path=db, instance_id="x", flush_interval_s=10.0)
     R = "smsp__pcsamp_warps_issue_stalled_"
-    lib = FakePcSamplingLib(drain_batches=[[
-        StallSample("flash_fwd_kernel", R + "long_scoreboard", 80),
-        StallSample("flash_fwd_kernel", R + "selected", 20),
-    ]])
+    lib = FakePcSamplingLib(drain_batches=[
+        [],   # baseline drain(窗前清零)
+        [
+            StallSample("flash_fwd_kernel", R + "long_scoreboard", 80),
+            StallSample("flash_fwd_kernel", R + "selected", 20),
+        ],
+    ])
     coll = CuptiKernelCollector(
         sink, source=FakeActivitySource(),
         pc_sampling=PcSamplingController(lib, sink=sink),
