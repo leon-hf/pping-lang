@@ -24,6 +24,7 @@
 #include <unistd.h>
 #include <cuda.h>
 #include <cupti_result.h>
+#include <cupti_callbacks.h>
 #include <cupti_pcsampling.h>
 
 namespace {
@@ -112,9 +113,39 @@ void free_sd() {
     }
 }
 
+// 失败收尾:disable PC sampling,别把设备/容器的 profiling 状态留在 enabled(否则
+// 后续进程的 start 也会挂,见设计文档 §12 容器污染)。
+void disable_pcs(CUcontext ctx) {
+    CUpti_PCSamplingDisableParams dp;
+    std::memset(&dp, 0, sizeof dp);
+    dp.size = CUpti_PCSamplingDisableParamsSize; dp.ctx = ctx;
+    cuptiPCSamplingDisable(&dp);
+}
+
 }  // namespace
 
+static CUpti_SubscriberHandle g_sub = nullptr;
+static void CUPTIAPI _noop_cb(void*, CUpti_CallbackDomain, CUpti_CallbackId, const void*) {}
+
 extern "C" {
+
+// 抢占 CUPTI:在 torch/Kineto 之前 subscribe,成为最早的 CUPTI 客户。
+// 这样后续 pping_pcs_start 才能在 torch 进程内成功(否则 torch 占住 CUPTI,
+// 我们的 PC Sampling enable 返 0 stall reasons,见设计文档 §12)。
+// 必须在 import torch / vLLM 建 CUDA context 之前调(或经 CUDA_INJECTION64_PATH 注入)。
+int pping_pcs_init(void) {
+    if (g_sub != nullptr) return 0;
+    CUptiResult r = cuptiSubscribe(&g_sub, (CUpti_CallbackFunc)_noop_cb, nullptr);
+    if (r != CUPTI_SUCCESS) { set_err("subscribe", r); return -1; }
+    g_err[0] = 0;
+    return 0;
+}
+
+// CUDA 驱动在 cuInit 时通过 CUDA_INJECTION64_PATH 调用此入口(早于应用 CUDA 初始化)。
+// 返回非 0 = 成功。这让 .so 作为唯一且最先的 CUPTI 客户(1b 注入式)。
+int InitializeInjection(void) {
+    return pping_pcs_init() == 0 ? 1 : 0;
+}
 
 int pping_pcs_available(void) {
     CUcontext c = nullptr;
@@ -147,7 +178,7 @@ int pping_pcs_start(int period_log2) {
         p.size = CUpti_PCSamplingGetNumStallReasonsParamsSize; p.ctx = ctx;
         p.numStallReasons = &num;
         r = cuptiPCSamplingGetNumStallReasons(&p);
-        if (r != CUPTI_SUCCESS) { set_err("getNumStallReasons", r); return -4; }
+        if (r != CUPTI_SUCCESS) { set_err("getNumStallReasons", r); disable_pcs(ctx); return -4; }
     }
     g.numReasons = num;
     g.rIdx.assign(num, 0);
@@ -165,6 +196,7 @@ int pping_pcs_start(int period_log2) {
         if (r != CUPTI_SUCCESS) {
             const char* s = "?"; cuptiGetResultString(r, &s);
             std::snprintf(g_err, sizeof g_err, "getStallReasons num=%zu -> CUPTI %d (%s)", num, (int)r, s);
+            disable_pcs(ctx);
             return -5;
         }
     }
@@ -210,7 +242,7 @@ int pping_pcs_start(int period_log2) {
         p.size = CUpti_PCSamplingConfigurationInfoParamsSize; p.ctx = ctx;
         p.numAttributes = nc; p.pPCSamplingConfigurationInfo = cfg;
         r = cuptiPCSamplingSetConfigurationAttribute(&p);
-        if (r != CUPTI_SUCCESS) { set_err("setConfig", r); free_sd(); return -6; }
+        if (r != CUPTI_SUCCESS) { set_err("setConfig", r); disable_pcs(ctx); free_sd(); return -6; }
     }
 
     {
@@ -218,7 +250,7 @@ int pping_pcs_start(int period_log2) {
         std::memset(&p, 0, sizeof p);
         p.size = CUpti_PCSamplingStartParamsSize; p.ctx = ctx;
         r = cuptiPCSamplingStart(&p);
-        if (r != CUPTI_SUCCESS) { set_err("start", r); free_sd(); return -7; }
+        if (r != CUPTI_SUCCESS) { set_err("start", r); disable_pcs(ctx); free_sd(); return -7; }
     }
 
     g.getdata_ms.store(0.0); g.dropped.store(0); g.hwfull.store(0);
