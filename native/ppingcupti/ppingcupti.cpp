@@ -119,14 +119,30 @@ size_t drain_sd_apilocked() {
 }
 
 // drain 线程主体:持续 GetData,把样本累进 live。不持 GIL(纯 C++)。
+// drain 间隔可经 PPING_PCS_DRAIN_US 调(微秒)。
+//
+// ★ §11 解(真机实测):崩点是 worker 的 GetData strdup 一个已被异步卸载/释放的
+// functionName(source);这个释放发生在我们 bracket 不到的地方(CUPTI 内部/CUDA 模块缓存),
+// 靠 DRIVER_API 回调串行化挡不住(已证伪:注入抢槽+回调触发+互斥锁,2ms 仍崩)。真正起效的是
+// 拉开 drain 间隔——把"worker 泡在 GetData 里"的占空比从 ~46%(2ms)降到 <1%,与那个释放
+// 几乎不再重叠。实测:2ms 崩;200ms 稳 60s/3.95亿样本;1s 稳 120s/5.6亿样本(均 dropped=0
+// hwfull=0)。默认 500us*1000=500ms,夹在两个已验证安全点之间,对 vLLM 推理采样既稳又够新。
+// 注:安全 cadence 与负载相关(满速 kernel 采样率更高、需更勤 drain 防 HW 缓冲溢出,但更勤=更
+// 接近崩区)——对 vLLM 推理这档 500ms 落在安全窗内;其他负载用 PPING_PCS_DRAIN_US 自调。
 void worker_loop() {
     if (g.ctx) cuCtxSetCurrent(g.ctx);  // drain 线程绑同一 context(Codex 补强)
+    unsigned drain_us = 500000;
+    if (const char* e = std::getenv("PPING_PCS_DRAIN_US")) {
+        long v = std::strtol(e, nullptr, 10);
+        if (v > 0) drain_us = (unsigned)v;
+    }
+    if (dbg()) std::fprintf(stderr, "[ppingcupti] worker drain 间隔 = %u us\n", drain_us);
     while (!g.stop_flag.load(std::memory_order_relaxed)) {
         {
             std::lock_guard<std::recursive_mutex> lk(g.api_mu);  // 与 module load/unload 互斥
             drain_sd_apilocked();
         }
-        usleep(2000);
+        usleep(drain_us);
     }
 }
 

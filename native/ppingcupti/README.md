@@ -13,7 +13,7 @@
 | 干净 CUDA 容器 NVRTC kernel | ✅ 430 万样本 |
 | vLLM 镜像 + torch GEMM | ✅ 8800 万样本 |
 | **真 vLLM 推理(单次取证窗)** | ✅ **4112 万样本**,访存依赖 ~74% 主导,kernel 全归因(cutlass GEMM / flash attention / RoPE / RMSNorm / SwiGLU)|
-| 容器 live dashboard(持续采样)| ⚠ vLLM 持续 JIT triton kernel 时 segfault(见下"已知限制")|
+| 容器 live dashboard(持续采样)| ✅ **已解(§11)**:500ms drain cadence;/api/kernels/deep_evidence 连打 6 次返真数据零崩;headless 90s / 9.3 亿样本稳 |
 
 ## 构建(Linux / WSL,需 cu13 CUPTI 头/库 + g++,**不需要 nvcc**)
 
@@ -54,11 +54,30 @@ g++ -O2 -fPIC -std=c++17 -I$CU13/include -shared \
 4. **跑**:容器里装 `duckdb`(镜像缺)、`PYTHONPATH=/work/src`、`PPING_LANG_PCS_SO=…/libppingcupti.so`,
    流程 = warmup → `prime` → 载 vLLM → 推理 → drain。参考 `_scratch/phase2-probe/vllm_img_real.sh`。
 
-## 已知限制
+## §11 持续采样稳定性(已解)
 
-- **持续采样 + vLLM 持续 JIT → segfault**(§11 module-flush):vLLM 推理中持续 JIT triton kernel,
-  `cuModuleLoad` 改 CUPTI 函数表与后台 worker 的 `cuptiPCSamplingGetData` 并发,撞 CUPTI use-after-free。
-  已试 RESOURCE 回调 flush / DRIVER_API bracketing / 降频,均不够。**单次取证窗(固定负载)稳**;
-  持续 always-on 采样的稳定性是下一个专项(方向:1b 注入式独占 CUPTI / 关 vLLM 运行时 JIT)。
+**现象**:持续采样 + vLLM 持续 JIT triton kernel 时 segfault,栈 = `strdup ← cuptiPCSamplingGetData
+← worker_loop`。**真因**(真机诊断坐实):worker 的 GetData 在 strdup 一个已被**异步卸载/释放**的
+module functionName(source);这个释放发生在 CUPTI 内部/CUDA 模块缓存,在我们 bracket 不到的地方。
+
+**走过的弯路**(均被证伪):RESOURCE 回调 flush(太晚)、DRIVER_API load/unload bracketing + 互斥锁
+(注入抢槽成功、回调确实触发、锁也加了 —— 2ms cadence 下**仍崩**,证明同步串行化挡不住异步释放)。
+
+**真正起效的**:**拉开 worker drain 间隔**,把"worker 泡在 GetData 里"的占空比从 ~46%(2ms)降到
+<1%,与那个异步释放几乎不再重叠。实测(注入 + 持续推理 + 持续 JIT):
+
+| drain cadence | 占空比 | 结果 |
+|---|---|---|
+| 2ms | ~46% | 崩(iter 12) |
+| 200ms | ~0.8% | 稳 60s / 3.95 亿样本 |
+| 500ms(默认) | ~0.35% | 稳 90s / 9.3 亿样本;live dashboard 连打 6 次零崩 |
+| 1s | ~0.17% | 稳 120s / 5.6 亿样本 |
+
+默认 cadence = 500ms(`PpingPcs` worker;`PPING_PCS_DRAIN_US` 可调,单位 us)。均 `dropped=0 hwfull=0`。
+注:这是**竞窗收敛**而非硬同步——对 vLLM 推理这档采样率,500ms 落在"既不崩、HW 缓冲也不溢"的安全窗内;
+满速 kernel 采样率更高需更勤 drain(更接近崩区),按负载用 `PPING_PCS_DRAIN_US` 自调。
+
+## 其他限制
+
 - **enable 必须早**(见上)。Deep Evidence 因此是"早 prime + 按需 drain 窗",不是"按需晚 enable"。
 - **Linux/WSL only**;Windows 本机 `available()`→False,优雅 no-op。
