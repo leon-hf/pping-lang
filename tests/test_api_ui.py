@@ -34,8 +34,20 @@ def test_root_returns_html(client):
 
 def test_root_contains_required_libs(client):
     body = client.get("/").text
-    assert "alpinejs" in body.lower()
-    assert "chart.js" in body.lower() or "chart.umd" in body.lower()
+    # vendor 本地化:Alpine/Chart 走 /vendor/ 而非 CDN,离线/air-gapped 主机也能渲染
+    assert "alpine.min.js" in body.lower()
+    assert "chart.umd" in body.lower()
+    assert "jsdelivr" not in body.lower() and "cdn." not in body.lower()
+
+
+def test_vendor_assets_served(client):
+    """vendor JS 本地服务可用(C:不再依赖 CDN)。"""
+    alp = client.get("/vendor/alpine.min.js")
+    assert alp.status_code == 200 and "javascript" in alp.headers["content-type"]
+    assert len(alp.text) > 1000
+    chart = client.get("/vendor/chart.umd.min.js")
+    assert chart.status_code == 200 and "javascript" in chart.headers["content-type"]
+    assert len(chart.text) > 1000
 
 
 def test_root_references_known_api_endpoints(client):

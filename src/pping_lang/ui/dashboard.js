@@ -523,6 +523,14 @@ function dashboard() {
         scheduler_slack: '#9bb04f', other: '#a8998a',
       }[cls] || '#a8998a';
     },
+    // 打开 Kernel tab 时调:先拉缓存结果;若可用且还没有结果,自动跑一次取证 ——
+    // 免得用户找不到/不点"采集 stall 证据"按钮就以为 tab 空的(§A)。
+    async onKernelTabOpen() {
+      await this.loadDeepEvidence();
+      if (this.deep.available_now && !this.deep.result && !this.deep.running) {
+        this.runDeepEvidence(5);
+      }
+    },
     // 读最近一次取证结果(开 Kernel tab 时调,不触发新采集)
     async loadDeepEvidence() {
       try {
@@ -796,6 +804,8 @@ function dashboard() {
       this.fetchSystem();
       this.refresh();
       setInterval(() => this.refresh(), 2000);
+      // 打开 Kernel tab 自动取证(§A):进去就有真数据,不用手点按钮
+      this.$watch('tab', (v) => { if (v === 'kernel') this.onKernelTabOpen(); });
     },
 
     updateRoofline(data) {

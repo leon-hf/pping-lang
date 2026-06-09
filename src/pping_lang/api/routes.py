@@ -334,6 +334,9 @@ def build_app(
     ui_html = _read_ui("index.html", "<h1>pping-lang UI missing</h1>")
     ui_css = _read_ui("dashboard.css")
     ui_js = _read_ui("dashboard.js")
+    # vendor 资源本地化:Alpine/Chart 不再走 CDN,离线/air-gapped GPU 机也能渲染
+    ui_vendor_alpine = _read_ui("vendor/alpine.min.js")
+    ui_vendor_chart = _read_ui("vendor/chart.umd.min.js")
 
     # === GET / — dashboard ===
     @app.get("/", response_class=HTMLResponse)
@@ -347,6 +350,14 @@ def build_app(
     @app.get("/dashboard.js")
     def dashboard_js() -> Response:
         return Response(ui_js, media_type="application/javascript; charset=utf-8")
+
+    @app.get("/vendor/alpine.min.js")
+    def vendor_alpine() -> Response:
+        return Response(ui_vendor_alpine, media_type="application/javascript; charset=utf-8")
+
+    @app.get("/vendor/chart.umd.min.js")
+    def vendor_chart() -> Response:
+        return Response(ui_vendor_chart, media_type="application/javascript; charset=utf-8")
 
     # === GET /api/health ===
     @app.get("/api/health")

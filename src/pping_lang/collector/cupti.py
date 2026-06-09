@@ -630,8 +630,15 @@ class CuptiKernelCollector:
     # === Deep Evidence(阶段 2 PC Sampling 按需取证)===
 
     def pc_sampling_available(self) -> bool:
-        """PC Sampling 取证当前能不能用(需配置 + libppingcupti + 权限)。"""
-        return self._pcs is not None and self._pcs.available
+        """PC Sampling 取证当前能不能用。
+
+        优先看 `started`(已 prime/start,可靠且与线程无关)——`available` 走
+        `pping_pcs_available()` 查的是**当前线程**的 CUDA context,在 API 线程池里
+        没 context 会误报 False,虽然采样在 worker 线程好好跑着。已 prime 即视为可用。
+        """
+        if self._pcs is None:
+            return False
+        return self._pcs.started or self._pcs.available
 
     def run_deep_evidence(self, window_s: float = 5.0, period_log2: int = 12) -> dict[str, Any]:
         """跑一个 PC Sampling 取证短窗(阻塞 ~window_s),返回 stall 分解结论。
