@@ -14,6 +14,7 @@
 
 #include <atomic>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <mutex>
 #include <string>
@@ -65,9 +66,23 @@ struct State {
     std::atomic<double> getdata_ms{0.0};
     std::atomic<unsigned long long> dropped{0};
     std::atomic<unsigned long long> hwfull{0};
+
+    // §11 诊断:module/library load/unload 的 DRIVER_API 回调实际触发次数。
+    // 若持续采样 + vLLM JIT 期间这个一直是 0,说明回调没装上(subscriber 槽被
+    // torch/Kineto 抢了 → 串行化没生效 → 崩)。injected = 经 CUDA_INJECTION64_PATH
+    // 在 cuInit(torch 之前)抢到 subscriber 槽。
+    std::atomic<unsigned long long> module_cbs{0};
+    bool injected = false;
 };
 
 State g;
+
+// PPING_PCS_DEBUG=1 时把 subscribe / 回调诊断打到 stderr(只读一次,缓存)。
+bool dbg() {
+    static int v = -1;
+    if (v < 0) { const char* e = std::getenv("PPING_PCS_DEBUG"); v = (e && *e && *e != '0') ? 1 : 0; }
+    return v != 0;
+}
 
 double now_ms() {
     struct timespec ts;
@@ -160,6 +175,10 @@ static void CUPTIAPI _cupti_cb(void*, CUpti_CallbackDomain domain,
     const CUpti_CallbackData* cb = (const CUpti_CallbackData*)cbdata;
     if (cb->callbackSite == CUPTI_API_ENTER) {
         g.api_mu.lock();   // 一直持到 EXIT;期间 worker GetData 阻塞
+        unsigned long long cbn = g.module_cbs.fetch_add(1) + 1;
+        if (dbg() && cbn == 1)
+            std::fprintf(stderr, "[ppingcupti] 首个 module DRIVER_API 回调触发(cbid=%u)"
+                         " —— 串行化已生效\n", (unsigned)cbid);
         if (cbid == CUPTI_DRIVER_TRACE_CBID_cuModuleUnload ||
             cbid == CUPTI_DRIVER_TRACE_CBID_cuLibraryUnload) {
             for (int k = 0; k < 512; ++k) {  // 卸载前 flush(functionName 还活着)
@@ -181,15 +200,32 @@ extern "C" {
 int pping_pcs_init(void) {
     if (g_sub != nullptr) return 0;
     CUptiResult r = cuptiSubscribe(&g_sub, (CUpti_CallbackFunc)_cupti_cb, nullptr);
-    if (r != CUPTI_SUCCESS) { set_err("subscribe", r); return -1; }
+    if (r != CUPTI_SUCCESS) {
+        g_sub = nullptr;
+        set_err("subscribe", r);
+        if (dbg()) {
+            const char* s = "?"; cuptiGetResultString(r, &s);
+            std::fprintf(stderr, "[ppingcupti] cuptiSubscribe 失败 rc=%d (%s) —— 另一个 CUPTI "
+                         "subscriber(torch/Kineto?)已占住唯一槽\n", (int)r, s);
+        }
+        return -1;
+    }
+    if (dbg()) std::fprintf(stderr, "[ppingcupti] cuptiSubscribe OK g_sub=%p\n", (void*)g_sub);
     g_err[0] = 0;
     return 0;
 }
 
 // CUDA 驱动在 cuInit 时通过 CUDA_INJECTION64_PATH 调用此入口(早于应用 CUDA 初始化)。
-// 返回非 0 = 成功。这让 .so 作为唯一且最先的 CUPTI 客户(1b 注入式)。
+// 返回非 0 = 成功。这让 .so 作为唯一且最先的 CUPTI 客户(1b 注入式)——torch 再来
+// subscribe 就轮不到,我们的 module load/unload 回调才真的会触发(§11 串行化前提)。
 int InitializeInjection(void) {
-    return pping_pcs_init() == 0 ? 1 : 0;
+    int ok = pping_pcs_init() == 0;
+    if (ok) {
+        g.injected = true;
+        if (dbg()) std::fprintf(stderr, "[ppingcupti] InitializeInjection: 注入式抢到 CUPTI "
+                                "subscriber 槽(torch 之前)\n");
+    }
+    return ok ? 1 : 0;
 }
 
 int pping_pcs_available(void) {
@@ -209,13 +245,32 @@ int pping_pcs_start(int period_log2) {
     if (period_log2 <= 0) period_log2 = 12;
 
     // 订阅 + 开 module/library load/unload 的 DRIVER_API 回调(§11:vLLM 推理持续 JIT,
-    // 整个 load/unload 调用要与 GetData 串行防崩)。
+    // 整个 load/unload 调用要与 GetData 串行防崩)。**唯一槽**:CUDA 13 只允许一个 CUPTI
+    // subscriber——若 torch/Kineto 已占,这里 subscribe 会失败,回调装不上,串行化失效 →
+    // 崩。正解是 CUDA_INJECTION64_PATH 在 torch 之前注入抢槽(g_sub 复用,见下分支)。
     if (g_sub == nullptr) {
-        cuptiSubscribe(&g_sub, (CUpti_CallbackFunc)_cupti_cb, nullptr);
+        CUptiResult sr = cuptiSubscribe(&g_sub, (CUpti_CallbackFunc)_cupti_cb, nullptr);
+        if (sr != CUPTI_SUCCESS) {
+            g_sub = nullptr;
+            if (dbg()) {
+                const char* s = "?"; cuptiGetResultString(sr, &s);
+                std::fprintf(stderr, "[ppingcupti] start: cuptiSubscribe 失败 rc=%d (%s) —— "
+                             "module 回调装不上,持续采样有崩风险。请用 CUDA_INJECTION64_PATH 注入。\n",
+                             (int)sr, s);
+            }
+        } else if (dbg()) {
+            std::fprintf(stderr, "[ppingcupti] start: 晚订阅成功 g_sub=%p(非注入)\n", (void*)g_sub);
+        }
+    } else if (dbg()) {
+        std::fprintf(stderr, "[ppingcupti] start: 复用已有 g_sub=%p(injected=%d)—— 串行化将生效\n",
+                     (void*)g_sub, (int)g.injected);
     }
     if (g_sub != nullptr) {
         for (CUpti_driver_api_trace_cbid_enum mc : kModuleCbids)
             cuptiEnableCallback(1, g_sub, CUPTI_CB_DOMAIN_DRIVER_API, mc);
+        if (dbg()) std::fprintf(stderr, "[ppingcupti] module DRIVER_API 回调已开启\n");
+    } else if (dbg()) {
+        std::fprintf(stderr, "[ppingcupti] 警告:g_sub 为空,module 回调未开启 —— 持续采样不安全\n");
     }
 
     CUptiResult r;
@@ -309,6 +364,7 @@ int pping_pcs_start(int period_log2) {
     }
 
     g.getdata_ms.store(0.0); g.dropped.store(0); g.hwfull.store(0);
+    g.module_cbs.store(0);
     g.stop_flag.store(false);
     g.running.store(true);
     g.worker = std::thread(worker_loop);
@@ -318,6 +374,10 @@ int pping_pcs_start(int period_log2) {
 
 int pping_pcs_stop(void) {
     if (!g.running.load()) return 0;
+    if (dbg())
+        std::fprintf(stderr, "[ppingcupti] stop: module 回调触发=%llu 次(=0 即串行化没生效)、"
+                     "getdata_ms=%.1f、dropped=%llu、hwfull=%llu\n",
+                     g.module_cbs.load(), g.getdata_ms.load(), g.dropped.load(), g.hwfull.load());
     g.stop_flag.store(true);
     if (g.worker.joinable()) g.worker.join();
     // 关 module 回调 + 标记停止(回调据此 no-op),避免收尾期间还有 module 事件进来
