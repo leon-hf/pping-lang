@@ -27,6 +27,11 @@ typedef struct {
     char               kernel[PPING_KERNEL_NAME_LEN];  /* kernel 函数名(截断) */
 } PpingStallRow;
 
+/* 抢占 CUPTI(在 torch/Kineto 之前 subscribe,成为最早的客户)。
+ * 必须在 import torch / 建 CUDA context 之前调,否则 torch 进程内 PC Sampling 起不来。
+ * 返回 0 成功。也可经 CUDA_INJECTION64_PATH 注入(驱动自动调 InitializeInjection)。 */
+int pping_pcs_init(void);
+
 /* 当前进程/设备能否做 PC Sampling(有 CUDA context + CUPTI 可用)。1=可,0=否。 */
 int pping_pcs_available(void);
 
