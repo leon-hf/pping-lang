@@ -73,6 +73,12 @@ struct State {
     // 在 cuInit(torch 之前)抢到 subscriber 槽。
     std::atomic<unsigned long long> module_cbs{0};
     bool injected = false;
+
+    // §11 plan B(JIT 冷却):记录最近一次 module load/unload 回调的时刻。worker 在此后
+    // 一小段冷却窗内**不 GetData**,避开 CUPTI 对刚卸载 module 的 functionName 的事后异步
+    // 释放(那是崩点,且在我们 bracket 不到的地方发生)。skipped_drains = 因冷却跳过的次数。
+    std::atomic<double> last_module_event_ms{0.0};
+    std::atomic<unsigned long long> skipped_drains{0};
 };
 
 State g;
@@ -136,9 +142,22 @@ void worker_loop() {
         long v = std::strtol(e, nullptr, 10);
         if (v > 0) drain_us = (unsigned)v;
     }
-    if (dbg()) std::fprintf(stderr, "[ppingcupti] worker drain 间隔 = %u us\n", drain_us);
+    // plan B:module load/unload 事件后冷却 cooldown_ms 内不 GetData(避开事后异步释放)。
+    // 默认 300ms;0=关闭(退回纯 cadence)。PPING_PCS_JIT_COOLDOWN_MS 可调。
+    double cooldown_ms = 300.0;
+    if (const char* e = std::getenv("PPING_PCS_JIT_COOLDOWN_MS")) {
+        char* end = nullptr; double v = std::strtod(e, &end);
+        if (end != e && v >= 0) cooldown_ms = v;
+    }
+    if (dbg()) std::fprintf(stderr, "[ppingcupti] worker drain=%u us, JIT 冷却=%.0f ms\n",
+                            drain_us, cooldown_ms);
     while (!g.stop_flag.load(std::memory_order_relaxed)) {
-        {
+        // 冷却门:若最近一次 module 事件距今 < cooldown_ms,跳过本轮 GetData(让 CUPTI 把
+        // 卸载后的异步释放做完再读)。冷却期间样本继续进 HW 缓冲,过后照常 drain(不丢)。
+        double since = now_ms() - g.last_module_event_ms.load();
+        if (cooldown_ms > 0.0 && since < cooldown_ms) {
+            g.skipped_drains.fetch_add(1);
+        } else {
             std::lock_guard<std::recursive_mutex> lk(g.api_mu);  // 与 module load/unload 互斥
             drain_sd_apilocked();
         }
@@ -189,6 +208,7 @@ static void CUPTIAPI _cupti_cb(void*, CUpti_CallbackDomain domain,
     if (domain != CUPTI_CB_DOMAIN_DRIVER_API) return;
     if (!g.running.load()) return;
     const CUpti_CallbackData* cb = (const CUpti_CallbackData*)cbdata;
+    g.last_module_event_ms.store(now_ms());  // plan B:刷新冷却起点(ENTER+EXIT 都刷,EXIT 即 op 之后)
     if (cb->callbackSite == CUPTI_API_ENTER) {
         g.api_mu.lock();   // 一直持到 EXIT;期间 worker GetData 阻塞
         unsigned long long cbn = g.module_cbs.fetch_add(1) + 1;
@@ -381,6 +401,7 @@ int pping_pcs_start(int period_log2) {
 
     g.getdata_ms.store(0.0); g.dropped.store(0); g.hwfull.store(0);
     g.module_cbs.store(0);
+    g.skipped_drains.store(0);
     g.stop_flag.store(false);
     g.running.store(true);
     g.worker = std::thread(worker_loop);
@@ -391,9 +412,10 @@ int pping_pcs_start(int period_log2) {
 int pping_pcs_stop(void) {
     if (!g.running.load()) return 0;
     if (dbg())
-        std::fprintf(stderr, "[ppingcupti] stop: module 回调触发=%llu 次(=0 即串行化没生效)、"
+        std::fprintf(stderr, "[ppingcupti] stop: module 回调=%llu 次、因 JIT 冷却跳过 drain=%llu 次、"
                      "getdata_ms=%.1f、dropped=%llu、hwfull=%llu\n",
-                     g.module_cbs.load(), g.getdata_ms.load(), g.dropped.load(), g.hwfull.load());
+                     g.module_cbs.load(), g.skipped_drains.load(),
+                     g.getdata_ms.load(), g.dropped.load(), g.hwfull.load());
     g.stop_flag.store(true);
     if (g.worker.joinable()) g.worker.join();
     // 关 module 回调 + 标记停止(回调据此 no-op),避免收尾期间还有 module 事件进来
