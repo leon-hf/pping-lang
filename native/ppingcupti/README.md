@@ -13,7 +13,7 @@
 | 干净 CUDA 容器 NVRTC kernel | ✅ 430 万样本 |
 | vLLM 镜像 + torch GEMM | ✅ 8800 万样本 |
 | **真 vLLM 推理(单次取证窗)** | ✅ **4112 万样本**,访存依赖 ~74% 主导,kernel 全归因(cutlass GEMM / flash attention / RoPE / RMSNorm / SwiGLU)|
-| 容器 live dashboard(持续采样)| ✅ **已解(§11)**:500ms drain cadence;/api/kernels/deep_evidence 连打 6 次返真数据零崩;headless 90s / 9.3 亿样本稳 |
+| 容器 live dashboard(持续采样)| ⚠ **大幅缓解未根治(§11)**:500ms cadence 下连打 6 次返真数据、稳跑数分钟,但**遇到一次运行时 JIT 仍崩**。无运行时 JIT(充分 warmup)时稳 |
 
 ## 构建(Linux / WSL,需 cu13 CUPTI 头/库 + g++,**不需要 nvcc**)
 
@@ -54,28 +54,31 @@ g++ -O2 -fPIC -std=c++17 -I$CU13/include -shared \
 4. **跑**:容器里装 `duckdb`(镜像缺)、`PYTHONPATH=/work/src`、`PPING_LANG_PCS_SO=…/libppingcupti.so`,
    流程 = warmup → `prime` → 载 vLLM → 推理 → drain。参考 `_scratch/phase2-probe/vllm_img_real.sh`。
 
-## §11 持续采样稳定性(已解)
+## §11 持续采样稳定性(大幅缓解,未根治)
 
-**现象**:持续采样 + vLLM 持续 JIT triton kernel 时 segfault,栈 = `strdup ← cuptiPCSamplingGetData
-← worker_loop`。**真因**(真机诊断坐实):worker 的 GetData 在 strdup 一个已被**异步卸载/释放**的
-module functionName(source);这个释放发生在 CUPTI 内部/CUDA 模块缓存,在我们 bracket 不到的地方。
+**现象**:持续采样时 segfault,栈 = `strdup ← cuptiPCSamplingGetData ← worker_loop`。**真因**(真机诊断
+坐实):worker 的 GetData 在 strdup 一个已被**异步卸载/释放**的 module functionName(source);释放发生在
+CUPTI 内部/CUDA 模块缓存,在我们 bracket 不到的地方。**崩点严格绑定 vLLM 运行时 JIT 事件**——日志实测:
+dashboard 平稳跑数分钟,**唯一一次** triton JIT(`_compute_slot_mapping_kernel`,新 shape)与 segfault
+**同一时刻**触发;无运行时 JIT 时一直稳。
 
 **走过的弯路**(均被证伪):RESOURCE 回调 flush(太晚)、DRIVER_API load/unload bracketing + 互斥锁
 (注入抢槽成功、回调确实触发、锁也加了 —— 2ms cadence 下**仍崩**,证明同步串行化挡不住异步释放)。
 
-**真正起效的**:**拉开 worker drain 间隔**,把"worker 泡在 GetData 里"的占空比从 ~46%(2ms)降到
-<1%,与那个异步释放几乎不再重叠。实测(注入 + 持续推理 + 持续 JIT):
+**当前缓解 = 拉开 worker drain 间隔**:把"worker 泡在 GetData 里"的占空比从 ~46%(2ms)降到 <1%,**降低
+每次 JIT 恰好撞上 GetData 的概率**。实测(注入 + 持续推理 + 持续 JIT,均 `dropped=0 hwfull=0`):
 
 | drain cadence | 占空比 | 结果 |
 |---|---|---|
-| 2ms | ~46% | 崩(iter 12) |
+| 2ms | ~46% | 几秒内必崩 |
 | 200ms | ~0.8% | 稳 60s / 3.95 亿样本 |
-| 500ms(默认) | ~0.35% | 稳 90s / 9.3 亿样本;live dashboard 连打 6 次零崩 |
+| 500ms(默认) | ~0.35% | 稳 90s headless / 9.3 亿;dashboard 连打 6 次取证稳,但**数分钟后在一次 JIT 上崩** |
 | 1s | ~0.17% | 稳 120s / 5.6 亿样本 |
 
-默认 cadence = 500ms(`PpingPcs` worker;`PPING_PCS_DRAIN_US` 可调,单位 us)。均 `dropped=0 hwfull=0`。
-注:这是**竞窗收敛**而非硬同步——对 vLLM 推理这档采样率,500ms 落在"既不崩、HW 缓冲也不溢"的安全窗内;
-满速 kernel 采样率更高需更勤 drain(更接近崩区),按负载用 `PPING_PCS_DRAIN_US` 自调。
+**⚠ 这是概率缓解,不是根治**:cadence 越大每次 JIT 撞崩概率越低,但只要有运行时 JIT 就非零。默认 500ms
+(`PPING_PCS_DRAIN_US` us 可按负载调)。**根治方向**:① vLLM **充分 warmup 覆盖所有 shape**、消除运行时
+JIT(消除触发源)—— 无 JIT 时实测一直稳,生产 vLLM 本就该做;② 在 `CUPTI_CBID_RESOURCE_MODULE_UNLOAD_STARTING`
+(CUPTI 文档推荐的卸载前钩子)里持锁 flush(待验)。**单次取证窗(固定/已 warmup 负载)稳**,是当前可靠用法。
 
 ## 其他限制
 
