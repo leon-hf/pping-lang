@@ -76,9 +76,17 @@ dashboard 平稳跑数分钟,**唯一一次** triton JIT(`_compute_slot_mapping_
 | 1s | ~0.17% | 稳 120s / 5.6 亿样本 |
 
 **⚠ 这是概率缓解,不是根治**:cadence 越大每次 JIT 撞崩概率越低,但只要有运行时 JIT 就非零。默认 500ms
-(`PPING_PCS_DRAIN_US` us 可按负载调)。**根治方向**:① vLLM **充分 warmup 覆盖所有 shape**、消除运行时
-JIT(消除触发源)—— 无 JIT 时实测一直稳,生产 vLLM 本就该做;② 在 `CUPTI_CBID_RESOURCE_MODULE_UNLOAD_STARTING`
-(CUPTI 文档推荐的卸载前钩子)里持锁 flush(待验)。**单次取证窗(固定/已 warmup 负载)稳**,是当前可靠用法。
+(`PPING_PCS_DRAIN_US` us 可按负载调)。
+
+**根治路径①(已实证可靠)= 消除运行时 JIT**:充分 warmup 覆盖所有 shape 后,稳态无新 JIT。实测
+`vllm_nojit_test.sh`(warmup 变 shape 吃掉所有 JIT → 切 `ignore_eos` 固定 shape 长跑):稳态相位
+**0 次运行时 JIT、150s、18.3 亿样本、零崩**(同 500ms cadence)。即:**崩完全且仅由运行时 JIT 触发;
+warmup 完整的 vLLM(生产本就该做)+ 取证窗内无新 shape → 连续采样可靠稳。**
+
+**根治路径②(待验)**:`CUPTI_CBID_RESOURCE_MODULE_UNLOAD_STARTING`(CUPTI 文档推荐的卸载前钩子)里
+持 `api_mu` flush,堵住运行时 JIT 那一刻的并发释放。
+
+**可靠用法**:单次取证窗(固定/已 warmup 负载)+ 默认 500ms cadence。
 
 ## 其他限制
 
