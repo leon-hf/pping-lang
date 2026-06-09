@@ -25,6 +25,7 @@
 #include <cuda.h>
 #include <cupti_result.h>
 #include <cupti_callbacks.h>
+#include <cupti_driver_cbid.h>
 #include <cupti_pcsampling.h>
 
 namespace {
@@ -46,6 +47,11 @@ struct State {
     // 聚合:kernel 名 -> (stallReason 索引 -> 样本数)。drain 线程写,pping_pcs_drain 换出。
     std::mutex mu;
     std::unordered_map<std::string, std::unordered_map<unsigned int, unsigned long long>> live;
+    // 串行化所有 PC sampling API 调用(GetData)与 module load/unload —— vLLM 推理中持续 JIT
+    // triton kernel,cuModuleLoad/Unload 改 CUPTI 内部函数表,与 worker 的 GetData 并发会
+    // use-after-free 崩(§11)。worker GetData 与 module load/unload 的 driver 回调都持此锁,
+    // 整个 load/unload 调用被锁包住。recursive:防同线程 module 调用嵌套自死锁。
+    std::recursive_mutex api_mu;
 
     // stall reason 索引<->名字
     std::vector<unsigned int> rIdx;
@@ -69,38 +75,43 @@ double now_ms() {
     return ts.tv_sec * 1000.0 + ts.tv_nsec / 1e6;
 }
 
+// 一次 GetData + 累加进 live。**调用方必须已持 g.api_mu**(与 module 回调互斥)。
+// 返回 totalNumPcs(这一批拿到的 PC 数)。
+size_t drain_sd_apilocked() {
+    CUpti_PCSamplingGetDataParams gp;
+    std::memset(&gp, 0, sizeof gp);
+    gp.size = CUpti_PCSamplingGetDataParamsSize;
+    gp.ctx = g.ctx;
+    gp.pcSamplingData = (void*)&g.sd;
+    double t0 = now_ms();
+    CUptiResult r = cuptiPCSamplingGetData(&gp);
+    g.getdata_ms.store(g.getdata_ms.load() + (now_ms() - t0));
+    if (r == CUPTI_ERROR_OUT_OF_MEMORY) { g.hwfull.fetch_add(1); return 0; }
+    if (r != CUPTI_SUCCESS) return 0;
+    g.dropped.fetch_add(g.sd.droppedSamples);
+    if (g.sd.totalNumPcs) {
+        std::lock_guard<std::mutex> lk(g.mu);
+        for (size_t i = 0; i < g.sd.totalNumPcs; ++i) {
+            CUpti_PCSamplingPCData& pc = g.sd.pPcData[i];
+            const char* nm = pc.functionName ? pc.functionName : "?";
+            auto& byReason = g.live[nm];
+            for (size_t j = 0; j < pc.stallReasonCount; ++j)
+                byReason[pc.stallReason[j].pcSamplingStallReasonIndex] +=
+                    pc.stallReason[j].samples;
+        }
+    }
+    return g.sd.totalNumPcs;
+}
+
 // drain 线程主体:持续 GetData,把样本累进 live。不持 GIL(纯 C++)。
 void worker_loop() {
     if (g.ctx) cuCtxSetCurrent(g.ctx);  // drain 线程绑同一 context(Codex 补强)
-    CUpti_PCSamplingData& sd = g.sd;
     while (!g.stop_flag.load(std::memory_order_relaxed)) {
-        CUpti_PCSamplingGetDataParams gp;
-        std::memset(&gp, 0, sizeof gp);
-        gp.size = CUpti_PCSamplingGetDataParamsSize;
-        gp.ctx = g.ctx;
-        gp.pcSamplingData = (void*)&sd;
-        double t0 = now_ms();
-        CUptiResult r = cuptiPCSamplingGetData(&gp);
-        g.getdata_ms.store(g.getdata_ms.load() + (now_ms() - t0));
-        if (r == CUPTI_ERROR_OUT_OF_MEMORY) {  // HW 缓冲满,这一轮无数据
-            g.hwfull.fetch_add(1);
-            usleep(1000);
-            continue;
+        {
+            std::lock_guard<std::recursive_mutex> lk(g.api_mu);  // 与 module load/unload 互斥
+            drain_sd_apilocked();
         }
-        if (r != CUPTI_SUCCESS) { usleep(2000); continue; }
-        g.dropped.fetch_add(sd.droppedSamples);
-        if (sd.totalNumPcs) {
-            std::lock_guard<std::mutex> lk(g.mu);
-            for (size_t i = 0; i < sd.totalNumPcs; ++i) {
-                CUpti_PCSamplingPCData& pc = sd.pPcData[i];
-                const char* nm = pc.functionName ? pc.functionName : "?";
-                auto& byReason = g.live[nm];
-                for (size_t j = 0; j < pc.stallReasonCount; ++j)
-                    byReason[pc.stallReason[j].pcSamplingStallReasonIndex] +=
-                        pc.stallReason[j].samples;
-            }
-        }
-        usleep(1000);
+        usleep(2000);
     }
 }
 
@@ -125,7 +136,41 @@ void disable_pcs(CUcontext ctx) {
 }  // namespace
 
 static CUpti_SubscriberHandle g_sub = nullptr;
-static void CUPTIAPI _noop_cb(void*, CUpti_CallbackDomain, CUpti_CallbackId, const void*) {}
+
+// 我们关心的 module/library load/unload driver API —— 整个调用要被 api_mu 包住,
+// 期间 worker 不能 GetData(否则与 CUPTI 改函数表并发崩,§11)。
+static const CUpti_driver_api_trace_cbid_enum kModuleCbids[] = {
+    CUPTI_DRIVER_TRACE_CBID_cuModuleLoad,
+    CUPTI_DRIVER_TRACE_CBID_cuModuleLoadData,
+    CUPTI_DRIVER_TRACE_CBID_cuModuleLoadDataEx,
+    CUPTI_DRIVER_TRACE_CBID_cuModuleLoadFatBinary,
+    CUPTI_DRIVER_TRACE_CBID_cuModuleUnload,
+    CUPTI_DRIVER_TRACE_CBID_cuLibraryLoadData,
+    CUPTI_DRIVER_TRACE_CBID_cuLibraryLoadFromFile,
+    CUPTI_DRIVER_TRACE_CBID_cuLibraryUnload,
+};
+
+// DRIVER_API 回调:module/library load/unload 的 ENTER 锁住 api_mu(直到 EXIT 解锁),
+// 把整个 load/unload 调用与 worker 的 GetData 串行;卸载在 ENTER 后才执行,故 ENTER 时
+// 先 flush 把该 module 的 PC 数据收干净,避免 functionName 被 free 后 use-after-free。
+static void CUPTIAPI _cupti_cb(void*, CUpti_CallbackDomain domain,
+                               CUpti_CallbackId cbid, const void* cbdata) {
+    if (domain != CUPTI_CB_DOMAIN_DRIVER_API) return;
+    if (!g.running.load()) return;
+    const CUpti_CallbackData* cb = (const CUpti_CallbackData*)cbdata;
+    if (cb->callbackSite == CUPTI_API_ENTER) {
+        g.api_mu.lock();   // 一直持到 EXIT;期间 worker GetData 阻塞
+        if (cbid == CUPTI_DRIVER_TRACE_CBID_cuModuleUnload ||
+            cbid == CUPTI_DRIVER_TRACE_CBID_cuLibraryUnload) {
+            for (int k = 0; k < 512; ++k) {  // 卸载前 flush(functionName 还活着)
+                size_t n = drain_sd_apilocked();
+                if (n == 0 && g.sd.remainingNumPcs == 0) break;
+            }
+        }
+    } else {  // CUPTI_API_EXIT
+        g.api_mu.unlock();
+    }
+}
 
 extern "C" {
 
@@ -135,7 +180,7 @@ extern "C" {
 // 必须在 import torch / vLLM 建 CUDA context 之前调(或经 CUDA_INJECTION64_PATH 注入)。
 int pping_pcs_init(void) {
     if (g_sub != nullptr) return 0;
-    CUptiResult r = cuptiSubscribe(&g_sub, (CUpti_CallbackFunc)_noop_cb, nullptr);
+    CUptiResult r = cuptiSubscribe(&g_sub, (CUpti_CallbackFunc)_cupti_cb, nullptr);
     if (r != CUPTI_SUCCESS) { set_err("subscribe", r); return -1; }
     g_err[0] = 0;
     return 0;
@@ -162,6 +207,16 @@ int pping_pcs_start(int period_log2) {
     }
     g.ctx = ctx;
     if (period_log2 <= 0) period_log2 = 12;
+
+    // 订阅 + 开 module/library load/unload 的 DRIVER_API 回调(§11:vLLM 推理持续 JIT,
+    // 整个 load/unload 调用要与 GetData 串行防崩)。
+    if (g_sub == nullptr) {
+        cuptiSubscribe(&g_sub, (CUpti_CallbackFunc)_cupti_cb, nullptr);
+    }
+    if (g_sub != nullptr) {
+        for (CUpti_driver_api_trace_cbid_enum mc : kModuleCbids)
+            cuptiEnableCallback(1, g_sub, CUPTI_CB_DOMAIN_DRIVER_API, mc);
+    }
 
     CUptiResult r;
     CUpti_PCSamplingEnableParams en;
@@ -265,6 +320,12 @@ int pping_pcs_stop(void) {
     if (!g.running.load()) return 0;
     g.stop_flag.store(true);
     if (g.worker.joinable()) g.worker.join();
+    // 关 module 回调 + 标记停止(回调据此 no-op),避免收尾期间还有 module 事件进来
+    if (g_sub != nullptr) {
+        for (CUpti_driver_api_trace_cbid_enum mc : kModuleCbids)
+            cuptiEnableCallback(0, g_sub, CUPTI_CB_DOMAIN_DRIVER_API, mc);
+    }
+    g.running.store(false);
     CUptiResult r;
     {
         CUpti_PCSamplingStopParams p;
@@ -273,24 +334,12 @@ int pping_pcs_stop(void) {
         r = cuptiPCSamplingStop(&p);
         if (r != CUPTI_SUCCESS) set_err("stop", r);
     }
-    // stop 后再 drain 一次残留进 live(下一次 pping_pcs_drain 取走)
+    // stop 后再 drain 残留进 live(api_mu 保护;worker 已停、回调已关)
     {
-        CUpti_PCSamplingGetDataParams gp;
-        std::memset(&gp, 0, sizeof gp);
-        gp.size = CUpti_PCSamplingGetDataParamsSize; gp.ctx = g.ctx; gp.pcSamplingData = (void*)&g.sd;
+        std::lock_guard<std::recursive_mutex> lk(g.api_mu);
         for (int k = 0; k < 64; ++k) {
-            if (cuptiPCSamplingGetData(&gp) != CUPTI_SUCCESS) break;
-            if (g.sd.totalNumPcs) {
-                std::lock_guard<std::mutex> lk(g.mu);
-                for (size_t i = 0; i < g.sd.totalNumPcs; ++i) {
-                    CUpti_PCSamplingPCData& pc = g.sd.pPcData[i];
-                    const char* nm = pc.functionName ? pc.functionName : "?";
-                    auto& byReason = g.live[nm];
-                    for (size_t j = 0; j < pc.stallReasonCount; ++j)
-                        byReason[pc.stallReason[j].pcSamplingStallReasonIndex] += pc.stallReason[j].samples;
-                }
-            }
-            if (g.sd.remainingNumPcs == 0 && g.sd.totalNumPcs == 0) break;
+            size_t n = drain_sd_apilocked();
+            if (n == 0 && g.sd.remainingNumPcs == 0) break;
         }
     }
     {
