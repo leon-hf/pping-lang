@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# 一键把 pping-lang live dashboard 部署到 runw(远程 16GB GPU)并打印访问 URL。
+# 用法:  bash deploy/runw/deploy.sh
+# 跳过测试:RUN_TESTS=0 bash deploy/runw/deploy.sh
+# 改目标: RUNW=other RUNW_IP=1.2.3.4 BRANCH=main bash deploy/runw/deploy.sh
+set -euo pipefail
+HERE=$(cd "$(dirname "$0")" && pwd)
+ROOT=$(cd "$HERE/../.." && pwd)
+
+RUNW=${RUNW:-runw}                                   # ssh 主机别名(~/.ssh/config)
+RUNW_IP=${RUNW_IP:-100.97.8.55}                      # Tailscale IP,用于发布 URL
+PORT=${PORT:-8765}
+IMAGE=${IMAGE:-vllm/vllm-openai:v0.17.1}
+REPO=${REPO:-/home/leon/pping-work/pping-lang}       # runw 上的 repo 路径
+MODELS=${MODELS:-/home/leon/pping-work/models}       # runw 上的本地模型缓存(挂进容器)
+MODEL=${MODEL:-Qwen/Qwen2.5-0.5B-Instruct}
+GPU_NAME=${GPU_NAME:-NVIDIA RTX 5060 Ti (runw)}
+BRANCH=${BRANCH:-$(git -C "$ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)}
+RUN_TESTS=${RUN_TESTS:-1}
+URL="http://$RUNW_IP:$PORT"
+
+echo "== deploy pping-lang dashboard -> $RUNW =="
+echo "   branch=$BRANCH  image=$IMAGE  url=$URL"
+
+# 1) CI:本地跑测试,绿了才部署
+if [ "$RUN_TESTS" = "1" ]; then
+  echo "[ci] pytest -q ..."
+  ( cd "$ROOT" && python -m pytest -q ) || { echo "[ci] 测试失败,中止部署。RUN_TESTS=0 可跳过。"; exit 1; }
+fi
+
+# 2) 推代码(runw 从 GitHub 拉同一 commit)
+echo "[git] push origin $BRANCH"
+git -C "$ROOT" push origin "$BRANCH"
+
+# 3) runw 上部署(把配置变量注入到 remote_deploy.sh 前面再喂给远端 bash)
+{
+  echo "BRANCH='$BRANCH'"; echo "IMAGE='$IMAGE'"; echo "REPO='$REPO'"
+  echo "MODELS='$MODELS'"; echo "PORT='$PORT'"; echo "MODEL='$MODEL'"; echo "GPU_NAME='$GPU_NAME'"
+  cat "$HERE/remote_deploy.sh"
+} | ssh "$RUNW" bash -s
+
+# 4) 等就绪(首次下模型会久;命中缓存后 ~1 分钟)
+echo "[wait] vLLM 载入 + pre-warm ..."
+ready=0
+for i in $(seq 1 90); do
+  if ssh "$RUNW" 'docker exec pdash grep -q "steady sampling" /tmp/dash.log 2>/dev/null'; then ready=1; break; fi
+  if ssh "$RUNW" 'docker exec pdash grep -qiE "Traceback|START_FAILED" /tmp/dash.log 2>/dev/null'; then
+    echo "[err] 启动报错,末尾日志:"; ssh "$RUNW" 'docker exec pdash tail -20 /tmp/dash.log'; exit 2
+  fi
+  sleep 5
+done
+[ "$ready" = 1 ] || echo "[warn] 未在 ~7.5min 内就绪;查:ssh $RUNW docker exec pdash tail -30 /tmp/dash.log"
+
+# 5) 验证 + 发布 URL
+echo "[verify] POST deep_evidence ..."
+curl -s --noproxy '*' --max-time 25 -X POST "$URL/api/kernels/deep_evidence?window=5" \
+  | python3 -c "import sys,json
+d=json.load(sys.stdin)
+ok=d.get('available'); st=d.get('stall_shares') or []
+print('  available=%s  sample_total=%d' % (ok, int(d.get('sample_total') or 0)))
+if st: print('  top stall: %s %.1f%%' % (st[0]['cls'], st[0]['pct']))
+if not ok: print('  ⚠ PC sampling 不可用 —— 多半是 GPU 性能计数器权限没开(NVIDIA 控制面板/NVIDIA App → 开发者 → 允许所有用户),开了重跑即可')
+" 2>/dev/null || echo "  (取数失败,可能仍在 warmup;稍后刷新页面)"
+
+echo ""
+echo "============================================================"
+echo "  ✅ DASHBOARD LIVE:  $URL   →  打开点 Kernel tab(自动取证)"
+echo "  停止(释放 GPU):    bash $HERE/stop.sh"
+echo "============================================================"

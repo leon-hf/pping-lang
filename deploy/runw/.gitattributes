@@ -1,0 +1,2 @@
+# 这些脚本要在 runw(Linux/WSL)里跑,强制 LF,避免 Windows CRLF 让 bash 报 \r 错
+* text eol=lf
