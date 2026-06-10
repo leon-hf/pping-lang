@@ -50,6 +50,13 @@ _GPU_PEAK_TABLE: list[tuple[str, GPUPeak]] = [
     ("RTX 4070",   GPUPeak(58.0, 504.2)),
     ("RTX 4060 Ti", GPUPeak(44.0, 288.0)),
     ("RTX 4060",   GPUPeak(31.3, 272.0)),
+    # Blackwell 桌面(bf16 dense ≈ 官方 AI TOPS / 8,与上面 Ada 同口径估算)
+    ("RTX 5090",   GPUPeak(209.5, 1792.0)),       # GB202, 512-bit GDDR7
+    ("RTX 5080",   GPUPeak(112.0, 960.0)),        # GB203, 256-bit GDDR7
+    ("RTX 5070 Ti", GPUPeak(87.9, 896.0)),        # GB203, 16GB GDDR7
+    ("RTX 5070",   GPUPeak(123.0, 672.0)),        # GB205
+    ("RTX 5060 Ti", GPUPeak(94.9, 448.0)),        # GB206, 759 AI TOPS, 16GB GDDR7 128-bit 448GB/s
+    ("RTX 5060",   GPUPeak(76.5, 448.0)),         # GB206
     ("RTX 3090",   GPUPeak(71.0, 936.0)),
 ]
 
