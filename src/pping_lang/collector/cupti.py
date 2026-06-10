@@ -346,6 +346,7 @@ class StallAggregator:
 
     def __init__(self, classifier: StallClassifier | None = None) -> None:
         self._clf = classifier or StallClassifier()
+        self._kcls = KernelClassifier()  # mangled kernel 名 → 算子类(gemm/attention/comm/...)
         self._lock = Lock()
         self._reset_locked()
 
@@ -420,6 +421,7 @@ class StallAggregator:
                         dom = cls
                 rows.append({
                     "kernel": kname,
+                    "cls": self._kcls.classify(kname),   # 算子类(gemm/attention/comm/...)
                     "samples": ktotal,
                     "time_pct": (100.0 * ktotal / grand_total) if grand_total else 0.0,
                     "stall_samples": stall_total,
@@ -429,6 +431,21 @@ class StallAggregator:
                 })
             rows.sort(key=lambda r: r["samples"], reverse=True)
             return rows[:limit]
+
+    def kernel_class_shares(self) -> list[dict[str, Any]]:
+        """按算子类聚合的 GPU 时间占比(全部 kernel,非 top-N)。样本数 ∝ GPU 时间,
+        故每类样本占比 = 该类算子吃掉的 GPU 时间占比。按占比降序。"""
+        with self._lock:
+            grand_total = sum(c.get("_total", 0) for c in self._kernel.values())
+            acc: dict[str, int] = defaultdict(int)
+            for kname, cats in self._kernel.items():
+                acc[self._kcls.classify(kname)] += cats.get("_total", 0)
+            shares = [
+                {"cls": cls, "time_pct": (100.0 * n / grand_total) if grand_total else 0.0}
+                for cls, n in acc.items()
+            ]
+            shares.sort(key=lambda d: d["time_pct"], reverse=True)
+            return shares
 
 
 # === 火焰图聚合(on-demand 深度模式) ==================================
@@ -1211,6 +1228,7 @@ class PcSamplingController:
             agg.add(self._lib.drain())  # 收尾再 drain 一次
             getdata_ms, dropped, hwfull = self._lib.overhead()
             table = agg.kernel_stall_table(self._top_n)
+            class_shares = agg.kernel_class_shares()  # 须在 snapshot_and_reset(清零)之前取
             stats = agg.snapshot_and_reset()
             shares = sorted(
                 ({"cls": cls, "pct": stats[STALL_CLASS_TO_METRIC[cls]]} for cls in STALL_CLASSES),
@@ -1223,6 +1241,7 @@ class PcSamplingController:
                 "sample_total": stats[M.KERNEL_STALL_SAMPLE_TOTAL],
                 "issued_pct": stats[M.KERNEL_STALL_ISSUED_PCT],
                 "stall_shares": shares,
+                "kernel_class_shares": class_shares,
                 "kernel_table": table,
                 "overhead": {"getdata_ms": getdata_ms, "dropped": dropped, "hwfull": hwfull},
                 "error": None,
