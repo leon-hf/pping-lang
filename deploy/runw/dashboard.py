@@ -5,7 +5,8 @@
 
 环境变量:
   PPING_MODEL      模型(默认 Qwen/Qwen2.5-0.5B-Instruct;走 modelscope,缓存到挂载的 /models)
-  PPING_GPU_NAME   面板显示的 GPU 名
+  PPING_GPU_NAME   面板显示的 GPU 名(显式覆盖;不设则 torch 现读真实设备名)
+  PPING_DEPLOY_TAG 部署标签,附在现读 GPU 名后(如 "NVIDIA … RTX 5060 Ti (runw)")
   PPING_PORT       端口(默认 8765)
   PPING_GPU_MEM    gpu_memory_utilization(默认 0.5)
 由部署脚本在容器里设好:CUDA_INJECTION64_PATH / PPING_LANG_PCS_SO / LD_LIBRARY_PATH。
@@ -47,6 +48,16 @@ sink = LocalSink(db_path=DB, instance_id="vllm-deploy", flush_interval_s=1.0)
 import torch  # noqa: E402
 a = torch.randn(4096, 4096, device="cuda"); b = torch.randn(4096, 4096, device="cuda")
 a = (a @ b); torch.cuda.synchronize()
+
+# GPU 名:现读真实设备名(+ 可选部署标签);PPING_GPU_NAME 显式设了则用它覆盖
+if not os.environ.get("PPING_GPU_NAME"):
+    try:
+        GPU_NAME = torch.cuda.get_device_name(0)
+        _tag = os.environ.get("PPING_DEPLOY_TAG")
+        if _tag:
+            GPU_NAME = f"{GPU_NAME} ({_tag})"
+    except Exception:  # noqa: BLE001
+        pass
 
 lib = CtypesPcSamplingLib()
 print("[pcs] available:", lib.available(), flush=True)

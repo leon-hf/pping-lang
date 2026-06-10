@@ -14,7 +14,7 @@ IMAGE=${IMAGE:-vllm/vllm-openai:v0.17.1}
 REPO=${REPO:-/home/leon/pping-work/pping-lang}       # runw 上的 repo 路径
 MODELS=${MODELS:-/home/leon/pping-work/models}       # runw 上的本地模型缓存(挂进容器)
 MODEL=${MODEL:-Qwen/Qwen2.5-0.5B-Instruct}
-GPU_NAME=${GPU_NAME:-"NVIDIA RTX 5060 Ti (runw)"}
+DEPLOY_TAG=${DEPLOY_TAG:-runw}                       # 部署标签,附在现读的 GPU 名后(如 "… (runw)")
 BRANCH=${BRANCH:-$(git -C "$ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)}
 RUN_TESTS=${RUN_TESTS:-1}
 URL="http://$RUNW_IP:$PORT"
@@ -41,7 +41,7 @@ echo "[sync] 完成"
 # 3) runw 上部署(把配置变量注入到 remote_deploy.sh 前面再喂给远端 bash)
 {
   echo "BRANCH='$BRANCH'"; echo "IMAGE='$IMAGE'"; echo "REPO='$REPO'"
-  echo "MODELS='$MODELS'"; echo "PORT='$PORT'"; echo "MODEL='$MODEL'"; echo "GPU_NAME='$GPU_NAME'"
+  echo "MODELS='$MODELS'"; echo "PORT='$PORT'"; echo "MODEL='$MODEL'"; echo "DEPLOY_TAG='$DEPLOY_TAG'"
   cat "$HERE/remote_deploy.sh"
 } | ssh "$RUNW" bash -s
 

@@ -1,4 +1,4 @@
-# 在 runw 上执行(由 deploy.sh 在前面注入 IMAGE/REPO/MODELS/PORT/MODEL/GPU_NAME 变量)。
+# 在 runw 上执行(由 deploy.sh 在前面注入 IMAGE/REPO/MODELS/PORT/MODEL/DEPLOY_TAG 变量)。
 # 代码已由 deploy.sh 用 tar over ssh 直接同步到 $REPO(不走 GitHub)。不要单独跑这个文件。
 set -e
 mkdir -p "$MODELS"
@@ -24,6 +24,6 @@ docker exec pdash pip install -q duckdb -i https://pypi.tuna.tsinghua.edu.cn/sim
 # 4) 起 dashboard(注入 + cu库路径 + pre-warm,后台)
 docker exec -d \
   -e CUDA_INJECTION64_PATH=/tmp/libppingcupti.so \
-  -e PPING_GPU_NAME="$GPU_NAME" -e PPING_PORT="$PORT" -e PPING_MODEL="$MODEL" \
+  -e PPING_DEPLOY_TAG="$DEPLOY_TAG" -e PPING_PORT="$PORT" -e PPING_MODEL="$MODEL" \
   pdash bash -lc 'source /tmp/pping_env.sh; PYTHONPATH=/work/src python3 /work/deploy/runw/dashboard.py > /tmp/dash.log 2>&1'
 echo "[runw] dashboard launching (首次会下模型到 /models,之后命中缓存)"
