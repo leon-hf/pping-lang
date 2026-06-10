@@ -501,12 +501,26 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
               <span x-show="!deep.running">重新采集</span><span x-show="deep.running">采集中…</span>
             </button>
           </div>
-          <div style="overflow-x: auto; margin-top: 12px;">
+          <!-- 按算子类型聚合的 GPU 时间占比(gemm / attention / comm / norm / …) -->
+          <div x-show="deep.result.kernel_class_shares && deep.result.kernel_class_shares.length" style="margin-top: 14px;">
+            <div style="font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 8px;">按算子类型 · 占 GPU 时间</div>
+            <div style="display: flex; flex-wrap: wrap; gap: 8px 12px;">
+              <template x-for="cs in deep.result.kernel_class_shares.filter(x => x.time_pct >= 0.05)" :key="cs.cls">
+                <span style="display: inline-flex; align-items: center; gap: 6px; padding: 4px 11px; border-radius: 999px; background: var(--surface-alt); font-size: 12px;">
+                  <span :style="`width:9px;height:9px;border-radius:2px;background:${kernelColor(cs.cls)}`"></span>
+                  <span x-text="kernelLabel(cs.cls)"></span>
+                  <strong style="font-variant-numeric: tabular-nums;" x-text="fmt(cs.time_pct, 1) + '%'"></strong>
+                </span>
+              </template>
+            </div>
+          </div>
+          <div style="overflow-x: auto; margin-top: 14px;">
             <table class="kernel-table">
               <thead>
                 <tr>
-                  <th style="width: 46%;">Kernel 名（原始）</th>
-                  <th style="text-align: right; width: 200px;">GPU 时间占比</th>
+                  <th style="width: 40%;">Kernel 名（原始）</th>
+                  <th>类</th>
+                  <th style="text-align: right; width: 180px;">GPU 时间占比</th>
                   <th>主导 stall（为什么慢）</th>
                   <th style="text-align: right;">该 stall 占比</th>
                 </tr>
@@ -515,6 +529,7 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
                 <template x-for="(k, i) in (kernelShowAll ? deep.result.kernel_table : deep.result.kernel_table.slice(0, kernelCollapsed))" :key="i">
                   <tr>
                     <td><code class="kname" x-text="k.kernel" :title="k.kernel"></code></td>
+                    <td><span class="kcls" :style="`background:${kernelColor(k.cls)}1a;color:${kernelColor(k.cls)}`" x-text="kernelLabel(k.cls)"></span></td>
                     <td style="text-align: right;">
                       <div style="display: flex; align-items: center; gap: 8px; justify-content: flex-end;">
                         <div style="width: 96px; background: #e9ebee; border-radius: 4px; height: 12px; overflow: hidden;">
