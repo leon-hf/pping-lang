@@ -4,6 +4,81 @@ let _tpotChart = null;
 let _e2eChart = null;
 let _kClassChart = null;   // kernel 类占比堆叠面积(实时)
 let _kUtilChart = null;    // GPU busy + 同步等待(实时)
+let _kRoofChart = null;    // Kernel tab 里复用的第二个 roofline 图(懒建,与 Overview 同数据)
+let _lastRoofline = null;  // 最近一次 /api/roofline 数据,懒建第二个图时回填
+
+// roofline 散点图配置工厂 —— Overview 与 Kernel tab 两个图共用同一份配置
+function _makeRooflineChart(ctx) {
+  return new Chart(ctx, {
+    type: 'scatter',
+    data: {
+      datasets: [
+        {
+          label: '当前样本', data: [],
+          backgroundColor: 'rgba(13, 139, 128, 0.55)', borderColor: '#0d8b80', borderWidth: 1,
+          pointRadius: 4, pointHoverRadius: 7, pointHoverBackgroundColor: '#0d8b80',
+          pointHoverBorderColor: '#fff', pointHoverBorderWidth: 2, showLine: false, order: 3,
+        },
+        {
+          label: 'Compute roof', data: [], showLine: true, borderColor: '#dc4d3e', borderWidth: 2.5,
+          pointRadius: 0, fill: 'origin', backgroundColor: 'rgba(220, 77, 62, 0.06)', tension: 0, order: 1,
+        },
+        {
+          label: 'Memory roof', data: [], showLine: true, borderColor: '#5147c8', borderWidth: 2.5,
+          pointRadius: 0, fill: 'origin', backgroundColor: 'rgba(81, 71, 200, 0.06)', tension: 0, order: 2,
+        },
+      ],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: '#1c1410', titleColor: '#fff', bodyColor: '#fdf9f2', padding: 11,
+          cornerRadius: 8, displayColors: false, borderWidth: 0, titleFont: { weight: '600' },
+          callbacks: {
+            title: () => '',
+            label: (ctx) => {
+              const ds = ctx.dataset.label;
+              if (ds === '当前样本') {
+                return [`AI:  ${ctx.parsed.x.toFixed(2)} FLOPs/byte`, `TPut: ${ctx.parsed.y.toFixed(1)} TFLOPs/s`];
+              }
+              return `${ds}: ${ctx.parsed.y.toFixed(1)} TFLOPs/s`;
+            },
+          },
+        },
+      },
+      scales: {
+        x: {
+          type: 'logarithmic',
+          title: { display: true, text: 'Arithmetic Intensity (FLOPs / byte)', color: '#7a6e63', font: { size: 11.5, weight: '600' } },
+          ticks: { color: '#a8998a', font: { size: 11 } }, grid: { color: '#f3ebdb', drawBorder: false },
+        },
+        y: {
+          type: 'logarithmic',
+          title: { display: true, text: 'Achieved Throughput (TFLOPs/s)', color: '#7a6e63', font: { size: 11.5, weight: '600' } },
+          ticks: { color: '#a8998a', font: { size: 11 } }, grid: { color: '#f3ebdb', drawBorder: false },
+        },
+      },
+    },
+  });
+}
+
+// 把 /api/roofline 数据填进一个 roofline 图(点 + 两条 roof)
+function _applyRooflineData(chart, data) {
+  if (!chart) return;
+  chart.data.datasets[0].data = (data.points || []).map(p => ({ x: p.ai, y: p.throughput_tflops }));
+  if (data.peak && data.peak.compute_tflops && data.peak.mem_bw_tbs) {
+    const peakC = data.peak.compute_tflops, peakBW = data.peak.mem_bw_tbs, knee = peakC / peakBW;
+    const xMin = 0.1, xMax = Math.max(1000, knee * 3);
+    chart.data.datasets[1].data = [{ x: knee, y: peakC }, { x: xMax, y: peakC }];
+    chart.data.datasets[2].data = [{ x: xMin, y: peakBW * xMin }, { x: knee, y: peakC }];
+  } else {
+    chart.data.datasets[1].data = [];
+    chart.data.datasets[2].data = [];
+  }
+  chart.update('none');
+}
 
 function _createMiniLatencyChart(canvasId, color) {
   const ctx = document.getElementById(canvasId);
@@ -681,10 +756,21 @@ function dashboard() {
     // 打开 Kernel tab 时调:先拉缓存结果;若可用且还没有结果,自动跑一次取证 ——
     // 免得用户找不到/不点"采集 stall 证据"按钮就以为 tab 空的(§A)。
     async onKernelTabOpen() {
+      this._ensureKernelRoofline();
       await this.loadDeepEvidence();
       if (this.deep.available_now && !this.deep.result && !this.deep.running) {
         this.runDeepEvidence(5);
       }
+    },
+    // 懒建 Kernel tab 里的第二个 roofline 图(canvas 在 x-show 容器内,tab 显示后才有尺寸)
+    _ensureKernelRoofline() {
+      setTimeout(() => {
+        const el = document.getElementById('kernel-roofline-chart');
+        if (!el) return;
+        if (_kRoofChart) { _kRoofChart.resize(); return; }
+        _kRoofChart = _makeRooflineChart(el.getContext('2d'));
+        if (_lastRoofline) _applyRooflineData(_kRoofChart, _lastRoofline);
+      }, 60);
     },
     // 读最近一次取证结果(开 Kernel tab 时调,不触发新采集)
     async loadDeepEvidence() {
@@ -845,111 +931,7 @@ function dashboard() {
     init() {
       const ctx = document.getElementById('gpu-chart').getContext('2d');
 
-      _chart = new Chart(ctx, {
-        type: 'scatter',
-        data: {
-          datasets: [
-            {
-              label: '当前样本',
-              data: [],
-              backgroundColor: 'rgba(13, 139, 128, 0.55)',
-              borderColor: '#0d8b80',
-              borderWidth: 1,
-              pointRadius: 4,
-              pointHoverRadius: 7,
-              pointHoverBackgroundColor: '#0d8b80',
-              pointHoverBorderColor: '#fff',
-              pointHoverBorderWidth: 2,
-              showLine: false,
-              order: 3,
-            },
-            {
-              // Compute roof: horizontal line + fill the compute-bound zone
-              // (right of knee). Soft coral wash hints "this is the compute
-              // wall, points here are bounded by FLOPS not bandwidth."
-              label: 'Compute roof',
-              data: [],
-              showLine: true,
-              borderColor: '#dc4d3e',
-              borderWidth: 2.5,
-              pointRadius: 0,
-              fill: 'origin',
-              backgroundColor: 'rgba(220, 77, 62, 0.06)',
-              tension: 0,
-              order: 1,
-            },
-            {
-              // Memory roof: diagonal + fill memory-bound zone (left of knee).
-              // Soft indigo wash hints "you're stuck on bandwidth here."
-              label: 'Memory roof',
-              data: [],
-              showLine: true,
-              borderColor: '#5147c8',
-              borderWidth: 2.5,
-              pointRadius: 0,
-              fill: 'origin',
-              backgroundColor: 'rgba(81, 71, 200, 0.06)',
-              tension: 0,
-              order: 2,
-            },
-          ],
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          animation: false,
-          plugins: {
-            legend: { display: false },
-            tooltip: {
-              backgroundColor: '#1c1410',
-              titleColor: '#fff',
-              bodyColor: '#fdf9f2',
-              padding: 11,
-              cornerRadius: 8,
-              displayColors: false,
-              borderWidth: 0,
-              titleFont: { weight: '600' },
-              callbacks: {
-                title: () => '',
-                label: (ctx) => {
-                  const ds = ctx.dataset.label;
-                  if (ds === '当前样本') {
-                    return [
-                      `AI:  ${ctx.parsed.x.toFixed(2)} FLOPs/byte`,
-                      `TPut: ${ctx.parsed.y.toFixed(1)} TFLOPs/s`,
-                    ];
-                  }
-                  return `${ds}: ${ctx.parsed.y.toFixed(1)} TFLOPs/s`;
-                },
-              },
-            },
-          },
-          scales: {
-            x: {
-              type: 'logarithmic',
-              title: {
-                display: true,
-                text: 'Arithmetic Intensity (FLOPs / byte)',
-                color: '#7a6e63',
-                font: { size: 11.5, weight: '600' },
-              },
-              ticks: { color: '#a8998a', font: { size: 11 } },
-              grid: { color: '#f3ebdb', drawBorder: false },
-            },
-            y: {
-              type: 'logarithmic',
-              title: {
-                display: true,
-                text: 'Achieved Throughput (TFLOPs/s)',
-                color: '#7a6e63',
-                font: { size: 11.5, weight: '600' },
-              },
-              ticks: { color: '#a8998a', font: { size: 11 } },
-              grid: { color: '#f3ebdb', drawBorder: false },
-            },
-          },
-        },
-      });
+      _chart = _makeRooflineChart(ctx);
       // Mini latency-trend charts (TTFT / TPOT / E2E)
       _ttftChart = _createMiniLatencyChart('ttft-chart', '#dc4d3e');
       _tpotChart = _createMiniLatencyChart('tpot-chart', '#5147c8');
@@ -971,39 +953,11 @@ function dashboard() {
       this.rooflineParamsB = data.params_billion != null
         ? Number(data.params_billion).toFixed(2)
         : '?';
-      // Sample points
-      const points = (data.points || []).map(p => ({
-        x: p.ai,
-        y: p.throughput_tflops,
-      }));
-      _chart.data.datasets[0].data = points;
-      // Plain-language verdict — Roofline is unintuitive on its own. We
-      // pick the median AI / throughput of recent points so a single
-      // outlier doesn't flip the bound classification.
+      // verdict(roofline 本身不直观,用中位 AI/吞吐 判定,免单点 outlier 翻转结论)
       this.rooflineVerdict = this._computeRooflineVerdict(data);
-
-      // Roof lines from peak info
-      if (data.peak && data.peak.compute_tflops && data.peak.mem_bw_tbs) {
-        const peakC = data.peak.compute_tflops;
-        const peakBW = data.peak.mem_bw_tbs;
-        const knee = peakC / peakBW;
-        const xMin = 0.1;
-        const xMax = Math.max(1000, knee * 3);
-        // Compute roof: horizontal from knee to xMax
-        _chart.data.datasets[1].data = [
-          { x: knee, y: peakC },
-          { x: xMax, y: peakC },
-        ];
-        // Memory roof: diagonal from (xMin, bw*xMin) to knee
-        _chart.data.datasets[2].data = [
-          { x: xMin, y: peakBW * xMin },
-          { x: knee, y: peakC },
-        ];
-      } else {
-        _chart.data.datasets[1].data = [];
-        _chart.data.datasets[2].data = [];
-      }
-      _chart.update('none');
+      _lastRoofline = data;
+      _applyRooflineData(_chart, data);        // Overview 的图
+      _applyRooflineData(_kRoofChart, data);   // Kernel tab 的图(懒建后才非空)
     },
 
     async fetchSystem() {
