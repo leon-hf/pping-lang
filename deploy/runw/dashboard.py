@@ -34,7 +34,7 @@ from pping_lang.api.server import ApiServer  # noqa: E402
 from pping_lang.collector.cupti import (  # noqa: E402
     CtypesPcSamplingLib, CuptiKernelCollector, FakeActivitySource, PcSamplingController,
 )
-from pping_lang.hardware import lookup_peak  # noqa: E402
+from pping_lang.hardware import lookup_peak, read_gpu_peak  # noqa: E402
 from pping_lang.rules.store import RuleStore  # noqa: E402
 from pping_lang.sink.local import LocalSink  # noqa: E402
 
@@ -57,7 +57,7 @@ coll = CuptiKernelCollector(sink, source=FakeActivitySource(available=False), pc
 app = build_app(
     db_path=DB, instance_id="vllm-deploy", engine_index=0, sink=sink,
     rule_store=RuleStore(), cupti=coll, gpu_name=GPU_NAME,
-    gpu_peak=lookup_peak(GPU_NAME),   # 让 roofline 画出屋脊线(5060 Ti 已加进 hardware 表)
+    gpu_peak=read_gpu_peak() or lookup_peak(GPU_NAME),  # 现读设备属性;读不到回退型号表
 )
 api = ApiServer(app, host="0.0.0.0", port=PORT)
 api.start()
