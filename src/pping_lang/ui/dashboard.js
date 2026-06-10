@@ -495,6 +495,7 @@ function dashboard() {
       return {
         attention: '#0d8b80', gemm: '#5147c8', norm: '#c2660d',
         rotary: '#be1556', activation: '#5a8f1f', comm: '#dc4d3e',
+        elementwise: '#3f7fa8', sampling: '#9b59b6', index: '#b8860b',
         memcpy: '#7a6e63', other: '#a8998a',
       }[cls] || '#a8998a';
     },
@@ -502,6 +503,7 @@ function dashboard() {
       return {
         attention: 'Attention', gemm: 'GEMM', norm: 'Norm',
         rotary: 'Rotary', activation: 'Activation', comm: '通信 (NCCL)',
+        elementwise: '逐元素', sampling: '采样/解码', index: '索引查表',
         other: '其它',
       }[cls] || cls;
     },

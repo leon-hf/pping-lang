@@ -126,6 +126,14 @@ DEFAULT_CLASSIFY_RULES: list[tuple[tuple[str, ...], str]] = [
     (("rms_norm", "rmsnorm", "layernorm", "layer_norm", "fused_add_rms"), "norm"),
     (("rotary", "rope"), "rotary"),
     (("silu", "swiglu", "geglu", "gelu", "act_and_mul", "activation"), "activation"),
+    # 采样/解码(softmax/argmax/分布采样)—— 必须在 elementwise 之前:分布采样核名里
+    # 含 "elementwise"(distribution_elementwise_grid_stride_kernel),否则会被误归逐元素。
+    (("softmax", "argmax", "distribution", "exponential", "multinomial",
+      "topk", "top_k", "gumbel"), "sampling"),
+    # 索引/聚集/embedding 查表(comm 的 all_gather/reduce_scatter 已在前面先被吃掉)
+    (("indexselect", "index_select", "embedding", "gather", "scatter"), "index"),
+    # 逐元素 / 拷贝 / 类型转换(大算子之间的 glue:add/mul/div/copy/cast)
+    (("elementwise", "direct_copy", "copy_kernel", "_cast", "fill_kernel"), "elementwise"),
 ]
 
 
