@@ -44,6 +44,11 @@ dev = ["pytest>=7.0", "pytest-cov>=4.0", "pytest-asyncio>=0.23.0", "ruff>=0.1.0"
 [project.entry-points."vllm.stat_logger_plugins"]
 pping_lang = "pping_lang.plugin:PpingLangStatLogger"
 
+# general_plugins 在 EngineCore/worker 进程也会加载 → 在有 CUDA 的引擎进程驱动 PC
+# sampling(多进程 serve 下,stat_logger 在前端无 CUDA context;见 engine_pcs.py)。
+[project.entry-points."vllm.general_plugins"]
+pping_lang_pcs = "pping_lang.engine_pcs:init_engine_pcs"
+
 [project.urls]
 Homepage = "https://github.com/leon/pping-lang"
 Documentation = "https://github.com/leon/pping-lang/tree/main/docs"
