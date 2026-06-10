@@ -464,6 +464,7 @@ function dashboard() {
     deep: { running: false, available_now: false, result: null, findings: [], error: null },
     kernelShowAll: false,        // Kernel 明细表:false=只显示前 N 行
     kernelCollapsed: 10,         // 收起时显示的行数
+    kernelExpanded: null,        // 展开看 stall 构成 + 建议的行索引(null=都收起)
     timeline: null,              // 执行时间线(最近 N 条 kernel 的 start/end/stream)
     tlFrozen: false,             // 冻结:停 2s 刷新,便于缩放/读
     tlPxPerMs: null,             // 时间线缩放:每毫秒像素;null=适应容器宽度
@@ -506,6 +507,122 @@ function dashboard() {
         elementwise: '逐元素', sampling: '采样/解码', index: '索引查表',
         other: '其它',
       }[cls] || cls;
+    },
+    // === Kernel tab 诊断辅助(全部从 deep.result 现有数据推导,无需后端)===
+    // #5 mangled 名 → 人话
+    kernelFriendly(name, cls) {
+      const n = (name || '').toLowerCase();
+      const has = (...xs) => xs.some(x => n.includes(x));
+      if (cls === 'gemm') {
+        if (has('cutlass') && has('wmma')) return 'GEMM · cutlass WMMA TensorOp';
+        if (has('cutlass')) return 'GEMM · cutlass TensorOp';
+        if (has('splitkreduce')) return 'GEMM · cuBLAS splitK 归约';
+        if (has('cublas')) return 'GEMM · cuBLAS';
+        return 'GEMM 矩阵乘';
+      }
+      if (cls === 'attention') {
+        if (has('splitkv')) return 'Attention · FlashAttention(split-KV)';
+        if (has('flash')) return 'Attention · FlashAttention';
+        if (has('reshape_and_cache')) return 'Attention · 写 KV cache';
+        if (has('paged')) return 'Attention · PagedAttention';
+        return '注意力';
+      }
+      if (cls === 'norm') {
+        if (has('fused_add_rms')) return 'Norm · fused add+RMSNorm';
+        if (has('rms')) return 'Norm · RMSNorm';
+        if (has('layernorm') || has('layer_norm')) return 'Norm · LayerNorm';
+        return '归一化';
+      }
+      if (cls === 'rotary') return 'RoPE 旋转位置编码';
+      if (cls === 'activation') {
+        if (has('act_and_mul') || has('silu')) return 'Activation · SiLU×Mul';
+        if (has('gelu')) return 'Activation · GELU';
+        return '激活函数';
+      }
+      if (cls === 'sampling') {
+        if (has('softmax')) return '采样 · Softmax';
+        if (has('argmax')) return '采样 · ArgMax(贪心)';
+        if (has('exponential') || has('distribution')) return '采样 · 随机采样';
+        if (has('topk') || has('top_k')) return '采样 · Top-K';
+        return '采样/解码';
+      }
+      if (cls === 'index') {
+        if (has('gather')) return '索引 · gather 聚集';
+        if (has('index')) return '索引 · indexSelect 查表';
+        return '索引/查表';
+      }
+      if (cls === 'elementwise') {
+        if (has('direct_copy') || has('copy')) return '逐元素 · 拷贝/类型转换';
+        if (has('div')) return '逐元素 · 除法';
+        if (has('add')) return '逐元素 · 加法';
+        if (has('mul')) return '逐元素 · 乘法';
+        return '逐元素';
+      }
+      if (cls === 'comm') return '通信 (NCCL)';
+      return this.kernelLabel(cls);
+    },
+    // #3 这个 kernel 浪费的"全局 GPU 时间"= 时间占比 × 它内部 stall 比例
+    kernelStallTimePct(k) {
+      if (!k || !k.samples) return 0;
+      return (k.time_pct || 0) * (k.stall_samples || 0) / k.samples;
+    },
+    // #1 GPU 在干活 vs 在等(issued = 真正发指令的样本占比)
+    issuedVerdict() {
+      const r = this.deep.result;
+      if (!r || !r.available) return null;
+      const issued = r.issued_pct || 0;
+      const stall = Math.max(0, 100 - issued);
+      return { issued, stall, level: stall >= 70 ? 'high' : (stall >= 45 ? 'mid' : 'low') };
+    },
+    // #2 访存 / 算力 / 延迟 瓶颈判定(取 stall_shares 头部,排除非瓶颈项)
+    bottleneckVerdict() {
+      const r = this.deep.result;
+      const sh = (r && r.stall_shares) || [];
+      const top = sh.filter(s => !['scheduler_slack', 'issued'].includes(s.cls))
+                    .slice().sort((a, b) => b.pct - a.pct)[0];
+      if (!top) return null;
+      const map = {
+        memory_dependency: { t: '访存瓶颈', a: '数据在等内存加载。可试 fp8/int8 量化减少访存、算子融合减少往返、确认 KV cache 复用。' },
+        memory_throttle: { t: '访存带宽瓶颈', a: '内存子系统被打满。降低精度 / 融合算子减少访存流量。' },
+        math_pipe: { t: '算力瓶颈', a: '计算单元接近饱和(好事,已高效)。再压只能靠更低精度或更优 kernel。' },
+        exec_dependency: { t: '指令延迟瓶颈', a: '指令间数据依赖等待,多由 kernel 内部结构决定,优化空间有限。' },
+        shared_dependency: { t: '共享内存瓶颈', a: '等共享内存 / L1。检查 tile 大小与 bank conflict。' },
+        sync: { t: '同步瓶颈', a: '线程在 barrier 等待。检查同步频率与负载均衡。' },
+        fetch_control: { t: '前端取指瓶颈', a: '指令获取 / 分支,一般非主因。' },
+        dispatch: { t: '发射瓶颈', a: '发射端口受限。' },
+      };
+      const m = map[top.cls] || { t: this.stallLabel(top.cls) + ' 为主', a: '' };
+      return { cls: top.cls, pct: top.pct, type: m.t, action: m.a };
+    },
+    // #3 全局最大可回收点:stall 时间占比最高的 kernel
+    topRecoverable() {
+      const kt = (this.deep.result && this.deep.result.kernel_table) || [];
+      let best = null, bestv = 0;
+      for (const k of kt) {
+        const v = this.kernelStallTimePct(k);
+        if (v > bestv) { bestv = v; best = k; }
+      }
+      return best ? { k: best, pct: bestv } : null;
+    },
+    // #6 单个 kernel 的优化建议
+    kernelSuggestion(k) {
+      if (!k) return '';
+      const ds = k.dominant_stall, c = k.cls;
+      if (c === 'gemm' && (ds === 'memory_dependency' || ds === 'memory_throttle'))
+        return '访存瓶颈的矩阵乘:fp8/int8 量化、增大 batch 提升计算密度、检查权重是否反复从显存读取。';
+      if (c === 'gemm' && ds === 'math_pipe')
+        return '矩阵乘已算力饱和(接近峰值),难再压;考虑更低精度。';
+      if (c === 'attention' && (ds === 'memory_dependency' || ds === 'memory_throttle'))
+        return '注意力访存瓶颈:确认 FlashAttention / PagedAttention 生效、KV cache 命中率。';
+      if (c === 'elementwise')
+        return '逐元素 / 拷贝:看能否算子融合,减少 kernel 数与显存往返。';
+      if (c === 'sampling')
+        return '采样 / 解码开销:批量解码、减少不必要的 host-device 往返。';
+      if (c === 'index')
+        return '索引 / 查表:确认访问模式连续,避免随机 gather 打散访存。';
+      if (ds === 'exec_dependency')
+        return '指令延迟为主,通常由 kernel 内部结构决定,优化空间有限。';
+      return '';
     },
 
     // stall 语义类 → 中文标签 / 颜色(Deep Evidence 分解条)

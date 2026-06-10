@@ -514,35 +514,99 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
               </template>
             </div>
           </div>
-          <div style="overflow-x: auto; margin-top: 14px;">
+          <!-- #1+#2+#3 诊断头条:GPU 在等多少 · 什么瓶颈 · 最大可回收点 -->
+          <template x-if="issuedVerdict() && bottleneckVerdict()">
+            <div style="margin-top: 16px; padding: 14px 16px; border-radius: 10px; border: 1px solid var(--border-strong); border-left: 3px solid var(--teal); background: var(--surface-tint);">
+              <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                <span style="font-size: 13px; font-weight: 700; color: var(--text-strong);">GPU 利用诊断</span>
+                <span style="font-size: 12.5px; color: var(--text);">
+                  <strong x-text="fmt(issuedVerdict().stall, 0) + '%'"></strong> 的采样周期在<strong>等待 (stall)</strong>,仅 <strong x-text="fmt(issuedVerdict().issued, 0) + '%'"></strong> 在真正发射指令
+                </span>
+              </div>
+              <div style="display: flex; height: 14px; border-radius: 4px; overflow: hidden; margin: 10px 0; background: #e9ebee;">
+                <div :style="`width:${issuedVerdict().issued}%;background:var(--teal)`" :title="`发射指令 ${fmt(issuedVerdict().issued,0)}%`"></div>
+                <div :style="`width:${issuedVerdict().stall}%;background:${stallColor(bottleneckVerdict().cls)}`" :title="`stall ${fmt(issuedVerdict().stall,0)}%`"></div>
+              </div>
+              <div style="font-size: 13px; color: var(--text);">
+                主因 <strong :style="`color:${stallColor(bottleneckVerdict().cls)}`" x-text="stallLabel(bottleneckVerdict().cls)"></strong>（占 stall 的 <span x-text="fmt(bottleneckVerdict().pct, 0)"></span>%）→
+                <strong style="color: var(--text-strong);" x-text="bottleneckVerdict().type"></strong>
+              </div>
+              <div x-show="bottleneckVerdict().action" style="margin-top: 5px; font-size: 12px; color: var(--muted);" x-text="'💡 ' + bottleneckVerdict().action"></div>
+              <template x-if="topRecoverable() && topRecoverable().pct >= 1">
+                <div style="margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border);">
+                  <span style="font-size: 12.5px; color: var(--text);">
+                    🎯 最大可回收点:<strong x-text="kernelFriendly(topRecoverable().k.kernel, topRecoverable().k.cls)"></strong>
+                    —— 全局约 <strong style="color: var(--text-strong);" x-text="fmt(topRecoverable().pct, 0) + '%'"></strong> 的 GPU 时间是它在等待,优先优化它。
+                  </span>
+                </div>
+              </template>
+            </div>
+          </template>
+
+          <div style="font-size: 11px; color: var(--muted-2); margin-top: 16px;">点任意行展开 → 看该 kernel 的完整 stall 构成 + 优化建议</div>
+          <div style="overflow-x: auto; margin-top: 8px;">
             <table class="kernel-table">
               <thead>
                 <tr>
-                  <th style="width: 40%;">Kernel 名（原始）</th>
+                  <th style="width: 34%;">Kernel</th>
                   <th>类</th>
-                  <th style="text-align: right; width: 180px;">GPU 时间占比</th>
-                  <th>主导 stall（为什么慢）</th>
-                  <th style="text-align: right;">该 stall 占比</th>
+                  <th style="text-align: right; width: 148px;">GPU 时间占比</th>
+                  <th style="text-align: right; width: 156px;" title="= GPU 时间占比 × 该 kernel 内部 stall 比例。它占的全局 GPU 时间里有多少花在等待 —— 这部分才是可优化回收的。">stall 时间<span style="font-weight: 400; color: var(--muted-2);"> 可回收</span></th>
+                  <th>主导 stall</th>
+                  <th style="width: 26px;"></th>
                 </tr>
               </thead>
-              <tbody>
-                <template x-for="(k, i) in (kernelShowAll ? deep.result.kernel_table : deep.result.kernel_table.slice(0, kernelCollapsed))" :key="i">
-                  <tr>
-                    <td><code class="kname" x-text="k.kernel" :title="k.kernel"></code></td>
+              <template x-for="(k, i) in (kernelShowAll ? deep.result.kernel_table : deep.result.kernel_table.slice(0, kernelCollapsed))" :key="i">
+                <tbody>
+                  <tr @click="kernelExpanded = (kernelExpanded === i ? null : i)" style="cursor: pointer;">
+                    <td>
+                      <div style="font-weight: 600; color: var(--text-strong); font-size: 12.5px;" x-text="kernelFriendly(k.kernel, k.cls)"></div>
+                      <code class="kname" style="font-size: 10.5px; color: var(--muted-2);" x-text="k.kernel" :title="k.kernel"></code>
+                    </td>
                     <td><span class="kcls" :style="`background:${kernelColor(k.cls)}1a;color:${kernelColor(k.cls)}`" x-text="kernelLabel(k.cls)"></span></td>
                     <td style="text-align: right;">
-                      <div style="display: flex; align-items: center; gap: 8px; justify-content: flex-end;">
-                        <div style="width: 96px; background: #e9ebee; border-radius: 4px; height: 12px; overflow: hidden;">
+                      <div style="display: flex; align-items: center; gap: 7px; justify-content: flex-end;">
+                        <div style="width: 78px; background: #e9ebee; border-radius: 4px; height: 11px; overflow: hidden;">
                           <div :style="`width:${Math.min(100, k.time_pct)}%;height:100%;background:var(--teal)`"></div>
                         </div>
-                        <span style="font-weight: 600; min-width: 44px; font-variant-numeric: tabular-nums;" x-text="fmt(k.time_pct, 1) + '%'"></span>
+                        <span style="font-weight: 600; min-width: 42px; font-variant-numeric: tabular-nums;" x-text="fmt(k.time_pct, 1) + '%'"></span>
                       </div>
                     </td>
-                    <td><span :style="`color:${stallColor(k.dominant_stall)};font-weight:600`" x-text="stallLabel(k.dominant_stall)"></span></td>
-                    <td style="text-align: right; color: var(--muted-2);" x-text="fmt(k.dominant_pct, 0) + '%'"></td>
+                    <td style="text-align: right;">
+                      <div style="display: flex; align-items: center; gap: 7px; justify-content: flex-end;">
+                        <div style="width: 78px; background: #e9ebee; border-radius: 4px; height: 11px; overflow: hidden;">
+                          <div :style="`width:${Math.min(100, kernelStallTimePct(k))}%;height:100%;background:${stallColor(k.dominant_stall)}`"></div>
+                        </div>
+                        <span style="font-weight: 600; min-width: 42px; font-variant-numeric: tabular-nums; color: var(--text);" x-text="fmt(kernelStallTimePct(k), 1) + '%'"></span>
+                      </div>
+                    </td>
+                    <td>
+                      <span :style="`color:${stallColor(k.dominant_stall)};font-weight:600`" x-text="stallLabel(k.dominant_stall)"></span>
+                      <span style="color: var(--muted-2); font-size: 11px;" x-text="fmt(k.dominant_pct, 0) + '%'"></span>
+                    </td>
+                    <td style="text-align: center; color: var(--muted-2);" x-text="kernelExpanded === i ? '▴' : '▾'"></td>
                   </tr>
-                </template>
-              </tbody>
+                  <tr x-show="kernelExpanded === i">
+                    <td colspan="6" style="background: var(--surface-alt);">
+                      <div style="padding: 11px 8px;">
+                        <div style="font-size: 11px; font-weight: 600; color: var(--muted); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.04em;">这个 kernel 的 stall 构成（占它自己的样本）</div>
+                        <div style="display: flex; flex-direction: column; gap: 4px; max-width: 580px;">
+                          <template x-for="ent in Object.entries(k.breakdown || {}).filter(e => e[0] !== 'issued' && e[1] > 0).sort((a, b) => b[1] - a[1]).slice(0, 9)" :key="ent[0]">
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                              <div style="width: 130px; font-size: 11.5px; color: var(--muted);" x-text="stallLabel(ent[0])"></div>
+                              <div style="flex: 1; background: #e9ebee; border-radius: 3px; height: 12px; overflow: hidden;">
+                                <div :style="`width:${Math.min(100, 100 * ent[1] / k.samples)}%;height:100%;background:${stallColor(ent[0])}`"></div>
+                              </div>
+                              <div style="width: 46px; text-align: right; font-size: 11px; font-variant-numeric: tabular-nums;" x-text="fmt(100 * ent[1] / k.samples, 1) + '%'"></div>
+                            </div>
+                          </template>
+                        </div>
+                        <div x-show="kernelSuggestion(k)" style="margin-top: 11px; padding: 9px 12px; background: var(--teal-soft); border-radius: 7px; font-size: 12px; color: var(--text);" x-text="'💡 ' + kernelSuggestion(k)"></div>
+                      </div>
+                    </td>
+                  </tr>
+                </tbody>
+              </template>
             </table>
           </div>
           <div x-show="deep.result.kernel_table.length > kernelCollapsed" style="margin-top: 12px; text-align: center;">
