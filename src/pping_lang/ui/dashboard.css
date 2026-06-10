@@ -1338,8 +1338,8 @@
     border: 1px solid color-mix(in srgb, var(--amber) 28%, transparent);
   }
   .kfinding {
-    padding: 11px 14px;
-    border-radius: 8px;
+    padding: 14px 16px;
+    border-radius: 9px;
     border: 1px solid var(--border);
     border-left: 3px solid var(--muted-2);
     background: var(--surface-alt);
@@ -1347,7 +1347,7 @@
   .kfinding.info { border-left-color: var(--teal); }
   .kfinding.warning { border-left-color: var(--amber); background: var(--amber-soft); }
   .kfinding.critical { border-left-color: var(--coral); background: var(--coral-soft); }
-  .kfinding .kf-title { font-weight: 600; font-size: 13px; color: var(--text-strong); margin-bottom: 3px; }
+  .kfinding .kf-title { font-weight: 600; font-size: 13px; color: var(--text-strong); margin-bottom: 5px; }
   .kfinding .kf-detail { font-size: 12.5px; color: var(--text); line-height: 1.55; }
   /* === 执行时间线 === */
   .tl-block {

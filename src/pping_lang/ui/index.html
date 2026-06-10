@@ -867,7 +867,7 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
         <!-- 结果 -->
         <template x-if="deep.result && deep.result.available">
           <div style="margin-top: 14px;">
-            <div x-show="deep.findings.length" style="display: flex; flex-direction: column; gap: 9px; margin-bottom: 14px;">
+            <div x-show="deep.findings.length" style="display: flex; flex-direction: column; gap: 14px; margin-bottom: 20px;">
               <template x-for="(f, i) in deep.findings" :key="i">
                 <div class="kfinding" :class="f.level">
                   <div class="kf-title" x-text="f.title"></div>
