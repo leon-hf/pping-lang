@@ -465,6 +465,7 @@ function dashboard() {
     kernelShowAll: false,        // Kernel 明细表:false=只显示前 N 行
     kernelCollapsed: 10,         // 收起时显示的行数
     kernelExpanded: null,        // 展开看 stall 构成 + 建议的行索引(null=都收起)
+    stallExpanded: null,         // Deep Evidence:展开看某 stall 类的原始 PerfWorks reason 名
     timeline: null,              // 执行时间线(最近 N 条 kernel 的 start/end/stream)
     tlFrozen: false,             // 冻结:停 2s 刷新,便于缩放/读
     tlPxPerMs: null,             // 时间线缩放:每毫秒像素;null=适应容器宽度
@@ -623,6 +624,41 @@ function dashboard() {
       if (ds === 'exec_dependency')
         return '指令延迟为主,通常由 kernel 内部结构决定,优化空间有限。';
       return '';
+    },
+    // === Deep Evidence(全局 / warp 效率 / 方法论)辅助 ===
+    // Warp 周期三态(占全部样本):发指令 / 就绪未选中(余量) / 真 stall(在等)
+    warpSplit() {
+      const r = this.deep.result;
+      if (!r || !r.available) return null;
+      const issued = r.issued_pct || 0;
+      const slackShare = ((r.stall_shares || []).find(s => s.cls === 'scheduler_slack') || {}).pct || 0;
+      const slack = slackShare * (100 - issued) / 100;   // slack 是"占 stall",换算回占全部
+      const stall = Math.max(0, 100 - issued - slack);
+      return { issued, slack, stall };
+    },
+    // 每个 stall 语义类一句话含义
+    stallMeaning(cls) {
+      return {
+        memory_dependency: '等全局/本地内存的数据返回(long scoreboard)',
+        shared_dependency: '等共享内存 / L1(short scoreboard)',
+        memory_throttle: '访存指令排队、内存子系统被打满',
+        math_pipe: '计算管线忙(Tensor / ALU / FMA),接近算力上限',
+        exec_dependency: '等前一条指令的结果(指令间依赖)',
+        sync: '在 barrier / membar 等其他线程',
+        fetch_control: '等取指 / 分支决议',
+        dispatch: '发射端口受限',
+        scheduler_slack: '有就绪 warp 但本周期没被选中(占用率有余量,非瓶颈)',
+        other: '其它 / 杂项',
+      }[cls] || '';
+    },
+    // 原始 PerfWorks reason 名:去掉公共前缀,留语义后缀(给专家看真实指标名)
+    prettyReason(raw) {
+      if (!raw) return '';
+      return raw
+        .replace(/^smsp__pcsamp_warps_issue_stalled_/, '')
+        .replace(/^smsp__pcsamp_warps_issue_/, '')
+        .replace(/^smsp__pcsamp_/, '')
+        .replace(/^smsp__/, '');
     },
 
     // stall 语义类 → 中文标签 / 颜色(Deep Evidence 分解条)

@@ -364,6 +364,8 @@ class StallAggregator:
         self._total = 0
         # per-kernel:kernel → {语义类/issued → 样本, "_total" → 样本}
         self._kernel: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+        # 语义类 → {原始 PerfWorks reason 名 → 样本}(专家下钻用,保留归并前的真实指标名)
+        self._reasons: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
         self._has_data = False
 
     @property
@@ -382,6 +384,7 @@ class StallAggregator:
                     self._issued += s.samples
                 else:
                     self._cat_samples[cat] += s.samples
+                self._reasons[cat][s.reason] += s.samples  # 留住原始 reason 名
                 k = self._kernel[s.kernel]
                 k[cat] += s.samples
                 k["_total"] += s.samples
@@ -454,6 +457,22 @@ class StallAggregator:
             ]
             shares.sort(key=lambda d: d["time_pct"], reverse=True)
             return shares
+
+    def stall_reason_detail(self, top_per_class: int = 6) -> dict[str, list[dict[str, Any]]]:
+        """每个语义类底下的原始 PerfWorks stall reason 名 + 样本(专家下钻)。
+        排除 issued(非 stall)。每类按样本降序取 top。"""
+        with self._lock:
+            out: dict[str, list[dict[str, Any]]] = {}
+            for cls, reasons in self._reasons.items():
+                if cls == "issued":
+                    continue
+                rows = sorted(
+                    ({"reason": r, "samples": n} for r, n in reasons.items()),
+                    key=lambda d: d["samples"], reverse=True,
+                )
+                if rows:
+                    out[cls] = rows[:top_per_class]
+            return out
 
 
 # === 火焰图聚合(on-demand 深度模式) ==================================
@@ -1236,7 +1255,8 @@ class PcSamplingController:
             agg.add(self._lib.drain())  # 收尾再 drain 一次
             getdata_ms, dropped, hwfull = self._lib.overhead()
             table = agg.kernel_stall_table(self._top_n)
-            class_shares = agg.kernel_class_shares()  # 须在 snapshot_and_reset(清零)之前取
+            class_shares = agg.kernel_class_shares()    # 须在 snapshot_and_reset(清零)之前取
+            reason_detail = agg.stall_reason_detail()   # 同上,清零前取原始 reason 名
             stats = agg.snapshot_and_reset()
             shares = sorted(
                 ({"cls": cls, "pct": stats[STALL_CLASS_TO_METRIC[cls]]} for cls in STALL_CLASSES),
@@ -1250,6 +1270,7 @@ class PcSamplingController:
                 "issued_pct": stats[M.KERNEL_STALL_ISSUED_PCT],
                 "stall_shares": shares,
                 "kernel_class_shares": class_shares,
+                "reason_detail": reason_detail,
                 "kernel_table": table,
                 "overhead": {"getdata_ms": getdata_ms, "dropped": dropped, "hwfull": hwfull},
                 "error": None,
