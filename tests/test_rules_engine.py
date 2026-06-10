@@ -207,6 +207,9 @@ def test_engine_bg_thread_runs(db_with_metrics):
         eval_interval_s=0.05, suppression_window_s=0, print_to_terminal=False,
     )
     engine.start()
-    time.sleep(0.15)  # let it tick at least twice
+    # 等后台线程至少跳两次;轮询(最多 ~2s)而非固定 sleep,机器负载高时也不抖
+    deadline = time.time() + 2.0
+    while engine.eval_count < 2 and time.time() < deadline:
+        time.sleep(0.02)
     engine.stop()
     assert engine.eval_count >= 2
