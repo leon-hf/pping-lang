@@ -399,6 +399,10 @@ class StallAggregator:
         这样"主导"指的是真正值得动手的 stall。按总样本降序。
         """
         with self._lock:
+            # 总样本数:PC sampling 按固定周期采样,故某 kernel 的样本数 ∝ 它占用的 GPU
+            # 时间。time_pct = 该 kernel 样本 / 全部样本 = 这个 kernel 的 GPU 时间占比
+            # (采样估计,非精确 μs)。这让同一次采样既给"为什么慢",也给"时间花在哪"。
+            grand_total = sum(c.get("_total", 0) for c in self._kernel.values())
             rows: list[dict[str, Any]] = []
             for kname, cats in self._kernel.items():
                 ktotal = cats.get("_total", 0)
@@ -417,6 +421,7 @@ class StallAggregator:
                 rows.append({
                     "kernel": kname,
                     "samples": ktotal,
+                    "time_pct": (100.0 * ktotal / grand_total) if grand_total else 0.0,
                     "stall_samples": stall_total,
                     "dominant_stall": dom,
                     "dominant_pct": dom_pct,
