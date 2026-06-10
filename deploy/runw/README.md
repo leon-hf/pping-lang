@@ -19,9 +19,9 @@ bash deploy/runw/stop.sh            # 看完停掉,释放 GPU
 ## 它做了什么
 
 1. **CI**:本地 `pytest -q`,绿了才继续。
-2. **push**:当前分支推 GitHub。
-3. **runw**(`remote_deploy.sh`):`git reset --hard` 同步 → 重建容器(挂 repo→/work、
-   **本地模型目录→/models**)→ `build_so.sh` 编 .so → 装 duckdb → 起 dashboard(注入+pre-warm)。
+2. **sync**:`tar over ssh` 把工作树直接同步到 runw(**不走 GitHub**,commit 与否都行)。
+3. **runw**(`remote_deploy.sh`):重建容器(挂 repo→/work、**本地模型目录→/models**)→
+   `build_so.sh` 编 .so → 装 duckdb → 起 dashboard(注入+pre-warm)。
 4. **wait + verify**:轮询就绪 → POST 取证确认出真数据 → 打印 URL。
 
 ## 设计要点 / 踩过的坑(都已固化在脚本里)
@@ -41,6 +41,6 @@ bash deploy/runw/stop.sh            # 看完停掉,释放 GPU
 
 ## 前置
 
-- 本机:`ssh runw` 通(`~/.ssh/config` 配好)、git 能 push、python 能跑 pytest。
-- runw:Docker + `vllm/vllm-openai` 镜像 + GPU(`--gpus all`)+ 能拉 GitHub/modelscope。
+- 本机:`ssh runw` 通(`~/.ssh/config` 配好)、有 `tar`、python 能跑 pytest。**不需要 GitHub**。
+- runw:Docker + `vllm/vllm-openai` 镜像 + GPU(`--gpus all`)+ 能连 modelscope(下模型)。
 - 目标机:GPU 性能计数器权限已开(见上)。

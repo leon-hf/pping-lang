@@ -28,9 +28,15 @@ if [ "$RUN_TESTS" = "1" ]; then
   ( cd "$ROOT" && python -m pytest -q ) || { echo "[ci] 测试失败,中止部署。RUN_TESTS=0 可跳过。"; exit 1; }
 fi
 
-# 2) 推代码(runw 从 GitHub 拉同一 commit)
-echo "[git] push origin $BRANCH"
-git -C "$ROOT" push origin "$BRANCH"
+# 2) 同步工作树到 runw —— 直接 tar over ssh,不走 GitHub(commit 与否都行)
+echo "[sync] 推工作树 -> $RUNW:$REPO(不走 GitHub)..."
+ssh "$RUNW" "mkdir -p '$REPO'"
+tar czf - -C "$ROOT" \
+  --exclude=.git --exclude=_scratch --exclude=_design-notes \
+  --exclude=__pycache__ --exclude=.pytest_cache --exclude=node_modules \
+  --exclude='*.duckdb' --exclude='*.so' . \
+  | ssh "$RUNW" "tar xzf - -C '$REPO'"
+echo "[sync] 完成"
 
 # 3) runw 上部署(把配置变量注入到 remote_deploy.sh 前面再喂给远端 bash)
 {
@@ -51,16 +57,24 @@ for i in $(seq 1 90); do
 done
 [ "$ready" = 1 ] || echo "[warn] 未在 ~7.5min 内就绪;查:ssh $RUNW docker exec pdash tail -30 /tmp/dash.log"
 
-# 5) 验证 + 发布 URL
+# 5) 验证 + 发布 URL(重试几次:pre-warm 刚完、首个窗口 drain 完前 POST 可能慢)
 echo "[verify] POST deep_evidence ..."
-curl -s --noproxy '*' --max-time 25 -X POST "$URL/api/kernels/deep_evidence?window=5" \
-  | python3 -c "import sys,json
-d=json.load(sys.stdin)
-ok=d.get('available'); st=d.get('stall_shares') or []
-print('  available=%s  sample_total=%d' % (ok, int(d.get('sample_total') or 0)))
-if st: print('  top stall: %s %.1f%%' % (st[0]['cls'], st[0]['pct']))
-if not ok: print('  ⚠ PC sampling 不可用 —— 多半是 GPU 性能计数器权限没开(NVIDIA 控制面板/NVIDIA App → 开发者 → 允许所有用户),开了重跑即可')
-" 2>/dev/null || echo "  (取数失败,可能仍在 warmup;稍后刷新页面)"
+for vtry in 1 2 3 4; do
+  resp=$(curl -s --noproxy '*' --max-time 25 -X POST "$URL/api/kernels/deep_evidence?window=5" 2>/dev/null || true)
+  line=$(printf '%s' "$resp" | python3 -c "import sys,json
+try: d=json.load(sys.stdin)
+except Exception: print('RETRY'); sys.exit(0)
+st=d.get('stall_shares') or []
+if not d.get('available'): print('NOPERM'); sys.exit(0)
+top=(' | top: %s %.1f%%' % (st[0]['cls'], st[0]['pct'])) if st else ''
+print('OK available=True sample_total=%d%s' % (int(d.get('sample_total') or 0), top))
+" 2>/dev/null || echo RETRY)
+  case "$line" in
+    OK*)    echo "  $line"; break;;
+    NOPERM) echo "  ⚠ PC sampling 不可用 —— GPU 性能计数器权限没开(NVIDIA 控制面板/App → 开发者 → 允许所有用户),开了重跑"; break;;
+    *)      [ "$vtry" = 4 ] && echo "  (暂未拿到数据;可能仍在 warmup,打开页面 Kernel tab 会自动取证)" || sleep 5;;
+  esac
+done
 
 echo ""
 echo "============================================================"

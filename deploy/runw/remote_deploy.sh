@@ -1,16 +1,11 @@
-# 在 runw 上执行(由 deploy.sh 在前面注入 BRANCH/IMAGE/REPO/MODELS/PORT/MODEL/GPU_NAME 变量)。
-# 不要单独跑这个文件。
+# 在 runw 上执行(由 deploy.sh 在前面注入 IMAGE/REPO/MODELS/PORT/MODEL/GPU_NAME 变量)。
+# 代码已由 deploy.sh 用 tar over ssh 直接同步到 $REPO(不走 GitHub)。不要单独跑这个文件。
 set -e
-REPO_PARENT=$(dirname "$REPO")
-mkdir -p "$REPO_PARENT" "$MODELS"
+mkdir -p "$MODELS"
 
-# 1) 同步代码(runw 从 GitHub 拉)
-if [ -d "$REPO/.git" ]; then
-  cd "$REPO"; git fetch -q origin "$BRANCH"; git checkout -q "$BRANCH"; git reset -q --hard "origin/$BRANCH"
-else
-  git clone -q -b "$BRANCH" https://github.com/leon-hf/pping-lang.git "$REPO"
-fi
-echo "[runw] repo @ $(git -C "$REPO" rev-parse --short HEAD) ($BRANCH)"
+# 1) 代码已同步,确认在
+[ -f "$REPO/deploy/runw/build_so.sh" ] || { echo "FATAL: $REPO 没同步到位"; exit 1; }
+echo "[runw] 使用已同步工作树 @ $REPO"
 
 # 2) (重)建容器:挂 repo→/work、本地模型目录→/models(模型缓存持久,免每次重下)
 docker rm -f pdash >/dev/null 2>&1 || true
