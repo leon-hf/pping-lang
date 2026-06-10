@@ -11,7 +11,11 @@ Day 3 status：完整数据流通了。
 - PPING_LANG_INSTANCE_ID          默认 local-{engine_index}
 - PPING_LANG_NVML_INTERVAL_S      默认 0.1（NVML 采样间隔，秒）
 - PPING_LANG_DISABLE_NVML         设为 1 关闭 NVML 采样
-- PPING_LANG_ENABLE_CUPTI         设为 1 开启 CUPTI kernel 级采集（默认关；仅 Linux x86_64/aarch64）
+- PPING_LANG_ENABLE_PCS           设为 1 开启 PC sampling（Deep Evidence,采样实测;长期主干）。
+                                  需 .so 注入(CUDA_INJECTION64_PATH)+ 单进程
+                                  (VLLM_ENABLE_V1_MULTIPROCESSING=0)。与 CUPTI 互斥,优先。
+- PPING_LANG_PCS_PERIOD_LOG2      PC sampling 采样周期 log2(默认 12 = 每 4096 cycle)
+- PPING_LANG_ENABLE_CUPTI         设为 1 开启 CUPTI Activity kernel 级采集（默认关；仅 Linux x86_64/aarch64;PCS 未开时才用）
 - PPING_LANG_CUPTI_ROLLUP_S       默认 1.0（CUPTI kernel 指标 roll-up 间隔，秒）
 - PPING_LANG_CUPTI_TOP_N          默认 100（每窗保留的 per-kernel 明细行数上限）
 - PPING_LANG_FLUSH_INTERVAL_S     默认 5.0（Sink → DuckDB 批量写间隔）
@@ -223,8 +227,30 @@ class PpingLangStatLogger(StatLoggerBase):
             self._nvml.start()
             atexit.register(self._nvml.stop)
 
-        # 4b) CUPTI kernel 级采集（opt-in，默认关；Linux-only，非 Linux 自动降级 no-op）
-        if os.environ.get("PPING_LANG_ENABLE_CUPTI") == "1":
+        # 4b) Kernel 级采集（opt-in，默认关）—— 两条**硬件互斥**的路(Activity 与 PC
+        #     sampling 抢同一套性能计数器,不能同时开):
+        #       PPING_LANG_ENABLE_PCS=1   → PC sampling(Deep Evidence,采样实测;长期主干)
+        #       PPING_LANG_ENABLE_CUPTI=1 → CUPTI Activity(精确 μs;可选,PCS 未开时才用)
+        #     PC sampling 需 .so 注入(CUDA_INJECTION64_PATH,驱动 cuInit 时加载)+ 采集须与
+        #     引擎**同进程**:多进程 serve 下插件在前端进程、碰不到 EngineCore 的 kernel,
+        #     故单进程(VLLM_ENABLE_V1_MULTIPROCESSING=0)才生效。详见设计 §11/§12。
+        if os.environ.get("PPING_LANG_ENABLE_PCS") == "1":
+            from pping_lang.collector.cupti import FakeActivitySource  # noqa: PLC0415
+            from pping_lang.engine_pcs import FilePcSampling  # noqa: PLC0415
+            # 多进程 serve:本进程(前端 stat_logger)没有 CUDA context、不能本地采样。
+            # 真采集由 EngineCore 进程的 general_plugin(engine_pcs.init_engine_pcs)做,
+            # 把每窗结果写共享文件;这里只读文件喂 Deep Evidence。单进程时两者同进程也成立。
+            pcs = FilePcSampling()
+            self._cupti = CuptiKernelCollector(
+                self._sink,
+                engine_index=self.engine_index,
+                source=FakeActivitySource(available=False),
+                pc_sampling=pcs,
+            )
+            logger.info(
+                "[pping-lang] PC sampling: 前端读共享结果文件(EngineCore general_plugin 采集)",
+            )
+        elif os.environ.get("PPING_LANG_ENABLE_CUPTI") == "1":
             rollup_s = float(os.environ.get("PPING_LANG_CUPTI_ROLLUP_S", "1.0"))
             top_n = int(os.environ.get("PPING_LANG_CUPTI_TOP_N", "100"))
             self._cupti = CuptiKernelCollector(
