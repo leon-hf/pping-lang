@@ -846,7 +846,7 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
         <div class="head" style="display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;">
           <div>
             <h3>🔬 Deep Evidence — 为什么慢 <span style="color: var(--muted-2); font-weight: 400; font-size: 12px;">PC Sampling 取证 · 按需短窗</span></h3>
-            <div style="margin-top: 4px; font-size: 11.5px; color: var(--muted-2);">always-on 给你"哪类 kernel 慢";这里短时间开 PC Sampling 取 stall 证据,回答"<strong>为什么</strong>慢"(访存依赖 / 计算管线 / 同步 …)</div>
+            <div style="margin-top: 4px; font-size: 11.5px; color: var(--muted-2);">上面看"哪个 kernel";这里看<strong>整体</strong>:warp 周期都花哪了、全局卡在什么 stall、以及这些数是怎么测出来的</div>
           </div>
           <div>
             <button class="btn" :disabled="deep.running" @click="runDeepEvidence(5)">
@@ -876,41 +876,68 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
               </template>
             </div>
 
+            <!-- #1 Warp 周期三态:发指令 / 就绪未选中(余量) / 真 stall -->
+            <template x-if="warpSplit()">
+              <div style="margin-bottom: 18px;">
+                <div style="font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 8px;">
+                  Warp 周期去向 <span style="font-weight: 400; text-transform: none;">· 占全部 <span x-text="fmt(deep.result.sample_total, 0)"></span> 样本</span>
+                </div>
+                <div style="display: flex; height: 18px; border-radius: 5px; overflow: hidden; background: #e9ebee;">
+                  <div :style="`width:${warpSplit().issued}%;background:#0d8b80`" :title="`发射指令 ${fmt(warpSplit().issued,1)}%`"></div>
+                  <div :style="`width:${warpSplit().slack}%;background:#9bb04f`" :title="`就绪未选中 ${fmt(warpSplit().slack,1)}%`"></div>
+                  <div :style="`width:${warpSplit().stall}%;background:#be1556`" :title="`真 stall ${fmt(warpSplit().stall,1)}%`"></div>
+                </div>
+                <div style="display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 9px; font-size: 11.5px; color: var(--muted);">
+                  <span style="display: inline-flex; align-items: center; gap: 5px;"><span style="width:9px;height:9px;border-radius:2px;background:#0d8b80;display:inline-block;"></span>发射指令(干活) <strong style="color: var(--text);" x-text="fmt(warpSplit().issued,1)+'%'"></strong></span>
+                  <span style="display: inline-flex; align-items: center; gap: 5px;"><span style="width:9px;height:9px;border-radius:2px;background:#9bb04f;display:inline-block;"></span>就绪未选中(占用率有余量) <strong style="color: var(--text);" x-text="fmt(warpSplit().slack,1)+'%'"></strong></span>
+                  <span style="display: inline-flex; align-items: center; gap: 5px;"><span style="width:9px;height:9px;border-radius:2px;background:#be1556;display:inline-block;"></span>真 stall(在等) <strong style="color: var(--text);" x-text="fmt(warpSplit().stall,1)+'%'"></strong></span>
+                </div>
+                <div style="margin-top: 7px; font-size: 11.5px; color: var(--muted);"
+                     x-text="warpSplit().stall >= 60 ? '→ 大量周期在真 stall:延迟瓶颈,看下面卡在什么' : (warpSplit().slack >= 30 ? '→ 有就绪 warp 没被选中:占用率充足,瓶颈不在并行度' : '→ 发射占比较高:GPU 比较忙碌')"></div>
+              </div>
+            </template>
+
+            <!-- #2 全局 stall 构成(点行展开 → #4 原始 PerfWorks reason)-->
             <div style="font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 8px;">
-              stall 分解 <span style="font-weight: 400; text-transform: none;">· 占 stall 样本(共 <span x-text="fmt(deep.result.sample_total, 0)"></span> 样本,issued <span x-text="fmt(deep.result.issued_pct, 0)"></span>%)</span>
+              stall 分解 <span style="font-weight: 400; text-transform: none;">· 占 stall 样本(= 全部 − issued)· 点行看原始硬件指标名</span>
             </div>
-            <div style="display: flex; flex-direction: column; gap: 6px;">
+            <div style="display: flex; flex-direction: column; gap: 9px;">
               <template x-for="s in deep.result.stall_shares.filter(x => x.pct >= 0.5)" :key="s.cls">
-                <div style="display: flex; align-items: center; gap: 10px;">
-                  <div style="width: 150px; font-size: 12px; color: var(--muted);" x-text="stallLabel(s.cls)"></div>
-                  <div style="flex: 1; background: #e9ebee; border-radius: 4px; height: 16px; overflow: hidden;">
-                    <div :style="`width:${Math.min(100, s.pct)}%;height:100%;background:${stallColor(s.cls)}`"></div>
+                <div>
+                  <div @click="stallExpanded = (stallExpanded === s.cls ? null : s.cls)"
+                       :style="`display:flex;align-items:center;gap:10px;${(deep.result.reason_detail && deep.result.reason_detail[s.cls]) ? 'cursor:pointer' : ''}`">
+                    <div style="width: 160px; font-size: 12px; color: var(--muted);">
+                      <span x-text="stallLabel(s.cls)"></span>
+                      <span style="color: var(--muted-2);" x-text="(deep.result.reason_detail && deep.result.reason_detail[s.cls]) ? (stallExpanded === s.cls ? '▴' : '▾') : ''"></span>
+                    </div>
+                    <div style="flex: 1; background: #e9ebee; border-radius: 4px; height: 16px; overflow: hidden;">
+                      <div :style="`width:${Math.min(100, s.pct)}%;height:100%;background:${stallColor(s.cls)}`"></div>
+                    </div>
+                    <div style="width: 48px; text-align: right; font-size: 12px; font-variant-numeric: tabular-nums;" x-text="fmt(s.pct, 1) + '%'"></div>
                   </div>
-                  <div style="width: 48px; text-align: right; font-size: 12px; font-variant-numeric: tabular-nums;" x-text="fmt(s.pct, 1) + '%'"></div>
+                  <div x-show="stallMeaning(s.cls)" style="margin: 3px 0 0 170px; font-size: 11px; color: var(--muted-2);" x-text="stallMeaning(s.cls)"></div>
+                  <!-- #4 原始 PerfWorks reason 下钻 -->
+                  <div x-show="stallExpanded === s.cls && deep.result.reason_detail && deep.result.reason_detail[s.cls]"
+                       style="margin: 7px 0 2px 170px; display: flex; flex-direction: column; gap: 3px;">
+                    <template x-for="rd in (deep.result.reason_detail[s.cls] || [])" :key="rd.reason">
+                      <div style="display: flex; gap: 10px; font-size: 11px; font-family: ui-monospace, Consolas, monospace;">
+                        <span style="color: var(--text);" x-text="prettyReason(rd.reason)" :title="rd.reason"></span>
+                        <span style="color: var(--muted-2);" x-text="fmt(rd.samples, 0) + ' 样本'"></span>
+                      </div>
+                    </template>
+                  </div>
                 </div>
               </template>
             </div>
 
-            <div x-show="deep.result.kernel_table && deep.result.kernel_table.length" style="margin-top: 16px;">
-              <div style="font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 8px;">per-kernel stall 画像</div>
-              <table class="kernel-table">
-                <thead><tr><th>kernel</th><th style="text-align:right;">GPU时间</th><th style="text-align:right;">样本</th><th>主导 stall</th><th style="text-align:right;">占比</th></tr></thead>
-                <tbody>
-                  <template x-for="(k, i) in deep.result.kernel_table.slice(0, 12)" :key="i">
-                    <tr>
-                      <td style="font-family: ui-monospace, monospace; font-size: 11px;" x-text="k.kernel"></td>
-                      <td style="text-align:right; font-weight:600;" x-text="fmt(k.time_pct, 1) + '%'"></td>
-                      <td style="text-align:right;" x-text="fmt(k.samples, 0)"></td>
-                      <td><span :style="`color:${stallColor(k.dominant_stall)};font-weight:600`" x-text="stallLabel(k.dominant_stall)"></span></td>
-                      <td style="text-align:right;" x-text="fmt(k.dominant_pct, 0) + '%'"></td>
-                    </tr>
-                  </template>
-                </tbody>
-              </table>
-            </div>
-
-            <div style="margin-top: 12px; font-size: 11px; color: var(--muted-2);">
-              取证窗 <span x-text="fmt(deep.result.window_s, 0)"></span>s · GetData 累计 <span x-text="fmt(deep.result.overhead.getdata_ms, 1)"></span>ms · 丢样 <span x-text="deep.result.overhead.dropped"></span> · HW满 <span x-text="deep.result.overhead.hwfull"></span>
+            <!-- #3 测量方法卡:怎么测的 + 代价 -->
+            <div style="margin-top: 18px; padding: 11px 14px; background: var(--surface-alt); border-radius: 8px; font-size: 11.5px; color: var(--muted); line-height: 1.7;">
+              <strong style="color: var(--text); font-weight: 600;">怎么测的</strong> ·
+              采样周期 每 <span x-text="Math.pow(2, deep.result.period_log2).toLocaleString()"></span> cycle 一次(2<sup x-text="deep.result.period_log2"></sup>) ·
+              本窗 <span x-text="fmt(deep.result.window_s, 0)"></span>s 采到 <strong style="color: var(--text);" x-text="fmt(deep.result.sample_total, 0)"></strong> 样本 ·
+              GetData 累计开销 <span x-text="fmt(deep.result.overhead.getdata_ms, 1)"></span>ms ·
+              丢样 <span x-text="deep.result.overhead.dropped"></span> · HW 缓冲满 <span x-text="deep.result.overhead.hwfull"></span> 次 ·
+              <span style="color: var(--muted-2);">GPU 硬件采样,无需 Nsight、不停服务</span>
             </div>
           </div>
         </template>
