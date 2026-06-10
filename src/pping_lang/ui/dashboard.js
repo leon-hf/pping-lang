@@ -503,9 +503,9 @@ function dashboard() {
     kernelLabel(cls) {
       return {
         attention: 'Attention', gemm: 'GEMM', norm: 'Norm',
-        rotary: 'Rotary', activation: 'Activation', comm: '通信 (NCCL)',
-        elementwise: '逐元素', sampling: '采样/解码', index: '索引查表',
-        other: '其它',
+        rotary: 'Rotary', activation: 'Activation', comm: 'Comm (NCCL)',
+        elementwise: 'Elementwise', sampling: 'Sampling', index: 'Index/Gather',
+        other: 'Other',
       }[cls] || cls;
     },
     // === Kernel tab 诊断辅助(全部从 deep.result 现有数据推导,无需后端)===
@@ -516,49 +516,49 @@ function dashboard() {
       if (cls === 'gemm') {
         if (has('cutlass') && has('wmma')) return 'GEMM · cutlass WMMA TensorOp';
         if (has('cutlass')) return 'GEMM · cutlass TensorOp';
-        if (has('splitkreduce')) return 'GEMM · cuBLAS splitK 归约';
+        if (has('splitkreduce')) return 'GEMM · cuBLAS splitK reduce';
         if (has('cublas')) return 'GEMM · cuBLAS';
-        return 'GEMM 矩阵乘';
+        return 'GEMM (matmul)';
       }
       if (cls === 'attention') {
-        if (has('splitkv')) return 'Attention · FlashAttention(split-KV)';
+        if (has('splitkv')) return 'Attention · FlashAttention (split-KV)';
         if (has('flash')) return 'Attention · FlashAttention';
-        if (has('reshape_and_cache')) return 'Attention · 写 KV cache';
+        if (has('reshape_and_cache')) return 'Attention · KV-cache write';
         if (has('paged')) return 'Attention · PagedAttention';
-        return '注意力';
+        return 'Attention';
       }
       if (cls === 'norm') {
-        if (has('fused_add_rms')) return 'Norm · fused add+RMSNorm';
+        if (has('fused_add_rms')) return 'Norm · fused add + RMSNorm';
         if (has('rms')) return 'Norm · RMSNorm';
         if (has('layernorm') || has('layer_norm')) return 'Norm · LayerNorm';
-        return '归一化';
+        return 'Norm';
       }
-      if (cls === 'rotary') return 'RoPE 旋转位置编码';
+      if (cls === 'rotary') return 'RoPE (rotary embedding)';
       if (cls === 'activation') {
         if (has('act_and_mul') || has('silu')) return 'Activation · SiLU×Mul';
         if (has('gelu')) return 'Activation · GELU';
-        return '激活函数';
+        return 'Activation';
       }
       if (cls === 'sampling') {
-        if (has('softmax')) return '采样 · Softmax';
-        if (has('argmax')) return '采样 · ArgMax(贪心)';
-        if (has('exponential') || has('distribution')) return '采样 · 随机采样';
-        if (has('topk') || has('top_k')) return '采样 · Top-K';
-        return '采样/解码';
+        if (has('softmax')) return 'Sampling · Softmax';
+        if (has('argmax')) return 'Sampling · ArgMax (greedy)';
+        if (has('exponential') || has('distribution')) return 'Sampling · random sample';
+        if (has('topk') || has('top_k')) return 'Sampling · Top-K';
+        return 'Sampling';
       }
       if (cls === 'index') {
-        if (has('gather')) return '索引 · gather 聚集';
-        if (has('index')) return '索引 · indexSelect 查表';
-        return '索引/查表';
+        if (has('gather')) return 'Index · gather';
+        if (has('index')) return 'Index · indexSelect';
+        return 'Index/Gather';
       }
       if (cls === 'elementwise') {
-        if (has('direct_copy') || has('copy')) return '逐元素 · 拷贝/类型转换';
-        if (has('div')) return '逐元素 · 除法';
-        if (has('add')) return '逐元素 · 加法';
-        if (has('mul')) return '逐元素 · 乘法';
-        return '逐元素';
+        if (has('direct_copy') || has('copy')) return 'Elementwise · copy/cast';
+        if (has('div')) return 'Elementwise · div';
+        if (has('add')) return 'Elementwise · add';
+        if (has('mul')) return 'Elementwise · mul';
+        return 'Elementwise';
       }
-      if (cls === 'comm') return '通信 (NCCL)';
+      if (cls === 'comm') return 'Comm (NCCL)';
       return this.kernelLabel(cls);
     },
     // #3 这个 kernel 浪费的"全局 GPU 时间"= 时间占比 × 它内部 stall 比例
