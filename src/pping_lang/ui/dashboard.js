@@ -51,8 +51,8 @@ function _makeRooflineChart(ctx) {
           pointRadius: 0, fill: 'origin', backgroundColor: 'rgba(81, 71, 200, 0.06)', tension: 0, order: 2,
         },
         {
-          // 调优地图:decode 的算术强度≈并发数 → 扩并发沿带宽上界向右爬,拐点撞算力墙
-          label: '并发扩展轨迹', data: [], showLine: true, borderColor: '#a8998a',
+          // 调优地图:decode 的算术强度≈batch → 扩 batch 沿带宽上界向右爬,ridge point 后 compute-bound
+          label: 'batch scaling envelope', data: [], showLine: true, borderColor: '#a8998a',
           borderDash: [5, 4], borderWidth: 1.5, pointRadius: 3.5, pointStyle: 'rectRot',
           backgroundColor: '#a8998a', fill: false, order: 4,
         },
@@ -73,8 +73,8 @@ function _makeRooflineChart(ctx) {
                 const n = ctx.raw && ctx.raw.n > 1 ? [`合并 ${ctx.raw.n} 个 step`] : [];
                 return [`AI:  ${ctx.parsed.x.toFixed(2)} FLOPs/byte`, `TPut: ${ctx.parsed.y.toFixed(1)} TFLOPs/s`, ...n];
               }
-              if (ds === '并发扩展轨迹') {
-                return `并发≈${ctx.raw.b}:带宽上界 ${ctx.parsed.y.toFixed(1)} TFLOPs/s`;
+              if (ds === 'batch scaling envelope') {
+                return `B=${ctx.raw.b}: bandwidth-bound 上界 ${ctx.parsed.y.toFixed(1)} TFLOPs/s`;
               }
               return `${ds}: ${ctx.parsed.y.toFixed(1)} TFLOPs/s`;
             },
@@ -123,7 +123,7 @@ function _applyRooflineData(chart, data) {
   // 其余里 x 明显更大的标 prefill
   if (agg.length) {
     const dec = agg.reduce((a, p) => (p.n > a.n ? p : a));
-    dec.label = '★ 你在这 · decode';
+    dec.label = 'decode · operating point';
     dec.labelBold = true;
     dec.labelColor = '#0d8b80';
     const rest = agg.filter(p => p !== dec && p.n > 0);
@@ -141,16 +141,16 @@ function _applyRooflineData(chart, data) {
     const xMin = 0.1, xMax = Math.max(1000, knee * 3);
     chart.data.datasets[1].data = [{ x: knee, y: peakC }, { x: xMax, y: peakC }];
     chart.data.datasets[2].data = [{ x: xMin, y: peakBW * xMin }, { x: knee, y: peakC }];
-    // B:并发扩展轨迹 —— decode 强度≈并发,沿带宽上界标 并发 1→拐点(调优地图)
+    // B:batch scaling envelope —— decode AI≈batch,沿带宽上界标 B=1→ridge point
     const traj = [];
     for (const b of [1, 4, 8, 16, 32, 64, 128, 256, 512]) {
       if (b > knee * 1.1) break;
       traj.push({
         x: b, y: Math.min(peakBW * b, peakC), b,
-        label: [1, 8, 32, 128].includes(b) ? `并发${b}` : '', labelDy: -9, labelColor: '#a8998a',
+        label: [1, 8, 32, 128].includes(b) ? `B=${b}` : '', labelDy: -9, labelColor: '#a8998a',
       });
     }
-    traj.push({ x: knee, y: peakC, b: Math.round(knee), label: '拐点 → 算力墙', labelDy: -9, labelColor: '#dc4d3e' });
+    traj.push({ x: knee, y: peakC, b: Math.round(knee), label: `ridge point (AI=${knee.toFixed(0)})`, labelDy: -9, labelColor: '#dc4d3e' });
     chart.data.datasets[3].data = traj;
   } else {
     chart.data.datasets[1].data = [];
@@ -1055,6 +1055,8 @@ function dashboard() {
           const t32 = Math.min(peakBW * 32, peakC);
           this.rooflineScale = {
             ai: dec.x, cur: dec.y, t32, gain: t32 / dec.y, knee: Math.round(knee),
+            // 该 AI 下的带宽上界利用率(实测吞吐 / envelope 值)
+            bwUtil: Math.min(100, 100 * dec.y / (peakBW * dec.x)),
           };
         }
       }
