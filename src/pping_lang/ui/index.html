@@ -193,26 +193,29 @@
         <div class="kpi coral" :class="{ warn: kpis.ttft_p99_ms > 1000 && kpis.ttft_p99_ms <= 2000, crit: kpis.ttft_p99_ms > 2000 }"
              title="TTFT = Time To First Token
 从用户发送请求到收到第一个生成 token 之间的延迟。
-p99：最坏 1% 的体验值（SLA 红线靠它）。
+大数字 = 窗口内平均（典型水平）；下方分布条 = p50→p95→p99（看尾部恶化,告警颜色按 p99）。
 解读：
   · 主要由 prefill 阶段决定（要处理整个 prompt）
   · 长 prompt / 高并发 / 排队都会拉高 TTFT
   · 用户感觉的「卡了多久才有反应」就是这个
 SLA 常见档：<200ms 即时；<500ms 流畅；<1s 可接受；>2s 用户开始流失。">
-          <div class="label">TTFT p99 <span class="kpi-sub-label">最坏 1% 体验</span></div>
-          <div class="value"><span x-text="fmt(kpis.ttft_p99_ms, 0)"></span><span class="unit">ms</span></div>
-          <div class="sub-line" x-show="kpis.ttft"
-               title="窗口内完成的请求数。样本越多，p99 越可信 — <30 时建议结合 p50/avg 一起看。">
-            p50 <span x-text="fmt(kpis.ttft?.p50, 0)"></span>
-            · p95 <span x-text="fmt(kpis.ttft?.p95, 0)"></span>
-            · avg <span x-text="fmt(kpis.ttft?.avg, 0)"></span>
-            · 请求数 <span x-text="kpis.ttft?.n ?? 0"></span>
+          <div class="label">TTFT 平均 <span class="kpi-sub-label">首 token 延迟 · <span x-text="kpis.ttft?.n ?? 0"></span> 请求</span></div>
+          <div class="value"><span x-text="fmt(kpis.ttft?.avg, 0)"></span><span class="unit">ms</span></div>
+          <div x-show="kpis.ttft && kpis.ttft.p99" title="分位分布:深色 0→p50,中 p50→p95,浅 p95→p99。条整体越短越好,浅色段越长 = 尾部越差。">
+            <div class="pct-bar">
+              <i :style="`width:${pctSeg(kpis.ttft)[0]}%`"></i><i :style="`width:${pctSeg(kpis.ttft)[1]}%`"></i><i :style="`width:${pctSeg(kpis.ttft)[2]}%`"></i>
+            </div>
+            <div class="pct-labels">
+              <span>p50 <b x-text="fmt(kpis.ttft?.p50, 0)"></b></span>
+              <span>p95 <b x-text="fmt(kpis.ttft?.p95, 0)"></b></span>
+              <span>p99 <b x-text="fmt(kpis.ttft?.p99, 0)"></b></span>
+            </div>
           </div>
         </div>
         <div class="kpi rose" :class="{ warn: kpis.tpot_p99_ms > 50 && kpis.tpot_p99_ms <= 100, crit: kpis.tpot_p99_ms > 100 }"
              title="TPOT = Time Per Output Token
 生成每个 token 的平均时间（每次 forward pass 的时长）。
-p99：最坏 1% 的尾延迟。
+大数字 = 窗口内平均；下方分布条 = p50→p95→p99（尾延迟,告警颜色按 p99）。
 解读：
   · 主要由 decode 阶段的带宽决定（要读完一遍权重）
   · 用户感觉的「文字一个个吐出来的快慢」就是这个
@@ -220,15 +223,19 @@ p99：最坏 1% 的尾延迟。
 SLA 常见档：<30ms 流畅；<50ms 可接受；>100ms 明显卡顿。
 ITL fallback：vllm <0.20 不发 TPOT 时，用 iter 间隔近似（语义略不同）。">
           <div class="label">
-            TPOT p99 <span class="kpi-sub-label" x-text="kpis.tpot_source === 'itl' ? '(ITL fallback)' : '每 token 间隔'"></span>
+            TPOT 平均 <span class="kpi-sub-label" x-text="kpis.tpot_source === 'itl' ? '(ITL fallback)' : '每 token 间隔'"></span>
           </div>
-          <div class="value"><span x-text="fmt(kpis.tpot_p99_ms, 0)"></span><span class="unit">ms</span></div>
-          <div class="sub-line" x-show="kpis.tpot"
-               :title="kpis.tpot_source === 'itl' ? '注意：当前 vllm 未发 TPOT，回退到 ITL，此处数字其实是调度 iter 采样数，不是请求数。' : '窗口内完成的请求数。样本越多，p99 越可信 — <30 时建议结合 p50/avg 一起看。'">
-            p50 <span x-text="fmt(kpis.tpot?.p50, 0)"></span>
-            · p95 <span x-text="fmt(kpis.tpot?.p95, 0)"></span>
-            · avg <span x-text="fmt(kpis.tpot?.avg, 0)"></span>
-            · 请求数 <span x-text="kpis.tpot?.n ?? 0"></span>
+          <div class="value"><span x-text="fmt(kpis.tpot?.avg, 0)"></span><span class="unit">ms</span></div>
+          <div x-show="kpis.tpot && kpis.tpot.p99"
+               :title="(kpis.tpot_source === 'itl' ? '注意:当前 vllm 未发 TPOT,回退到 ITL 近似。' : '') + '分位分布:深色 0→p50,中 p50→p95,浅 p95→p99。浅色段越长 = 尾部越差。告警颜色按 p99。'">
+            <div class="pct-bar">
+              <i :style="`width:${pctSeg(kpis.tpot)[0]}%`"></i><i :style="`width:${pctSeg(kpis.tpot)[1]}%`"></i><i :style="`width:${pctSeg(kpis.tpot)[2]}%`"></i>
+            </div>
+            <div class="pct-labels">
+              <span>p50 <b x-text="fmt(kpis.tpot?.p50, 0)"></b></span>
+              <span>p95 <b x-text="fmt(kpis.tpot?.p95, 0)"></b></span>
+              <span>p99 <b x-text="fmt(kpis.tpot?.p99, 0)"></b></span>
+            </div>
           </div>
         </div>
         <div class="kpi teal"
