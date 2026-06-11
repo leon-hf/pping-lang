@@ -2,7 +2,7 @@
 # 在 vLLM 容器里编 libppingcupti.so —— 自动探测 cu12/cu13 布局(换镜像免改)。
 # 产物 /tmp/libppingcupti.so + 把运行期库路径写进 /tmp/pping_env.sh(launch 时 source)。
 set -u
-NAT=/work/native/ppingcupti
+NAT=/work/src/pping_lang/native
 
 # cupti 动态库(libcupti.so.12 或 .13)+ 其所在目录
 CUPTI_LIB=$(find /usr/local/lib/python3*/dist-packages/nvidia -name 'libcupti.so.1*' 2>/dev/null | head -1)
