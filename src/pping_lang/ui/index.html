@@ -576,7 +576,7 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
                   <strong x-text="fmt(issuedVerdict().stall, 0) + '%'"></strong> 的采样周期在<strong>等待 (stall)</strong>,仅 <strong x-text="fmt(issuedVerdict().issued, 0) + '%'"></strong> 在真正发射指令
                 </span>
               </div>
-              <div style="display: flex; height: 14px; border-radius: 4px; overflow: hidden; margin: 10px 0; background: #e9ebee;">
+              <div style="display: flex; height: 14px; border-radius: 4px; overflow: hidden; margin: 10px 0; background: #ececf0;">
                 <div :style="`width:${issuedVerdict().issued}%;background:var(--teal)`" :title="`发射指令 ${fmt(issuedVerdict().issued,0)}%`"></div>
                 <div :style="`width:${issuedVerdict().stall}%;background:${stallColor(bottleneckVerdict().cls)}`" :title="`stall ${fmt(issuedVerdict().stall,0)}%`"></div>
               </div>
@@ -619,7 +619,7 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
                     <td><span class="kcls" :style="`background:${kernelColor(k.cls)}1a;color:${kernelColor(k.cls)}`" x-text="kernelLabel(k.cls)"></span></td>
                     <td style="text-align: right;">
                       <div style="display: flex; align-items: center; gap: 7px; justify-content: flex-end;">
-                        <div style="width: 78px; background: #e9ebee; border-radius: 4px; height: 11px; overflow: hidden;">
+                        <div style="width: 78px; background: #ececf0; border-radius: 4px; height: 11px; overflow: hidden;">
                           <div :style="`width:${Math.min(100, k.time_pct)}%;height:100%;background:var(--teal)`"></div>
                         </div>
                         <span style="font-weight: 600; min-width: 42px; font-variant-numeric: tabular-nums;" x-text="fmt(k.time_pct, 1) + '%'"></span>
@@ -627,7 +627,7 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
                     </td>
                     <td style="text-align: right;">
                       <div style="display: flex; align-items: center; gap: 7px; justify-content: flex-end;">
-                        <div style="width: 78px; background: #e9ebee; border-radius: 4px; height: 11px; overflow: hidden;">
+                        <div style="width: 78px; background: #ececf0; border-radius: 4px; height: 11px; overflow: hidden;">
                           <div :style="`width:${Math.min(100, kernelStallTimePct(k))}%;height:100%;background:${stallColor(k.dominant_stall)}`"></div>
                         </div>
                         <span style="font-weight: 600; min-width: 42px; font-variant-numeric: tabular-nums; color: var(--text);" x-text="fmt(kernelStallTimePct(k), 1) + '%'"></span>
@@ -647,7 +647,7 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
                           <template x-for="ent in Object.entries(k.breakdown || {}).filter(e => e[0] !== 'issued' && e[1] > 0).sort((a, b) => b[1] - a[1]).slice(0, 9)" :key="ent[0]">
                             <div style="display: flex; align-items: center; gap: 8px;">
                               <div style="width: 130px; font-size: 11.5px; color: var(--muted);" x-text="stallLabel(ent[0])"></div>
-                              <div style="flex: 1; background: #e9ebee; border-radius: 3px; height: 12px; overflow: hidden;">
+                              <div style="flex: 1; background: #ececf0; border-radius: 3px; height: 12px; overflow: hidden;">
                                 <div :style="`width:${Math.min(100, 100 * ent[1] / k.samples)}%;height:100%;background:${stallColor(ent[0])}`"></div>
                               </div>
                               <div style="width: 46px; text-align: right; font-size: 11px; font-variant-numeric: tabular-nums;" x-text="fmt(100 * ent[1] / k.samples, 1) + '%'"></div>
@@ -935,15 +935,15 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
                 <div style="font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 8px;">
                   Warp 周期去向 <span style="font-weight: 400; text-transform: none;">· 占全部 <span x-text="fmt(deep.result.sample_total, 0)"></span> 样本</span>
                 </div>
-                <div style="display: flex; height: 18px; border-radius: 5px; overflow: hidden; background: #e9ebee;">
-                  <div :style="`width:${warpSplit().issued}%;background:#0d8b80`" :title="`发射指令 ${fmt(warpSplit().issued,1)}%`"></div>
-                  <div :style="`width:${warpSplit().slack}%;background:#9bb04f`" :title="`就绪未选中 ${fmt(warpSplit().slack,1)}%`"></div>
-                  <div :style="`width:${warpSplit().stall}%;background:#be1556`" :title="`真 stall ${fmt(warpSplit().stall,1)}%`"></div>
+                <div style="display: flex; height: 18px; border-radius: 5px; overflow: hidden; background: #ececf0;">
+                  <div :style="`width:${warpSplit().issued}%;background:#0d9488`" :title="`发射指令 ${fmt(warpSplit().issued,1)}%`"></div>
+                  <div :style="`width:${warpSplit().slack}%;background:#65a30d`" :title="`就绪未选中 ${fmt(warpSplit().slack,1)}%`"></div>
+                  <div :style="`width:${warpSplit().stall}%;background:#d6336c`" :title="`真 stall ${fmt(warpSplit().stall,1)}%`"></div>
                 </div>
                 <div style="display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 9px; font-size: 11.5px; color: var(--muted);">
-                  <span style="display: inline-flex; align-items: center; gap: 5px;"><span style="width:9px;height:9px;border-radius:2px;background:#0d8b80;display:inline-block;"></span>发射指令(干活) <strong style="color: var(--text);" x-text="fmt(warpSplit().issued,1)+'%'"></strong></span>
-                  <span style="display: inline-flex; align-items: center; gap: 5px;"><span style="width:9px;height:9px;border-radius:2px;background:#9bb04f;display:inline-block;"></span>就绪未选中(占用率有余量) <strong style="color: var(--text);" x-text="fmt(warpSplit().slack,1)+'%'"></strong></span>
-                  <span style="display: inline-flex; align-items: center; gap: 5px;"><span style="width:9px;height:9px;border-radius:2px;background:#be1556;display:inline-block;"></span>真 stall(在等) <strong style="color: var(--text);" x-text="fmt(warpSplit().stall,1)+'%'"></strong></span>
+                  <span style="display: inline-flex; align-items: center; gap: 5px;"><span style="width:9px;height:9px;border-radius:2px;background:#0d9488;display:inline-block;"></span>发射指令(干活) <strong style="color: var(--text);" x-text="fmt(warpSplit().issued,1)+'%'"></strong></span>
+                  <span style="display: inline-flex; align-items: center; gap: 5px;"><span style="width:9px;height:9px;border-radius:2px;background:#65a30d;display:inline-block;"></span>就绪未选中(占用率有余量) <strong style="color: var(--text);" x-text="fmt(warpSplit().slack,1)+'%'"></strong></span>
+                  <span style="display: inline-flex; align-items: center; gap: 5px;"><span style="width:9px;height:9px;border-radius:2px;background:#d6336c;display:inline-block;"></span>真 stall(在等) <strong style="color: var(--text);" x-text="fmt(warpSplit().stall,1)+'%'"></strong></span>
                 </div>
                 <div style="margin-top: 7px; font-size: 11.5px; color: var(--muted);"
                      x-text="warpSplit().stall >= 60 ? '→ 大量周期在真 stall:延迟瓶颈,看下面卡在什么' : (warpSplit().slack >= 30 ? '→ 有就绪 warp 没被选中:占用率充足,瓶颈不在并行度' : '→ 发射占比较高:GPU 比较忙碌')"></div>
@@ -963,7 +963,7 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
                       <span x-text="stallLabel(s.cls)"></span>
                       <span style="color: var(--muted-2);" x-text="(deep.result.reason_detail && deep.result.reason_detail[s.cls]) ? (stallExpanded === s.cls ? '▴' : '▾') : ''"></span>
                     </div>
-                    <div style="flex: 1; background: #e9ebee; border-radius: 4px; height: 16px; overflow: hidden;">
+                    <div style="flex: 1; background: #ececf0; border-radius: 4px; height: 16px; overflow: hidden;">
                       <div :style="`width:${Math.min(100, s.pct)}%;height:100%;background:${stallColor(s.cls)}`"></div>
                     </div>
                     <div style="width: 48px; text-align: right; font-size: 12px; font-variant-numeric: tabular-nums;" x-text="fmt(s.pct, 1) + '%'"></div>
