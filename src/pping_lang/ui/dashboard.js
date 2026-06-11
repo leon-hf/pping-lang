@@ -7,10 +7,33 @@ let _kUtilChart = null;    // GPU busy + 同步等待(实时)
 let _kRoofChart = null;    // Kernel tab 里复用的第二个 roofline 图(懒建,与 Overview 同数据)
 let _lastRoofline = null;  // 最近一次 /api/roofline 数据,懒建第二个图时回填
 
+// 在点旁绘制文字标签(簇语义 / 并发标记)—— data 点带 label 字段即画
+const _roofLabelsPlugin = {
+  id: 'roofLabels',
+  afterDatasetsDraw(chart) {
+    const { ctx } = chart;
+    chart.data.datasets.forEach((ds, di) => {
+      const meta = chart.getDatasetMeta(di);
+      if (!meta || meta.hidden) return;
+      ds.data.forEach((p, i) => {
+        if (!p || !p.label || !meta.data[i]) return;
+        const el = meta.data[i];
+        ctx.save();
+        ctx.font = (p.labelBold ? '600 ' : '400 ') + '10.5px Inter, "PingFang SC", sans-serif';
+        ctx.fillStyle = p.labelColor || '#7a6e63';
+        ctx.textAlign = 'left';
+        ctx.fillText(p.label, el.x + 9, el.y + (p.labelDy != null ? p.labelDy : 4));
+        ctx.restore();
+      });
+    });
+  },
+};
+
 // roofline 散点图配置工厂 —— Overview 与 Kernel tab 两个图共用同一份配置
 function _makeRooflineChart(ctx) {
   return new Chart(ctx, {
     type: 'scatter',
+    plugins: [_roofLabelsPlugin],
     data: {
       datasets: [
         {
@@ -26,6 +49,12 @@ function _makeRooflineChart(ctx) {
         {
           label: 'Memory roof', data: [], showLine: true, borderColor: '#5147c8', borderWidth: 2.5,
           pointRadius: 0, fill: 'origin', backgroundColor: 'rgba(81, 71, 200, 0.06)', tension: 0, order: 2,
+        },
+        {
+          // 调优地图:decode 的算术强度≈并发数 → 扩并发沿带宽上界向右爬,拐点撞算力墙
+          label: '并发扩展轨迹', data: [], showLine: true, borderColor: '#a8998a',
+          borderDash: [5, 4], borderWidth: 1.5, pointRadius: 3.5, pointStyle: 'rectRot',
+          backgroundColor: '#a8998a', fill: false, order: 4,
         },
       ],
     },
@@ -43,6 +72,9 @@ function _makeRooflineChart(ctx) {
               if (ds === '当前样本') {
                 const n = ctx.raw && ctx.raw.n > 1 ? [`合并 ${ctx.raw.n} 个 step`] : [];
                 return [`AI:  ${ctx.parsed.x.toFixed(2)} FLOPs/byte`, `TPut: ${ctx.parsed.y.toFixed(1)} TFLOPs/s`, ...n];
+              }
+              if (ds === '并发扩展轨迹') {
+                return `并发≈${ctx.raw.b}:带宽上界 ${ctx.parsed.y.toFixed(1)} TFLOPs/s`;
               }
               return `${ds}: ${ctx.parsed.y.toFixed(1)} TFLOPs/s`;
             },
@@ -87,6 +119,19 @@ function _aggRooflinePoints(raw) {
 function _applyRooflineData(chart, data) {
   if (!chart) return;
   const agg = _aggRooflinePoints((data.points || []).map(p => ({ x: p.ai, y: p.throughput_tflops })));
+  // A:簇语义标签 —— 步数最多的簇 = decode 主体(decode 步数远多于 prefill);
+  // 其余里 x 明显更大的标 prefill
+  if (agg.length) {
+    const dec = agg.reduce((a, p) => (p.n > a.n ? p : a));
+    dec.label = '★ 你在这 · decode';
+    dec.labelBold = true;
+    dec.labelColor = '#0d8b80';
+    const rest = agg.filter(p => p !== dec && p.n > 0);
+    if (rest.length) {
+      const pf = rest.reduce((a, p) => (p.x > a.x ? p : a));
+      if (pf.x > dec.x * 2.5) { pf.label = 'prefill'; pf.labelColor = '#7a6e63'; }
+    }
+  }
   chart.data.datasets[0].data = agg;
   // 点半径 ∝ log(合并步数):单步 4px,几十步 ~10px,封顶 13px
   chart.data.datasets[0].pointRadius = agg.map(p => Math.min(13, 3 + 2.2 * Math.log2(1 + p.n)));
@@ -96,9 +141,21 @@ function _applyRooflineData(chart, data) {
     const xMin = 0.1, xMax = Math.max(1000, knee * 3);
     chart.data.datasets[1].data = [{ x: knee, y: peakC }, { x: xMax, y: peakC }];
     chart.data.datasets[2].data = [{ x: xMin, y: peakBW * xMin }, { x: knee, y: peakC }];
+    // B:并发扩展轨迹 —— decode 强度≈并发,沿带宽上界标 并发 1→拐点(调优地图)
+    const traj = [];
+    for (const b of [1, 4, 8, 16, 32, 64, 128, 256, 512]) {
+      if (b > knee * 1.1) break;
+      traj.push({
+        x: b, y: Math.min(peakBW * b, peakC), b,
+        label: [1, 8, 32, 128].includes(b) ? `并发${b}` : '', labelDy: -9, labelColor: '#a8998a',
+      });
+    }
+    traj.push({ x: knee, y: peakC, b: Math.round(knee), label: '拐点 → 算力墙', labelDy: -9, labelColor: '#dc4d3e' });
+    chart.data.datasets[3].data = traj;
   } else {
     chart.data.datasets[1].data = [];
     chart.data.datasets[2].data = [];
+    chart.data.datasets[3].data = [];
   }
   chart.update('none');
 }
@@ -576,6 +633,7 @@ function dashboard() {
     rooflineParamsB: '0',
     // Verdict card — populated each refresh from the recent points
     rooflineVerdict: null,    // {bound, computeUtil, bwUtil, knee, suggestions[]}
+    rooflineScale: null,      // 调优指引:{ai, cur, t32, gain, knee}(decode 强度≈并发 → 扩并发能到哪)
     ttftHasData: false,
     tpotHasData: false,
     e2eHasData: false,
@@ -987,6 +1045,19 @@ function dashboard() {
       // verdict(roofline 本身不直观,用中位 AI/吞吐 判定,免单点 outlier 翻转结论)
       this.rooflineVerdict = this._computeRooflineVerdict(data);
       _lastRoofline = data;
+      // 调优指引(decode 强度≈并发):当前簇 → 并发32 的带宽上界 → 拐点
+      this.rooflineScale = null;
+      if (data.peak && data.peak.compute_tflops && data.peak.mem_bw_tbs && (data.points || []).length) {
+        const peakC = data.peak.compute_tflops, peakBW = data.peak.mem_bw_tbs, knee = peakC / peakBW;
+        const agg = _aggRooflinePoints(data.points.map(p => ({ x: p.ai, y: p.throughput_tflops })));
+        const dec = agg.length ? agg.reduce((a, p) => (p.n > a.n ? p : a)) : null;
+        if (dec && dec.y > 0 && dec.x < knee) {
+          const t32 = Math.min(peakBW * 32, peakC);
+          this.rooflineScale = {
+            ai: dec.x, cur: dec.y, t32, gain: t32 / dec.y, knee: Math.round(knee),
+          };
+        }
+      }
       _applyRooflineData(_chart, data);        // Overview 的图
       _applyRooflineData(_kRoofChart, data);   // Kernel tab 的图(懒建后才非空)
     },
