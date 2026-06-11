@@ -1009,7 +1009,7 @@ def _default_source(capture_stacks: bool = False) -> KernelActivitySource:
 
 
 class _PpingStallRow(ctypes.Structure):
-    """镜像 native/ppingcupti/ppingcupti.h 的 PpingStallRow(固定 272 字节)。"""
+    """镜像 pping_lang/native/ppingcupti.h 的 PpingStallRow(固定 272 字节)。"""
     _fields_ = [
         ("stall_reason", ctypes.c_uint),
         ("_pad", ctypes.c_uint),

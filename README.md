@@ -74,18 +74,28 @@ python -m examples.embedded.demo
 
 ### 接入 vLLM
 
+**基础接入** —— KPI / Roofline / NVML / 诊断,自动加载,不改任何参数：
+
 ```bash
 pip install pping-lang
 vllm serve <model>
 ```
 
-vLLM 启动日志将输出 dashboard 地址：
+vLLM 启动日志将输出 dashboard 地址 `[pping-lang] dashboard → http://localhost:8765`。
 
-```
-[pping-lang] dashboard → http://localhost:8765
+**完整接入** —— 再加 Kernel 级 PC Sampling（Deep Evidence「为什么慢」）：
+
+```bash
+pip install pping-lang
+pping-vllm serve <model>      # 等价于 vllm serve,额外开启 Kernel 级采集
 ```
 
-无需修改任何 vLLM 启动参数。
+`pping-vllm` 是一层薄包装：首次自动把内置的 CUPTI 注入库（`libppingcupti.so`）在本机**现编**
+（自动探测 cu12/cu13，缓存到 `~/.pping-lang/`），设好注入与采样环境变量，再 `exec vllm serve`
+（透传所有参数）。编不出 `.so`（无 g++ / 无 CUPTI）则**自动降级**为基础接入。
+
+> Kernel 级采集通过 `vllm.general_plugins` 入口在 **EngineCore 进程**驱动 PC sampling、结果跨
+> 进程回流前端 dashboard —— 在**默认多进程 `vllm serve`** 上即可工作,无需单进程。
 
 ---
 
@@ -96,6 +106,7 @@ vLLM 启动日志将输出 dashboard 地址：
 | 标签页 | 内容 |
 |:--|:--|
 | 实时 | 12 项 KPI（TTFT / TPOT / 吞吐 / KV cache / 队列状态 / MFU / GPU 利用 / 显存 / Prefix cache / Padding / 抢占率）；Roofline 散点 + 自动结论；TTFT / TPOT / E2E 时序图。每项 KPI 支持 hover 查看公式与解读 |
+| Kernel | 每个 GPU kernel 的 GPU 时间占比 + 算子分类（GEMM / Attention / …）+ 主导 stall；Roofline 宏观定位；Deep Evidence「为什么慢」（PC Sampling：warp 周期三态 / 全局 stall 分解 / 原始 PerfWorks reason 下钻）。需 `pping-vllm` 完整接入 |
 | 规则 | 阈值与 condition 可视化编辑；「测试当前数据」按钮预览触发结果；保存后热加载，不需要重启 vLLM |
 | 压测 | 内置 OpenAI 协议静态压测器，配置 endpoint / 调用名 / 并发 / 时长 / prompt 来源，输出 client-side TTFT / TPOT / E2E 分布及 SLO 校验 |
 
