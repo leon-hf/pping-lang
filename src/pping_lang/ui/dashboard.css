@@ -565,6 +565,29 @@
   }
   .kpi .sub-line span { color: var(--text); font-weight: 600; }
 
+  /* 延迟分位分布条:p50→p95→p99 三段,卡片强调色渐淡(快的部分深,尾部浅) */
+  .kpi .pct-bar {
+    display: flex;
+    height: 7px;
+    border-radius: 4px;
+    overflow: hidden;
+    background: var(--surface-alt);
+    margin-top: 9px;
+  }
+  .kpi .pct-bar i { display: block; height: 100%; background: var(--accent-color, var(--muted)); }
+  .kpi .pct-bar i:nth-child(1) { opacity: 0.95; }
+  .kpi .pct-bar i:nth-child(2) { opacity: 0.55; }
+  .kpi .pct-bar i:nth-child(3) { opacity: 0.28; }
+  .kpi .pct-labels {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 5px;
+    font-size: 10.5px;
+    color: var(--muted-2);
+    font-variant-numeric: tabular-nums;
+  }
+  .kpi .pct-labels b { color: var(--text); font-weight: 600; }
+
   /* === Roofline plain-language verdict === */
   .roofline-verdict {
     margin-top: 18px;
