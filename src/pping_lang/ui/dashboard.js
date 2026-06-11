@@ -15,17 +15,17 @@ function _makeRooflineChart(ctx) {
       datasets: [
         {
           label: '当前样本', data: [],
-          backgroundColor: 'rgba(13, 148, 136, 0.55)', borderColor: '#0d9488', borderWidth: 1,
-          pointRadius: 4, pointHoverRadius: 7, pointHoverBackgroundColor: '#0d9488',
+          backgroundColor: 'rgba(13, 139, 128, 0.55)', borderColor: '#0d8b80', borderWidth: 1,
+          pointRadius: 4, pointHoverRadius: 7, pointHoverBackgroundColor: '#0d8b80',
           pointHoverBorderColor: '#fff', pointHoverBorderWidth: 2, showLine: false, order: 3,
         },
         {
-          label: 'Compute roof', data: [], showLine: true, borderColor: '#e5484d', borderWidth: 2.5,
-          pointRadius: 0, fill: 'origin', backgroundColor: 'rgba(229, 72, 77, 0.06)', tension: 0, order: 1,
+          label: 'Compute roof', data: [], showLine: true, borderColor: '#dc4d3e', borderWidth: 2.5,
+          pointRadius: 0, fill: 'origin', backgroundColor: 'rgba(220, 77, 62, 0.06)', tension: 0, order: 1,
         },
         {
-          label: 'Memory roof', data: [], showLine: true, borderColor: '#5e6ad2', borderWidth: 2.5,
-          pointRadius: 0, fill: 'origin', backgroundColor: 'rgba(94, 106, 210, 0.06)', tension: 0, order: 2,
+          label: 'Memory roof', data: [], showLine: true, borderColor: '#5147c8', borderWidth: 2.5,
+          pointRadius: 0, fill: 'origin', backgroundColor: 'rgba(81, 71, 200, 0.06)', tension: 0, order: 2,
         },
       ],
     },
@@ -34,7 +34,7 @@ function _makeRooflineChart(ctx) {
       plugins: {
         legend: { display: false },
         tooltip: {
-          backgroundColor: '#18181b', titleColor: '#fff', bodyColor: '#fafafa', padding: 11,
+          backgroundColor: '#1c1410', titleColor: '#fff', bodyColor: '#fdf9f2', padding: 11,
           cornerRadius: 8, displayColors: false, borderWidth: 0, titleFont: { weight: '600' },
           callbacks: {
             title: () => '',
@@ -51,13 +51,13 @@ function _makeRooflineChart(ctx) {
       scales: {
         x: {
           type: 'logarithmic',
-          title: { display: true, text: 'Arithmetic Intensity (FLOPs / byte)', color: '#71717a', font: { size: 11.5, weight: '600' } },
-          ticks: { color: '#a1a1aa', font: { size: 11 } }, grid: { color: '#ececf0', drawBorder: false },
+          title: { display: true, text: 'Arithmetic Intensity (FLOPs / byte)', color: '#7a6e63', font: { size: 11.5, weight: '600' } },
+          ticks: { color: '#a8998a', font: { size: 11 } }, grid: { color: '#f3ebdb', drawBorder: false },
         },
         y: {
           type: 'logarithmic',
-          title: { display: true, text: 'Achieved Throughput (TFLOPs/s)', color: '#71717a', font: { size: 11.5, weight: '600' } },
-          ticks: { color: '#a1a1aa', font: { size: 11 } }, grid: { color: '#ececf0', drawBorder: false },
+          title: { display: true, text: 'Achieved Throughput (TFLOPs/s)', color: '#7a6e63', font: { size: 11.5, weight: '600' } },
+          ticks: { color: '#a8998a', font: { size: 11 } }, grid: { color: '#f3ebdb', drawBorder: false },
         },
       },
     },
@@ -121,9 +121,9 @@ function _createMiniLatencyChart(canvasId, color) {
       plugins: {
         legend: { display: false },
         tooltip: {
-          backgroundColor: '#18181b',
+          backgroundColor: '#1c1410',
           titleColor: '#fff',
-          bodyColor: '#fafafa',
+          bodyColor: '#fdf9f2',
           padding: 9,
           cornerRadius: 6,
           displayColors: true,
@@ -139,12 +139,12 @@ function _createMiniLatencyChart(canvasId, color) {
         y: {
           beginAtZero: true,
           ticks: {
-            color: '#a1a1aa',
+            color: '#a8998a',
             font: { size: 10 },
             maxTicksLimit: 4,
             callback: (v) => v + 'ms',
           },
-          grid: { color: '#ececf0', drawBorder: false },
+          grid: { color: '#f3ebdb', drawBorder: false },
         },
         x: { display: false, grid: { display: false } },
       },
@@ -162,12 +162,12 @@ function _updateMiniLatencyChart(chart, buckets) {
 
 // kernel 类(堆叠面积)— 顺序 = 画的层序
 const _KCLASSES = [
-  ['gemm', '#5e6ad2', 'GEMM'], ['attention', '#0d9488', 'Attention'],
-  ['comm', '#e5484d', '通信'], ['norm', '#d97706', 'Norm'],
-  ['activation', '#16a34a', 'Activation'], ['rotary', '#d6336c', 'Rotary'],
-  ['other', '#a1a1aa', '其它'],
+  ['gemm', '#5147c8', 'GEMM'], ['attention', '#0d8b80', 'Attention'],
+  ['comm', '#dc4d3e', '通信'], ['norm', '#c2660d', 'Norm'],
+  ['activation', '#5a8f1f', 'Activation'], ['rotary', '#be1556', 'Rotary'],
+  ['other', '#a8998a', '其它'],
 ];
-const _kTip = {backgroundColor:'#18181b',titleColor:'#fff',bodyColor:'#fafafa',padding:9,cornerRadius:6,borderWidth:0,titleFont:{weight:'600',size:11},bodyFont:{size:11}};
+const _kTip = {backgroundColor:'#1c1410',titleColor:'#fff',bodyColor:'#fdf9f2',padding:9,cornerRadius:6,borderWidth:0,titleFont:{weight:'600',size:11},bodyFont:{size:11}};
 function _createKClassChart() {
   const ctx = document.getElementById('k-class-chart'); if (!ctx) return null;
   return new Chart(ctx.getContext('2d'), {
@@ -182,7 +182,7 @@ function _createKClassChart() {
       plugins: {legend: {display: false},
         tooltip: {..._kTip, callbacks: {label: c => `${c.dataset.label}: ${c.parsed.y == null ? '—' : c.parsed.y.toFixed(0) + '%'}`}}},
       scales: {
-        y: {stacked: true, min: 0, max: 100, ticks: {color: '#a1a1aa', font: {size: 10}, maxTicksLimit: 5, callback: v => v + '%'}, grid: {color: '#ececf0', drawBorder: false}},
+        y: {stacked: true, min: 0, max: 100, ticks: {color: '#a8998a', font: {size: 10}, maxTicksLimit: 5, callback: v => v + '%'}, grid: {color: '#f3ebdb', drawBorder: false}},
         x: {display: false, grid: {display: false}},
       },
     },
@@ -193,16 +193,16 @@ function _createKUtilChart() {
   return new Chart(ctx.getContext('2d'), {
     type: 'line',
     data: {labels: [], datasets: [
-      {label: 'GPU busy', data: [], borderColor: '#0d9488', backgroundColor: '#0d94881a', borderWidth: 2, fill: true, pointRadius: 0, tension: 0.3},
-      {label: '同步等待 (launch-bound)', data: [], borderColor: '#d97706', backgroundColor: 'transparent', borderWidth: 2, fill: false, pointRadius: 0, tension: 0.3},
+      {label: 'GPU busy', data: [], borderColor: '#0d8b80', backgroundColor: '#0d8b801a', borderWidth: 2, fill: true, pointRadius: 0, tension: 0.3},
+      {label: '同步等待 (launch-bound)', data: [], borderColor: '#c2660d', backgroundColor: 'transparent', borderWidth: 2, fill: false, pointRadius: 0, tension: 0.3},
     ]},
     options: {
       responsive: true, maintainAspectRatio: false, animation: false,
       interaction: {mode: 'index', intersect: false},
-      plugins: {legend: {display: true, position: 'top', align: 'end', labels: {font: {size: 10}, boxWidth: 10, color: '#71717a'}},
+      plugins: {legend: {display: true, position: 'top', align: 'end', labels: {font: {size: 10}, boxWidth: 10, color: '#7a6e63'}},
         tooltip: {..._kTip, callbacks: {label: c => `${c.dataset.label}: ${c.parsed.y == null ? '—' : c.parsed.y.toFixed(0) + '%'}`}}},
       scales: {
-        y: {min: 0, max: 100, ticks: {color: '#a1a1aa', font: {size: 10}, maxTicksLimit: 5, callback: v => v + '%'}, grid: {color: '#ececf0', drawBorder: false}},
+        y: {min: 0, max: 100, ticks: {color: '#a8998a', font: {size: 10}, maxTicksLimit: 5, callback: v => v + '%'}, grid: {color: '#f3ebdb', drawBorder: false}},
         x: {display: false, grid: {display: false}},
       },
     },
@@ -570,11 +570,11 @@ function dashboard() {
     // kernel 语义类 → 颜色 / 中文标签(分段条 + 图例)
     kernelColor(cls) {
       return {
-        attention: '#0d9488', gemm: '#5e6ad2', norm: '#d97706',
-        rotary: '#d6336c', activation: '#16a34a', comm: '#e5484d',
-        elementwise: '#0284c7', sampling: '#9333ea', index: '#ca8a04',
-        memcpy: '#71717a', other: '#a1a1aa',
-      }[cls] || '#a1a1aa';
+        attention: '#0d8b80', gemm: '#5147c8', norm: '#c2660d',
+        rotary: '#be1556', activation: '#5a8f1f', comm: '#dc4d3e',
+        elementwise: '#3f7fa8', sampling: '#9b59b6', index: '#b8860b',
+        memcpy: '#7a6e63', other: '#a8998a',
+      }[cls] || '#a8998a';
     },
     kernelLabel(cls) {
       return {
@@ -747,11 +747,11 @@ function dashboard() {
     },
     stallColor(cls) {
       return {
-        memory_dependency: '#5e6ad2', shared_dependency: '#0d9488',
-        memory_throttle: '#8b5cf6', math_pipe: '#d97706', exec_dependency: '#d6336c',
-        sync: '#e5484d', fetch_control: '#16a34a', dispatch: '#a16207',
-        scheduler_slack: '#65a30d', other: '#a1a1aa',
-      }[cls] || '#a1a1aa';
+        memory_dependency: '#5147c8', shared_dependency: '#0d8b80',
+        memory_throttle: '#7a5cc8', math_pipe: '#c2660d', exec_dependency: '#be1556',
+        sync: '#dc4d3e', fetch_control: '#5a8f1f', dispatch: '#9a8f1f',
+        scheduler_slack: '#9bb04f', other: '#a8998a',
+      }[cls] || '#a8998a';
     },
     // 打开 Kernel tab 时调:先拉缓存结果;若可用且还没有结果,自动跑一次取证 ——
     // 免得用户找不到/不点"采集 stall 证据"按钮就以为 tab 空的(§A)。
@@ -941,9 +941,9 @@ function dashboard() {
 
       _chart = _makeRooflineChart(ctx);
       // Mini latency-trend charts (TTFT / TPOT / E2E)
-      _ttftChart = _createMiniLatencyChart('ttft-chart', '#e5484d');
-      _tpotChart = _createMiniLatencyChart('tpot-chart', '#5e6ad2');
-      _e2eChart  = _createMiniLatencyChart('e2e-chart',  '#0d9488');
+      _ttftChart = _createMiniLatencyChart('ttft-chart', '#dc4d3e');
+      _tpotChart = _createMiniLatencyChart('tpot-chart', '#5147c8');
+      _e2eChart  = _createMiniLatencyChart('e2e-chart',  '#0d8b80');
       // kernel 趋势图懒创建(canvas 在 x-if 里,见 _updateKernelTrends)
 
       this.fetchSystem();
