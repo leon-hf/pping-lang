@@ -41,7 +41,8 @@ function _makeRooflineChart(ctx) {
             label: (ctx) => {
               const ds = ctx.dataset.label;
               if (ds === '当前样本') {
-                return [`AI:  ${ctx.parsed.x.toFixed(2)} FLOPs/byte`, `TPut: ${ctx.parsed.y.toFixed(1)} TFLOPs/s`];
+                const n = ctx.raw && ctx.raw.n > 1 ? [`合并 ${ctx.raw.n} 个 step`] : [];
+                return [`AI:  ${ctx.parsed.x.toFixed(2)} FLOPs/byte`, `TPut: ${ctx.parsed.y.toFixed(1)} TFLOPs/s`, ...n];
               }
               return `${ds}: ${ctx.parsed.y.toFixed(1)} TFLOPs/s`;
             },
@@ -64,10 +65,32 @@ function _makeRooflineChart(ctx) {
   });
 }
 
+// 相近 step 合并成簇心:log 网格分桶(x 每十倍程 6 桶、y 4 桶),桶内取几何均值,
+// n = 合并步数 → 点大小。免得 60s 内每 step 一个点密密麻麻(信息在簇,不在单点)。
+function _aggRooflinePoints(raw) {
+  const bins = new Map();
+  for (const p of raw) {
+    if (!(p.x > 0) || !(p.y > 0)) continue;
+    const k = Math.round(Math.log10(p.x) * 6) + '|' + Math.round(Math.log10(p.y) * 4);
+    let b = bins.get(k);
+    if (!b) { b = { sx: 0, sy: 0, n: 0 }; bins.set(k, b); }
+    b.sx += Math.log10(p.x); b.sy += Math.log10(p.y); b.n++;
+  }
+  const out = [];
+  for (const b of bins.values()) {
+    out.push({ x: Math.pow(10, b.sx / b.n), y: Math.pow(10, b.sy / b.n), n: b.n });
+  }
+  return out;
+}
+
 // 把 /api/roofline 数据填进一个 roofline 图(点 + 两条 roof)
 function _applyRooflineData(chart, data) {
   if (!chart) return;
-  chart.data.datasets[0].data = (data.points || []).map(p => ({ x: p.ai, y: p.throughput_tflops }));
+  const agg = _aggRooflinePoints((data.points || []).map(p => ({ x: p.ai, y: p.throughput_tflops })));
+  chart.data.datasets[0].data = agg;
+  // 点半径 ∝ log(合并步数):单步 4px,几十步 ~10px,封顶 13px
+  chart.data.datasets[0].pointRadius = agg.map(p => Math.min(13, 3 + 2.2 * Math.log2(1 + p.n)));
+  chart.data.datasets[0].pointHoverRadius = agg.map(p => Math.min(15, 5 + 2.2 * Math.log2(1 + p.n)));
   if (data.peak && data.peak.compute_tflops && data.peak.mem_bw_tbs) {
     const peakC = data.peak.compute_tflops, peakBW = data.peak.mem_bw_tbs, knee = peakC / peakBW;
     const xMin = 0.1, xMax = Math.max(1000, knee * 3);
