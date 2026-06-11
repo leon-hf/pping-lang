@@ -1,34 +1,34 @@
 :root {
-    /* 冷中性 zinc 灰白 + 克制强调色(Linear / Vercel / Stripe 浅色系) */
+    /* White base + warm coral accents (Vercel / Stripe / Linear lineage) */
     --bg: #ffffff;
     --surface: #ffffff;
-    --surface-alt: #f4f4f5;
-    --surface-tint: #f9f9fb;
-    --border: #e4e4e7;
-    --border-strong: #d4d4d8;
-    --text-strong: #18181b;
-    --text: #3f3f46;
-    --muted: #71717a;
-    --muted-2: #a1a1aa;
+    --surface-alt: #faf6ef;
+    --surface-tint: #fdfaf4;
+    --border: #ece7df;
+    --border-strong: #d6cfc3;
+    --text-strong: #1c1410;
+    --text: #3d342c;
+    --muted: #7a6e63;
+    --muted-2: #a8998a;
 
     /* Diverse accent palette */
-    --coral: #e5484d;
-    --coral-soft: #fdecec;
-    --coral-strong: #b5292e;
-    --amber: #d97706;
-    --amber-soft: #fdf2dd;
-    --rose: #d6336c;
-    --rose-soft: #fceaf1;
-    --teal: #0d9488;
-    --teal-soft: #d8f1ee;
-    --indigo: #5e6ad2;
-    --indigo-soft: #e9ebfa;
-    --sage: #16a34a;
-    --sage-soft: #e3f3ea;
+    --coral: #dc4d3e;
+    --coral-soft: #fdeae5;
+    --coral-strong: #a8311f;
+    --amber: #c2660d;
+    --amber-soft: #fdf1d8;
+    --rose: #be1556;
+    --rose-soft: #ffe3ec;
+    --teal: #0d8b80;
+    --teal-soft: #d5f1ec;
+    --indigo: #5147c8;
+    --indigo-soft: #e8e5fb;
+    --sage: #5a8f1f;
+    --sage-soft: #e9f4d3;
 
-    --shadow-sm: 0 1px 2px rgba(24, 24, 27, 0.04);
-    --shadow-md: 0 1px 3px rgba(24, 24, 27, 0.05), 0 6px 16px -4px rgba(24, 24, 27, 0.06);
-    --shadow-lg: 0 1px 3px rgba(24, 24, 27, 0.06), 0 12px 32px -8px rgba(24, 24, 27, 0.1);
+    --shadow-sm: 0 1px 2px rgba(28, 20, 16, 0.04);
+    --shadow-md: 0 1px 3px rgba(28, 20, 16, 0.05), 0 6px 16px -4px rgba(28, 20, 16, 0.06);
+    --shadow-lg: 0 1px 3px rgba(28, 20, 16, 0.06), 0 12px 32px -8px rgba(28, 20, 16, 0.1);
     --radius-sm: 6px;
     --radius: 10px;
     --radius-lg: 16px;
@@ -41,7 +41,7 @@
                  "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
     background: var(--bg);
     background-image:
-      radial-gradient(ellipse 70% 35% at 50% 0%, rgba(94, 106, 210, 0.03), transparent 70%);
+      radial-gradient(ellipse 70% 35% at 50% 0%, rgba(220, 77, 62, 0.025), transparent 70%);
     background-attachment: fixed;
     color: var(--text);
     font-size: 14px;
@@ -75,7 +75,7 @@
     background: linear-gradient(135deg, var(--coral) 0%, var(--amber) 100%);
     display: grid;
     place-items: center;
-    box-shadow: 0 2px 8px -2px rgba(229, 72, 77, 0.35);
+    box-shadow: 0 2px 8px -2px rgba(220, 77, 62, 0.35);
   }
   .brand-mark svg { width: 17px; height: 17px; color: white; }
   .brand h1 {
@@ -191,7 +191,7 @@
     gap: 22px;
     align-items: center;
     box-shadow: var(--shadow-sm);
-    background-image: linear-gradient(135deg, rgba(229, 72, 77, 0.03) 0%, transparent 40%);
+    background-image: linear-gradient(135deg, rgba(220, 77, 62, 0.03) 0%, transparent 40%);
   }
   .hero-icon {
     width: 56px; height: 56px;
@@ -200,7 +200,7 @@
     display: grid;
     place-items: center;
     color: white;
-    box-shadow: 0 6px 16px -6px rgba(229, 72, 77, 0.4);
+    box-shadow: 0 6px 16px -6px rgba(220, 77, 62, 0.4);
   }
   .hero-icon svg { width: 26px; height: 26px; }
   .hero-body { min-width: 0; }
@@ -250,13 +250,13 @@
     font-weight: 600;
     font-size: 12px;
   }
-  .chip.coral { background: var(--coral-soft); border-color: rgba(229, 72, 77, 0.18); }
+  .chip.coral { background: var(--coral-soft); border-color: rgba(220, 77, 62, 0.18); }
   .chip.coral .chip-val { color: var(--coral-strong); }
   .chip.amber { background: var(--amber-soft); border-color: rgba(194, 102, 13, 0.18); }
   .chip.amber .chip-val { color: var(--amber); }
-  .chip.indigo { background: var(--indigo-soft); border-color: rgba(94, 106, 210, 0.18); }
+  .chip.indigo { background: var(--indigo-soft); border-color: rgba(81, 71, 200, 0.18); }
   .chip.indigo .chip-val { color: var(--indigo); }
-  .chip.teal { background: var(--teal-soft); border-color: rgba(13, 148, 136, 0.18); }
+  .chip.teal { background: var(--teal-soft); border-color: rgba(13, 139, 128, 0.18); }
   .chip.teal .chip-val { color: var(--teal); }
 
   /* "启动信息" button — lives at the top of the right pulse column,
@@ -267,7 +267,7 @@
     gap: 7px;
     padding: 8px 16px 8px 13px;
     background: var(--coral-soft);
-    border: 1px solid rgba(229, 72, 77, 0.35);
+    border: 1px solid rgba(220, 77, 62, 0.35);
     color: var(--coral-strong);
     border-radius: 999px;
     cursor: pointer;
@@ -276,7 +276,7 @@
     font-weight: 600;
     letter-spacing: -0.005em;
     white-space: nowrap;
-    box-shadow: 0 1px 3px rgba(229, 72, 77, 0.15);
+    box-shadow: 0 1px 3px rgba(220, 77, 62, 0.15);
     transition: background 0.15s, color 0.15s, border-color 0.15s,
                 transform 0.1s, box-shadow 0.15s;
   }
@@ -284,7 +284,7 @@
     background: linear-gradient(135deg, var(--coral) 0%, var(--rose) 100%);
     color: white;
     border-color: var(--coral);
-    box-shadow: 0 4px 12px -2px rgba(229, 72, 77, 0.4);
+    box-shadow: 0 4px 12px -2px rgba(220, 77, 62, 0.4);
     transform: translateY(-1px);
   }
   .hero-info-btn:active { transform: translateY(0); }
@@ -294,7 +294,7 @@
   .modal-backdrop {
     position: fixed;
     inset: 0;
-    background: rgba(24, 24, 27, 0.35);
+    background: rgba(28, 20, 16, 0.35);
     backdrop-filter: blur(2px);
     display: grid;
     place-items: center;
@@ -309,7 +309,7 @@
     max-height: 85vh;
     display: flex;
     flex-direction: column;
-    box-shadow: 0 24px 60px -16px rgba(24, 24, 27, 0.3);
+    box-shadow: 0 24px 60px -16px rgba(28, 20, 16, 0.3);
     overflow: hidden;
   }
   .modal-head {
@@ -374,7 +374,7 @@
   .modal-section .copy-btn:hover {
     background: var(--surface-tint);
     color: var(--coral);
-    border-color: rgba(229, 72, 77, 0.25);
+    border-color: rgba(220, 77, 62, 0.25);
   }
   .modal-section pre.cmdline {
     background: var(--surface-alt);
@@ -943,7 +943,7 @@
   .btn:active { transform: translateY(0.5px); }
   .btn.primary {
     background: linear-gradient(135deg, var(--coral) 0%, var(--rose) 100%);
-    box-shadow: 0 4px 12px -4px rgba(229, 72, 77, 0.4);
+    box-shadow: 0 4px 12px -4px rgba(220, 77, 62, 0.4);
   }
   .btn.secondary {
     background: var(--surface);
@@ -1154,7 +1154,7 @@
   .form-grid input:focus, .form-grid select:focus, .form-grid textarea:focus {
     outline: none;
     border-color: var(--coral);
-    box-shadow: 0 0 0 3px rgba(229, 72, 77, 0.12);
+    box-shadow: 0 0 0 3px rgba(220, 77, 62, 0.12);
   }
   .form-grid textarea { resize: vertical; min-height: 64px; }
   .form-grid .hint {
@@ -1249,7 +1249,7 @@
   .slo-field:focus {
     outline: none;
     border-color: var(--coral);
-    box-shadow: 0 0 0 3px rgba(229, 72, 77, 0.12);
+    box-shadow: 0 0 0 3px rgba(220, 77, 62, 0.12);
   }
   .slo-field:disabled {
     background: var(--surface-alt);
