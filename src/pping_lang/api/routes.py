@@ -743,7 +743,7 @@ def build_app(
     @app.post("/api/kernels/deep_evidence")
     def deep_evidence(
         window: float = Query(5.0, ge=0.0, le=30.0, description="取证窗时长(秒)"),
-        period_log2: int = Query(12, ge=5, le=31, description="采样周期 2^N 周期"),
+        period_log2: int = Query(16, ge=5, le=31, description="采样周期 2^N 周期(过小会打满 HW 缓冲楔死采样)"),
     ) -> dict[str, Any]:
         if cupti is None:
             return {"available": False, "error": "CUPTI collector 未配置", "findings": []}

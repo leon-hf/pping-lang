@@ -193,8 +193,25 @@ void worker_loop() {
         if (cooldown_ms > 0.0 && since < cooldown_ms) {
             g.skipped_drains.fetch_add(1);
         } else {
-            std::lock_guard<std::recursive_mutex> lk(g.api_mu);  // 与 module load/unload 互斥
-            drain_sd_apilocked();
+            // ★ 排空式 drain(cudagraph 实测教训):图回放的 PC 记录生产速度远超
+            // "每周期一次×4000"的排水量 → 积压 → scratch 打满 → 之后每次 GetData 永远
+            // OUT_OF_MEMORY(hwfull 每周期+1、样本全失,引擎无感)。每周期必须循环 GetData
+            // 直到排空(remainingNumPcs=0);OOM 时重试(消费即腾 scratch,可恢复),连续
+            // 无进展才放弃本周期。锁按次取放,给 module 回调留插队空隙。
+            int oom_streak = 0;
+            for (int it = 0; it < 4096; ++it) {
+                size_t got;
+                bool empty;
+                {
+                    std::lock_guard<std::recursive_mutex> lk(g.api_mu);  // 与 module load/unload 互斥
+                    got = drain_sd_apilocked();
+                    empty = (got == 0 && g.sd.remainingNumPcs == 0);
+                }
+                if (got > 0) { oom_streak = 0; continue; }
+                if (empty) break;
+                // got==0 且 remaining>0:OOM 或瞬时空转 → 重试,连续 16 次无进展放弃本周期
+                if (++oom_streak >= 16) break;
+            }
         }
         usleep(drain_us);
     }
@@ -236,19 +253,37 @@ static const CUpti_driver_api_trace_cbid_enum kModuleCbids[] = {
 };
 
 // P3:我们关心的 launch driver API —— 只为采 launch 栈,**不**串行化(不碰 api_mu)。
+// 注:cbid 是 enum 成员不是宏,#ifdef 守不住(早期版本踩过:守了等于没编进去)。
+// _ptsz(per-thread stream)变体参数布局与原版相同,一并钩。
 static const CUpti_driver_api_trace_cbid_enum kLaunchCbids[] = {
     CUPTI_DRIVER_TRACE_CBID_cuLaunchKernel,
-#ifdef CUPTI_DRIVER_TRACE_CBID_cuLaunchKernelEx
+    CUPTI_DRIVER_TRACE_CBID_cuLaunchKernel_ptsz,
     CUPTI_DRIVER_TRACE_CBID_cuLaunchKernelEx,
-#endif
+    CUPTI_DRIVER_TRACE_CBID_cuLaunchKernelEx_ptsz,
 };
 
 static inline bool is_launch_cbid(CUpti_CallbackId cbid) {
-    if (cbid == (CUpti_CallbackId)CUPTI_DRIVER_TRACE_CBID_cuLaunchKernel) return true;
-#ifdef CUPTI_DRIVER_TRACE_CBID_cuLaunchKernelEx
-    if (cbid == (CUpti_CallbackId)CUPTI_DRIVER_TRACE_CBID_cuLaunchKernelEx) return true;
-#endif
-    return false;
+    return cbid == (CUpti_CallbackId)CUPTI_DRIVER_TRACE_CBID_cuLaunchKernel ||
+           cbid == (CUpti_CallbackId)CUPTI_DRIVER_TRACE_CBID_cuLaunchKernel_ptsz ||
+           cbid == (CUpti_CallbackId)CUPTI_DRIVER_TRACE_CBID_cuLaunchKernelEx ||
+           cbid == (CUpti_CallbackId)CUPTI_DRIVER_TRACE_CBID_cuLaunchKernelEx_ptsz;
+}
+
+// ★ cudagraph 串行化(§11 的延伸,真机实测):稳态图回放走 cuGraphLaunch,不触发 module
+// 回调 —— GetData 与图启动在驱动里并发,在 Blackwell+CUPTI13 上表现为 EngineCore 静默死锁
+// (推理挂死、无任何报错;LAUNCH_STACK 开关都复现,排除 launch 回调)。修法同 §11:把
+// cuGraphLaunch 也纳入 api_mu 伞下,图启动期间绝不 GetData。FULL 模式每 decode step 仅一次
+// 图启动,锁竞争代价 ~一次 GetData 时长(≈20ms)/500ms 周期,可接受。
+// 注意:**不要**刷新 last_module_event_ms —— 图启动是常态高频事件,刷了冷却窗会让 GetData
+// 永远饿死(HW 缓冲打满全丢样)。
+static const CUpti_driver_api_trace_cbid_enum kGraphLaunchCbids[] = {
+    CUPTI_DRIVER_TRACE_CBID_cuGraphLaunch,
+    CUPTI_DRIVER_TRACE_CBID_cuGraphLaunch_ptsz,
+};
+
+static inline bool is_graph_launch_cbid(CUpti_CallbackId cbid) {
+    return cbid == (CUpti_CallbackId)CUPTI_DRIVER_TRACE_CBID_cuGraphLaunch ||
+           cbid == (CUpti_CallbackId)CUPTI_DRIVER_TRACE_CBID_cuGraphLaunch_ptsz;
 }
 
 // 从 launch 参数取 CUfunction(只读首字段,driver API 参数 ABI 稳定)。
@@ -288,6 +323,13 @@ static void CUPTIAPI _cupti_cb(void*, CUpti_CallbackDomain domain,
                 a.count++;
             }
         }
+        return;
+    }
+    // ★ cudagraph 回放串行化:图启动期间持 api_mu(挡住 worker 的 GetData),防驱动级死锁。
+    // 只锁不刷新冷却(图启动高频,刷了 GetData 永远饿死)。见 kGraphLaunchCbids 注释。
+    if (is_graph_launch_cbid(cbid)) {
+        if (cb->callbackSite == CUPTI_API_ENTER) g.api_mu.lock();
+        else g.api_mu.unlock();
         return;
     }
     g.last_module_event_ms.store(now_ms());  // plan B:刷新冷却起点(ENTER+EXIT 都刷,EXIT 即 op 之后)
@@ -392,6 +434,15 @@ int pping_pcs_start(int period_log2) {
     if (g_sub != nullptr) {
         for (CUpti_driver_api_trace_cbid_enum mc : kModuleCbids)
             cuptiEnableCallback(1, g_sub, CUPTI_CB_DOMAIN_DRIVER_API, mc);
+        // cudagraph 串行化:默认**关**。py-spy 实锤后真凶是带载 reprime 的 stop()(见
+        // engine_pcs.py),GetData 与图回放并发本身没有出过事(1 亿样本窗与图回放共存)。
+        // 且持锁跨 ENTER→EXIT 在 async-scheduling 双线程高频 launch 下有 ABBA 死锁隐患
+        // (CUPTI 回调内锁 × api_mu),仅留作排查工具。
+        if (const char* e = std::getenv("PPING_LANG_PCS_GRAPH_SERIALIZE"); e && *e && *e != '0') {
+            for (CUpti_driver_api_trace_cbid_enum gc : kGraphLaunchCbids)
+                cuptiEnableCallback(1, g_sub, CUPTI_CB_DOMAIN_DRIVER_API, gc);
+            if (dbg()) std::fprintf(stderr, "[ppingcupti] graph-launch 串行化已开启(排查用)\n");
+        }
         if (dbg()) std::fprintf(stderr, "[ppingcupti] module DRIVER_API 回调已开启\n");
         if (g.launch_stack) {
             for (CUpti_driver_api_trace_cbid_enum lc : kLaunchCbids)
@@ -440,8 +491,9 @@ int pping_pcs_start(int period_log2) {
         }
     }
 
-    // parsed-data 缓冲
-    const size_t COLLECT = 4000;
+    // parsed-data 缓冲。16384:cudagraph 回放下记录量大,4000 时单次 GetData 吃不动积压
+    // (配合 worker 的排空式 drain;内存 ≈16K×~700B≈11MB,可接受)
+    const size_t COLLECT = 16384;
     std::memset(&g.sd, 0, sizeof g.sd);
     g.sd.size = sizeof(CUpti_PCSamplingData);
     g.sd.collectNumPcs = COLLECT;
@@ -462,7 +514,7 @@ int pping_pcs_start(int period_log2) {
     cfg[nc].attributeData.stallReasonData.stallReasonCount = num;
     cfg[nc].attributeData.stallReasonData.pStallReasonIndex = g.rIdx.data(); nc++;
     cfg[nc].attributeType = CUPTI_PC_SAMPLING_CONFIGURATION_ATTR_TYPE_SCRATCH_BUFFER_SIZE;
-    cfg[nc].attributeData.scratchBufferSizeData.scratchBufferSize = (size_t)16 * 1024 * 1024; nc++;
+    cfg[nc].attributeData.scratchBufferSizeData.scratchBufferSize = (size_t)64 * 1024 * 1024; nc++;  // cudagraph 回放记录量大,16MB 会被积压打满
     cfg[nc].attributeType = CUPTI_PC_SAMPLING_CONFIGURATION_ATTR_TYPE_HARDWARE_BUFFER_SIZE;
     cfg[nc].attributeData.hardwareBufferSizeData.hardwareBufferSize = (size_t)512 * 1024 * 1024; nc++;
     cfg[nc].attributeType = CUPTI_PC_SAMPLING_CONFIGURATION_ATTR_TYPE_WORKER_THREAD_PERIODIC_SLEEP_SPAN;
@@ -515,6 +567,8 @@ int pping_pcs_stop(void) {
     if (g_sub != nullptr) {
         for (CUpti_driver_api_trace_cbid_enum mc : kModuleCbids)
             cuptiEnableCallback(0, g_sub, CUPTI_CB_DOMAIN_DRIVER_API, mc);
+        for (CUpti_driver_api_trace_cbid_enum gc : kGraphLaunchCbids)
+            cuptiEnableCallback(0, g_sub, CUPTI_CB_DOMAIN_DRIVER_API, gc);
         if (g.launch_stack)
             for (CUpti_driver_api_trace_cbid_enum lc : kLaunchCbids)
                 cuptiEnableCallback(0, g_sub, CUPTI_CB_DOMAIN_DRIVER_API, lc);
@@ -660,6 +714,12 @@ void pping_pcs_overhead(double* getdata_ms, unsigned long long* dropped, unsigne
     if (dropped) *dropped = g.dropped.load();
     if (hwfull) *hwfull = g.hwfull.load();
 }
+
+/* 诊断:worker 因 JIT 冷却跳过的 drain 次数(枯竭排查:冷却饿死 GetData 的直接证据)。 */
+unsigned long long pping_pcs_skipped_drains(void) { return g.skipped_drains.load(); }
+
+/* 诊断:module DRIVER_API 回调累计触发数(负载期持续上涨 = 持续 JIT/模块事件)。 */
+unsigned long long pping_pcs_module_cbs(void) { return g.module_cbs.load(); }
 
 const char* pping_pcs_last_error(void) { return g_err; }
 
