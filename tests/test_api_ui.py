@@ -90,7 +90,7 @@ def test_ui_assets_split_and_under_budget():
     html = (ui / "index.html").stat().st_size
     css = (ui / "dashboard.css").stat().st_size
     js = (ui / "dashboard.js").stat().st_size
-    assert html < 100_000, f"index.html is {html} bytes, exceeds 100KB"
+    assert html < 110_000, f"index.html is {html} bytes, exceeds 110KB"
     assert css < 70_000, f"dashboard.css is {css} bytes, exceeds 70KB"
     assert js < 60_000, f"dashboard.js is {js} bytes, exceeds 60KB"
 

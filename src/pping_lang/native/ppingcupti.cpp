@@ -24,6 +24,9 @@
 #include <vector>
 
 #include <unistd.h>
+#include <execinfo.h>   // backtrace —— launch 栈采集(allocation-free)
+#include <dlfcn.h>      // dladdr / dlsym —— 符号化 + 动态取 cuFuncGetName
+#include <cxxabi.h>     // __cxa_demangle —— C++ 符号还原
 #include <cuda.h>
 #include <cupti_result.h>
 #include <cupti_callbacks.h>
@@ -57,6 +60,20 @@ struct State {
     std::unordered_map<unsigned long long,
         std::unordered_map<unsigned long long,
             std::pair<std::string, unsigned long long>>> live_pc;
+
+    // P3 launch 栈(MVP):CUfunction -> {首次抓的 native 栈, launch 计数}。默认不开
+    // (PPING_LANG_PCS_LAUNCH_STACK=1)。launch 回调里只 find+count++(持 launch_mu,极短),
+    // 首见才 backtrace 一次(同款 kernel 启动路径稳定);**绝不碰 api_mu**(否则每次 launch
+    // 与 PC drain 串行,开销爆)。
+    bool launch_stack = false;
+    static const int kMaxFrames = 24;
+    struct LaunchAgg {
+        void* frames[kMaxFrames];
+        int nframes = 0;
+        unsigned long long count = 0;
+    };
+    std::mutex launch_mu;
+    std::unordered_map<void*, LaunchAgg> launches;  // key = CUfunction
     // 串行化所有 PC sampling API 调用(GetData)与 module load/unload —— vLLM 推理中持续 JIT
     // triton kernel,cuModuleLoad/Unload 改 CUPTI 内部函数表,与 worker 的 GetData 并发会
     // use-after-free 崩(§11)。worker GetData 与 module load/unload 的 driver 回调都持此锁,
@@ -218,6 +235,38 @@ static const CUpti_driver_api_trace_cbid_enum kModuleCbids[] = {
     CUPTI_DRIVER_TRACE_CBID_cuLibraryUnload,
 };
 
+// P3:我们关心的 launch driver API —— 只为采 launch 栈,**不**串行化(不碰 api_mu)。
+static const CUpti_driver_api_trace_cbid_enum kLaunchCbids[] = {
+    CUPTI_DRIVER_TRACE_CBID_cuLaunchKernel,
+#ifdef CUPTI_DRIVER_TRACE_CBID_cuLaunchKernelEx
+    CUPTI_DRIVER_TRACE_CBID_cuLaunchKernelEx,
+#endif
+};
+
+static inline bool is_launch_cbid(CUpti_CallbackId cbid) {
+    if (cbid == (CUpti_CallbackId)CUPTI_DRIVER_TRACE_CBID_cuLaunchKernel) return true;
+#ifdef CUPTI_DRIVER_TRACE_CBID_cuLaunchKernelEx
+    if (cbid == (CUpti_CallbackId)CUPTI_DRIVER_TRACE_CBID_cuLaunchKernelEx) return true;
+#endif
+    return false;
+}
+
+// 从 launch 参数取 CUfunction(只读首字段,driver API 参数 ABI 稳定)。
+//   cuLaunchKernel:   { CUfunction f; ... }              —— f 是首字段
+//   cuLaunchKernelEx: { const CUlaunchConfig* config; CUfunction f; ... } —— f 在 config 之后
+static inline CUfunction launch_func(CUpti_CallbackId cbid, const void* fp) {
+    if (!fp) return nullptr;
+    if (cbid == (CUpti_CallbackId)CUPTI_DRIVER_TRACE_CBID_cuLaunchKernel)
+        return *(CUfunction*)fp;
+#ifdef CUPTI_DRIVER_TRACE_CBID_cuLaunchKernelEx
+    if (cbid == (CUpti_CallbackId)CUPTI_DRIVER_TRACE_CBID_cuLaunchKernelEx) {
+        struct ExHdr { const void* config; CUfunction f; };
+        return ((const ExHdr*)fp)->f;
+    }
+#endif
+    return nullptr;
+}
+
 // DRIVER_API 回调:module/library load/unload 的 ENTER 锁住 api_mu(直到 EXIT 解锁),
 // 把整个 load/unload 调用与 worker 的 GetData 串行;卸载在 ENTER 后才执行,故 ENTER 时
 // 先 flush 把该 module 的 PC 数据收干净,避免 functionName 被 free 后 use-after-free。
@@ -226,6 +275,21 @@ static void CUPTIAPI _cupti_cb(void*, CUpti_CallbackDomain domain,
     if (domain != CUPTI_CB_DOMAIN_DRIVER_API) return;
     if (!g.running.load()) return;
     const CUpti_CallbackData* cb = (const CUpti_CallbackData*)cbdata;
+    // P3 launch 栈:launch 回调单独轻量处理,**绝不碰 api_mu**(否则每次 launch 与 PC drain
+    // 串行);首见某 CUfunction 抓一次 backtrace(同款 kernel 启动路径稳定),之后只 count++。
+    if (g.launch_stack && is_launch_cbid(cbid)) {
+        if (cb->callbackSite == CUPTI_API_ENTER) {
+            CUfunction f = launch_func(cbid, cb->functionParams);
+            if (f) {
+                std::lock_guard<std::mutex> lk(g.launch_mu);
+                State::LaunchAgg& a = g.launches[(void*)f];
+                if (a.nframes == 0)  // backtrace allocation-free,只首见调一次
+                    a.nframes = backtrace(a.frames, State::kMaxFrames);
+                a.count++;
+            }
+        }
+        return;
+    }
     g.last_module_event_ms.store(now_ms());  // plan B:刷新冷却起点(ENTER+EXIT 都刷,EXIT 即 op 之后)
     if (cb->callbackSite == CUPTI_API_ENTER) {
         g.api_mu.lock();   // 一直持到 EXIT;期间 worker GetData 阻塞
@@ -300,6 +364,9 @@ int pping_pcs_start(int period_log2) {
     // P3:per-PC 直方图开关(默认关,避免每样本多付一次 hash)。
     if (const char* e = std::getenv("PPING_LANG_PCS_PC_HIST"))
         g.pc_hist = (*e && *e != '0');
+    // P3 launch 栈(MVP):默认关,避免每次 launch 多付一次回调。
+    if (const char* e = std::getenv("PPING_LANG_PCS_LAUNCH_STACK"))
+        g.launch_stack = (*e && *e != '0');
 
     // 订阅 + 开 module/library load/unload 的 DRIVER_API 回调(§11:vLLM 推理持续 JIT,
     // 整个 load/unload 调用要与 GetData 串行防崩)。**唯一槽**:CUDA 13 只允许一个 CUPTI
@@ -326,6 +393,11 @@ int pping_pcs_start(int period_log2) {
         for (CUpti_driver_api_trace_cbid_enum mc : kModuleCbids)
             cuptiEnableCallback(1, g_sub, CUPTI_CB_DOMAIN_DRIVER_API, mc);
         if (dbg()) std::fprintf(stderr, "[ppingcupti] module DRIVER_API 回调已开启\n");
+        if (g.launch_stack) {
+            for (CUpti_driver_api_trace_cbid_enum lc : kLaunchCbids)
+                cuptiEnableCallback(1, g_sub, CUPTI_CB_DOMAIN_DRIVER_API, lc);
+            if (dbg()) std::fprintf(stderr, "[ppingcupti] launch DRIVER_API 回调已开启(MVP 启动栈)\n");
+        }
     } else if (dbg()) {
         std::fprintf(stderr, "[ppingcupti] 警告:g_sub 为空,module 回调未开启 —— 持续采样不安全\n");
     }
@@ -443,6 +515,9 @@ int pping_pcs_stop(void) {
     if (g_sub != nullptr) {
         for (CUpti_driver_api_trace_cbid_enum mc : kModuleCbids)
             cuptiEnableCallback(0, g_sub, CUPTI_CB_DOMAIN_DRIVER_API, mc);
+        if (g.launch_stack)
+            for (CUpti_driver_api_trace_cbid_enum lc : kLaunchCbids)
+                cuptiEnableCallback(0, g_sub, CUPTI_CB_DOMAIN_DRIVER_API, lc);
     }
     g.running.store(false);
     CUptiResult r;
@@ -514,6 +589,56 @@ int pping_pcs_drain_pc(PpingPcRow* out, int max_rows) {
             std::strncpy(row.kernel, byOff.second.first.c_str(), PPING_KERNEL_NAME_LEN - 1);
             row.kernel[PPING_KERNEL_NAME_LEN - 1] = 0;
         }
+    }
+    return n;
+}
+
+int pping_pcs_drain_launches(PpingLaunchRow* out, int max_rows) {
+    if (out == nullptr || max_rows <= 0) return 0;
+    std::unordered_map<void*, State::LaunchAgg> snap;
+    {
+        std::lock_guard<std::mutex> lk(g.launch_mu);
+        snap.swap(g.launches);  // snapshot-swap;launch 计数从头累(下批重新攒)
+    }
+    // 动态取 cuFuncGetName(cu12.3+);老驱动没有 → kernel 名退化为 func_<ptr>
+    typedef CUresult (*FnGetName)(const char**, CUfunction);
+    static FnGetName p_getname = (FnGetName)dlsym(RTLD_DEFAULT, "cuFuncGetName");
+    int n = 0;
+    for (auto& kv : snap) {
+        if (n >= max_rows) break;
+        PpingLaunchRow& row = out[n];
+        CUfunction f = (CUfunction)kv.first;
+        State::LaunchAgg& a = kv.second;
+        row.launches = a.count;
+        const char* knm = nullptr;
+        if (p_getname && p_getname(&knm, f) == CUDA_SUCCESS && knm) {
+            std::strncpy(row.kernel, knm, PPING_KERNEL_NAME_LEN - 1);
+            row.kernel[PPING_KERNEL_NAME_LEN - 1] = 0;
+        } else {
+            std::snprintf(row.kernel, PPING_KERNEL_NAME_LEN, "func_%p", (void*)f);
+        }
+        // 符号化栈:跳过采集器/CUPTI/驱动自身的帧,取若干有意义帧," <- " 连接
+        std::string s;
+        int kept = 0;
+        for (int i = 0; i < a.nframes && kept < 6; ++i) {
+            Dl_info info;
+            if (!dladdr(a.frames[i], &info) || !info.dli_sname) continue;
+            const char* fn = info.dli_fname ? info.dli_fname : "";
+            if (std::strstr(fn, "libppingcupti") || std::strstr(fn, "libcupti") ||
+                std::strstr(fn, "libcuda.so"))
+                continue;
+            int st = 0;
+            char* dm = abi::__cxa_demangle(info.dli_sname, nullptr, nullptr, &st);
+            std::string nm = (st == 0 && dm) ? std::string(dm) : std::string(info.dli_sname);
+            if (dm) free(dm);
+            if (nm.size() > 80) nm = nm.substr(0, 77) + "...";
+            if (!s.empty()) s += " <- ";
+            s += nm;
+            kept++;
+        }
+        std::strncpy(row.stack, s.c_str(), sizeof(row.stack) - 1);
+        row.stack[sizeof(row.stack) - 1] = 0;
+        n++;
     }
     return n;
 }

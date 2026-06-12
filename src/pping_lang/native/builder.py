@@ -122,7 +122,7 @@ def ensure_so(force: bool = False) -> tuple[str, str]:
         f"-I{det['cupti_inc']}", f"-I{det['cuda_inc']}", f"-I{_NATIVE_DIR}",
         "-shared", f"-L{det['cupti_libdir']}", f"-Wl,-rpath,{det['cupti_libdir']}",
         "-o", str(out), str(_CPP),
-        f"-l:{det['cupti_soname']}", *det["link_cuda"], "-pthread",
+        f"-l:{det['cupti_soname']}", *det["link_cuda"], "-pthread", "-ldl",
     ]
     logger.info("[pping-lang] 编译 libppingcupti.so:cupti=%s @ %s",
                 det["cupti_soname"], det["cupti_libdir"])

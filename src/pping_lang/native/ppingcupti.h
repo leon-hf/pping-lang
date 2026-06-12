@@ -66,6 +66,20 @@ typedef struct {
  * 最多写 max_rows 行;返回写入行数(>=0),负数表错误。超出容量的并入 dropped。 */
 int pping_pcs_drain_pc(PpingPcRow* out, int max_rows);
 
+/* P3 launch 栈(MVP):一条 per-kernel 的 native 启动栈 —— 这个 kernel 从哪段 host 代码
+ * (libtorch/cuBLAS 调用路径)launch 的。即便闭源 GEMM 进不去,也能"向外归因"到调用它的
+ * 代码路径(对标 zymtrace 的核心能力,轻量版:到 C++ 帧 / Python 解释器边界)。
+ * 仅 PPING_LANG_PCS_LAUNCH_STACK=1 时采集;首次见到某 kernel 抓一次栈,之后只累加计数。 */
+typedef struct {
+    unsigned long long launches;                 /* 本批该 kernel 的 launch 次数 */
+    char               kernel[PPING_KERNEL_NAME_LEN];  /* kernel 名(cuFuncGetName,截断) */
+    char               stack[768];               /* 符号化后的 native 栈(top 帧," <- " 连接) */
+} PpingLaunchRow;
+
+/* 拉走 per-kernel launch 栈(snapshot-swap)。仅 PPING_LANG_PCS_LAUNCH_STACK=1 时有数据。
+ * 最多写 max_rows 行;返回写入行数(>=0),负数表错误。 */
+int pping_pcs_drain_launches(PpingLaunchRow* out, int max_rows);
+
 /* 自我观测(5% 预算可见性):
  *   getdata_ms = 自 start 起 cuptiPCSamplingGetData 累计墙钟(ms)
  *   dropped    = 丢弃样本数(HW 满)+ drain 容量溢出丢的行

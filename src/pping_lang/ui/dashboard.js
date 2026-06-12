@@ -787,6 +787,22 @@ function dashboard() {
       const hs = (this.deep.result && this.deep.result.pc_hotspots) || [];
       return hs.find(h => h.kernel === k.kernel) || null;
     },
+    // P3 launch 栈:把 native 栈清洗成可读帧链(caller→callee:host 代码在前,启动原语在后)
+    launchFrames(h) {
+      if (!h || !h.launch || !h.launch.stack) return [];
+      let frames = h.launch.stack.split(' <- ').map(s => s.trim()).filter(Boolean);
+      frames = frames.map(f => {
+        let s = f.replace(/^void\s+/, '');
+        const lt = s.indexOf('<'), pr = s.indexOf('(');
+        let cut = s.length;
+        if (lt > 0) cut = Math.min(cut, lt);
+        if (pr > 0) cut = Math.min(cut, pr);
+        s = s.slice(0, cut).trim();
+        const parts = s.split('::');
+        return parts.length > 1 ? parts.slice(-2).join('::') : s;
+      }).filter(f => !/^_PyEval|^_PyObject|^PyObject|^PyNumber|make_boxed|wrap_kernel|_get_operation/.test(f));
+      return frames.reverse();   // host 高层算子在前 → 启动原语在后
+    },
     // P3:所有"能定位到 Python 源码行"的 kernel(差异化能力,单独提到顶部,免得埋在长表里)
     sourceHotspots() {
       const hs = (this.deep.result && this.deep.result.pc_hotspots) || [];
