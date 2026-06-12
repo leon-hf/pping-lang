@@ -798,9 +798,15 @@ function dashboard() {
         if (lt > 0) cut = Math.min(cut, lt);
         if (pr > 0) cut = Math.min(cut, pr);
         s = s.slice(0, cut).trim();
-        const parts = s.split('::');
-        return parts.length > 1 ? parts.slice(-2).join('::') : s;
-      }).filter(f => !/^_PyEval|^_PyObject|^PyObject|^PyNumber|make_boxed|wrap_kernel|_get_operation/.test(f));
+        // 去 PyTorch 派发器噪音后缀(::impl / ::call / ::redispatch / ::out),露出真正的算子名
+        let parts = s.split('::').filter(Boolean);
+        while (parts.length > 1 && /^(impl|call|redispatch|out|cuda|reimpl)$/.test(parts[parts.length - 1]))
+          parts.pop();
+        // 去 at/at::_ops/c10/torch 这类命名空间前缀,留末段算子名
+        return parts[parts.length - 1] || s;
+      }).filter(f => f && !/^_PyEval|^_PyObject|^PyObject|^PyNumber|make_boxed|wrap_kernel|_get_operation|^Wrap/.test(f));
+      // 相邻重复(addmm::call 与 addmm::impl 清洗后同名)去重
+      frames = frames.filter((f, i) => i === 0 || f !== frames[i - 1]);
       return frames.reverse();   // host 高层算子在前 → 启动原语在后
     },
     // P3:所有"能定位到 Python 源码行"的 kernel(差异化能力,单独提到顶部,免得埋在长表里)
