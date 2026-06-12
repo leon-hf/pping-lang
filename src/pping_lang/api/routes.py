@@ -341,7 +341,9 @@ def build_app(
     # === GET / — dashboard ===
     @app.get("/", response_class=HTMLResponse)
     def index() -> HTMLResponse:
-        return HTMLResponse(ui_html)
+        # index.html 同样 no-cache:无缓存头时浏览器走启发式缓存,普通 F5 可能拿旧版
+        # (实测踩过:布局改了用户刷新看不到)。js/css 的同款处理见下。
+        return HTMLResponse(ui_html, headers={"Cache-Control": "no-cache, must-revalidate"})
 
     # 自研 JS/CSS 每次部署都会变 —— no-cache 让浏览器每次校验(没变 304,很便宜),
     # 避免普通 F5 复用旧 dashboard.js 导致新功能(如行级归因)静默不渲染。
