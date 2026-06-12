@@ -342,7 +342,7 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
       <!-- Latency trends (TTFT / TPOT / E2E) -->
       <div class="section-head" style="margin-top: 28px;">
         <h2 style="font-size: 16px;">用户延迟趋势</h2>
-        <span class="hint">最近 5 分钟 · 浅线 p50 / 实线 p99</span>
+        <span class="hint">最近 5 分钟 · 实线 平均 / 浅线 p99</span>
       </div>
 
       <div class="latency-trends">
@@ -350,8 +350,8 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
           <div class="lat-head">
             <span class="lat-title">TTFT · 首 token 延迟</span>
             <span class="lat-now">
-              <span class="label-p">p99</span>
-              <span x-text="fmt(kpis.ttft_p99_ms, 0)"></span><span class="unit">ms</span>
+              <span class="label-p">平均</span>
+              <span x-text="fmt(kpis.ttft?.avg, 0)"></span><span class="unit">ms</span>
             </span>
           </div>
           <div class="lat-chart" x-show="ttftHasData"><canvas id="ttft-chart"></canvas></div>
@@ -362,8 +362,8 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
           <div class="lat-head">
             <span class="lat-title">TPOT · 单 token 生成时间</span>
             <span class="lat-now">
-              <span class="label-p">p99</span>
-              <span x-text="fmt(kpis.tpot_p99_ms, 0)"></span><span class="unit">ms</span>
+              <span class="label-p">平均</span>
+              <span x-text="fmt(kpis.tpot?.avg, 0)"></span><span class="unit">ms</span>
             </span>
           </div>
           <div class="lat-source" x-show="tpotSource === 'itl'">数据源：ITL fallback（当前 vllm 没发 TPOT 字段，用 iter 间隔近似）</div>
@@ -375,8 +375,8 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
           <div class="lat-head">
             <span class="lat-title">E2E · 端到端延迟</span>
             <span class="lat-now" x-show="e2eHasData">
-              <span class="label-p">p99</span>
-              <span x-text="fmt(e2eP99, 0)"></span><span class="unit">ms</span>
+              <span class="label-p">平均</span>
+              <span x-text="fmt(e2eAvg, 0)"></span><span class="unit">ms</span>
             </span>
             <span class="lat-now" x-show="!e2eHasData" style="color: var(--muted-2);">—</span>
           </div>
