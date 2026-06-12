@@ -53,7 +53,10 @@ def init_engine_pcs() -> None:
 
 def _driver_loop() -> None:
     result_file = _result_file()
-    period_log2 = int(os.environ.get("PPING_LANG_PCS_PERIOD_LOG2", "12"))
+    # ★ 默认 2^16(实测教训):2^12 在 decode 负载下 >2000 万样本/s,几秒打满 CUPTI 硬件
+    # 缓冲 → 会话**永久楔死**(官方只给预防不给恢复)→ 之前误判为 "cudagraph 采不到"。
+    # 2^16 下排水稳定跟得上(实测 cudagraph serve 120s 持续 ~1100 万样本/窗、hwfull=0)。
+    period_log2 = int(os.environ.get("PPING_LANG_PCS_PERIOD_LOG2", "16"))
     window_s = float(os.environ.get("PPING_LANG_PCS_WINDOW_S", "5.0"))
     cuda_wait_s = float(os.environ.get("PPING_LANG_PCS_CUDA_WAIT_S", "120"))
 
@@ -81,12 +84,9 @@ def _driver_loop() -> None:
         return
 
     # 3) prime。
-    #    ★ cudagraph 已知限制(实测,见 _design-notes):eager serve 工作良好(2700万样本/窗);
-    #    但 cudagraph serve 稳态下,decode 的 FULL graph 回放 kernel **采不到**(每窗 0 样本 /
-    #    getdata_ms≈0.1ms),只有启动期 eager/piecewise 部分能采。延迟 prime 跨过 capture 也无效
-    #    (晚 prime 仍 0)→ 不是 prime 时机问题,疑为 CUPTI×cudagraph 回放的底层限制。
-    #    故默认不延迟(=0,eager 立即可用);需排查时用 PPING_LANG_PCS_PRIME_DELAY_S 调。
-    #    要可靠的 kernel 级数据,当前用 `--enforce-eager`(诊断会话)。
+    #    (历史勘误:曾误判"cudagraph 图回放采不到样是底层限制" —— 真因是 2^12 周期下
+    #    样本产率打满 CUPTI HW 缓冲、会话永久楔死,见上方 period_log2 注释。2^16 后
+    #    cudagraph/eager 都持续工作,无需延迟 prime。延迟开关留作排查工具。)
     prime_delay_s = float(os.environ.get("PPING_LANG_PCS_PRIME_DELAY_S", "0"))
     if prime_delay_s > 0:
         logger.info("[pping-lang] PCS 驱动:延迟 %.0fs 再 prime", prime_delay_s)
@@ -108,13 +108,20 @@ def _driver_loop() -> None:
     # 自愈:cudagraph capture 会把早 prime 的采样打停(实测:capture 后 drain 全空窗,
     # 但 capture 后重启采样即恢复)。检测"曾有样本→连续空窗"的打断特征,重启采样。
     # 纯空闲(从未有样本)不触发,避免无谓重启;重启有冷却,避免抖动。
+    # ★ reprime 安全边界(py-spy 实锤,见设计文档 §cudagraph):
+    #   - cudagraph capture 会把早 prime 的采样打哑(之后全空窗)→ 需要一次 reprime 救活;
+    #   - 但 reprime 的 cuptiPCSamplingStop 若在引擎**带载推理中**执行,会与在飞的图回放
+    #     在驱动层互等 → EngineCore 静默挂死(MainThread 卡 CUDA 调用,我们卡在 stop())。
+    #   解:reprime 全程**最多 1 次**(正好落在 capture 后、流量前的空闲间隙,实测把采样
+    #   救活后稳定工作);空窗阈值 2(防瞬时空窗误触发);用完配额后空窗只记不动。
     seen_samples = False
     dry_windows = 0
     last_reprime = 0.0
     reprime_count = 0
     window_count = 0
     reprime_cooldown_s = float(os.environ.get("PPING_LANG_PCS_REPRIME_COOLDOWN_S", "20"))
-    dry_threshold = int(os.environ.get("PPING_LANG_PCS_REPRIME_DRY_WINDOWS", "1"))
+    dry_threshold = int(os.environ.get("PPING_LANG_PCS_REPRIME_DRY_WINDOWS", "2"))
+    max_reprimes = int(os.environ.get("PPING_LANG_PCS_MAX_REPRIMES", "1"))
     status_file = result_file + ".status"
     while True:
         try:
@@ -130,11 +137,14 @@ def _driver_loop() -> None:
             else:
                 dry_windows += 1
                 now = time.monotonic()
-                # 曾经有样本、现在连续空窗 → 疑似被 capture(或其它)打断,重启采样自愈
+                # 曾经有样本、现在连续空窗 → 疑似被 capture 打断,重启采样自愈。
+                # ★ 最多 max_reprimes 次:带载中 stop 会与图回放在驱动层互等挂死引擎(见上)。
                 if (seen_samples and dry_windows >= dry_threshold
+                        and reprime_count < max_reprimes
                         and now - last_reprime >= reprime_cooldown_s):
                     logger.info("[pping-lang] PCS 驱动:采样枯竭(连续 %d 空窗),重启采样自愈"
-                                "(疑似 cudagraph capture 打断)", dry_windows)
+                                "(%d/%d 次,疑似 cudagraph capture 打断)",
+                                dry_windows, reprime_count + 1, max_reprimes)
                     rp = ctl.reprime(period_log2)
                     last_reprime = now
                     dry_windows = 0
@@ -142,11 +152,21 @@ def _driver_loop() -> None:
                     did_reprime = True
                     res.setdefault("_reprime", {})["result"] = rp
             # 心跳:每窗写状态(诊断 cudagraph 自愈),与主结果文件分开
+            extra: dict[str, Any] = {}
+            try:  # 诊断计数(老 .so 无符号则跳过)
+                raw = getattr(ctl, "_lib", None)
+                clib = getattr(raw, "_lib", None)
+                if clib is not None and hasattr(clib, "pping_pcs_skipped_drains"):
+                    extra["skipped"] = int(clib.pping_pcs_skipped_drains())
+                    extra["module_cbs"] = int(clib.pping_pcs_module_cbs())
+            except Exception:  # noqa: BLE001
+                pass
             _atomic_write_json(status_file, {
                 "window": window_count, "samples": samples, "seen": seen_samples,
                 "dry": dry_windows, "reprimes": reprime_count, "did_reprime": did_reprime,
-                "getdata_ms": ov.get("getdata_ms"), "available": res.get("available"),
-                "err": res.get("error"),
+                "getdata_ms": ov.get("getdata_ms"), "dropped": ov.get("dropped"),
+                "hwfull": ov.get("hwfull"), **extra,
+                "available": res.get("available"), "err": res.get("error"),
             })
         except Exception:  # noqa: BLE001
             logger.exception("[pping-lang] PCS 驱动:窗口失败")

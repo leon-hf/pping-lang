@@ -740,7 +740,7 @@ class CuptiKernelCollector:
             return False
         return self._pcs.started or self._pcs.available
 
-    def run_deep_evidence(self, window_s: float = 5.0, period_log2: int = 12) -> dict[str, Any]:
+    def run_deep_evidence(self, window_s: float = 5.0, period_log2: int = 16) -> dict[str, Any]:
         """跑一个 PC Sampling 取证短窗(阻塞 ~window_s),返回 stall 分解结论。
         未配置 / 不可用 → fail-closed 的 {available: False, error: ...}。"""
         if self._pcs is None:
@@ -1338,7 +1338,7 @@ class PcSamplingController:
     def last_result(self) -> dict[str, Any] | None:
         return self._last_result
 
-    def prime(self, period_log2: int = 12) -> dict[str, Any]:
+    def prime(self, period_log2: int = 16) -> dict[str, Any]:
         """早期 enable+start 一次(幂等)。必须在 workload 干重活前调。"""
         if self._started:
             return {"available": True}
@@ -1350,7 +1350,7 @@ class PcSamplingController:
         self._started = True
         return {"available": True}
 
-    def reprime(self, period_log2: int = 12) -> dict[str, Any]:
+    def reprime(self, period_log2: int = 16) -> dict[str, Any]:
         """停止再启动采样 —— 自愈被打断的采样(实测:cudagraph capture 会把早 prime 的
         采样打停,之后 drain 全是空窗;capture 后重启即恢复)。start-after-workload 实测可行
         (与 §12 的"enable 须早于 workload"不冲突:那是首次 enable 的硬约束,重启是已 enable
@@ -1375,7 +1375,7 @@ class PcSamplingController:
         self,
         *,
         window_s: float = 5.0,
-        period_log2: int = 12,
+        period_log2: int = 16,   # 2^16:防 HW 缓冲溢出楔死(见 engine_pcs 注释)
         drain_interval_s: float = 0.5,
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
