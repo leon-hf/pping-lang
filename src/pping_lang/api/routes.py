@@ -343,13 +343,17 @@ def build_app(
     def index() -> HTMLResponse:
         return HTMLResponse(ui_html)
 
+    # 自研 JS/CSS 每次部署都会变 —— no-cache 让浏览器每次校验(没变 304,很便宜),
+    # 避免普通 F5 复用旧 dashboard.js 导致新功能(如行级归因)静默不渲染。
+    _NOCACHE = {"Cache-Control": "no-cache, must-revalidate"}
+
     @app.get("/dashboard.css")
     def dashboard_css() -> Response:
-        return Response(ui_css, media_type="text/css; charset=utf-8")
+        return Response(ui_css, media_type="text/css; charset=utf-8", headers=_NOCACHE)
 
     @app.get("/dashboard.js")
     def dashboard_js() -> Response:
-        return Response(ui_js, media_type="application/javascript; charset=utf-8")
+        return Response(ui_js, media_type="application/javascript; charset=utf-8", headers=_NOCACHE)
 
     @app.get("/vendor/alpine.min.js")
     def vendor_alpine() -> Response:

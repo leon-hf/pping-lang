@@ -97,7 +97,10 @@ def _driver_loop() -> None:
     while True:
         try:
             res = ctl.run_window(window_s=window_s, period_log2=period_log2)
-            _atomic_write_json(result_file, res)
+            # 空窗(无流量 → 0 样本)不覆盖:保留上一个有数据的窗,避免前端刷新正好
+            # 赶上空闲窗看到"无数据"。真停流量时显示的是最近一次真实采样(配合前端新鲜度提示)。
+            if res.get("available") and (res.get("sample_total") or 0) > 0:
+                _atomic_write_json(result_file, res)
         except Exception:  # noqa: BLE001
             logger.exception("[pping-lang] PCS 驱动:窗口失败")
             time.sleep(2.0)
