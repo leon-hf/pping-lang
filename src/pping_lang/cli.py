@@ -26,6 +26,9 @@ def pping_vllm_main() -> None:
             ld = os.environ.get("LD_LIBRARY_PATH", "")
             os.environ["LD_LIBRARY_PATH"] = cupti_libdir + (f":{ld}" if ld else "")
         os.environ.setdefault("PPING_LANG_ENABLE_PCS", "1")
+        # P3 行级归因:开 per-PC 直方图(源码行/SASS 热点)。每样本多一次 hash,默认开,
+        # 想省这点开销可显式设 0。
+        os.environ.setdefault("PPING_LANG_PCS_PC_HIST", "1")
         print(f"[pping-vllm] PC sampling 就绪:.so={so}", file=sys.stderr)
     except Exception as e:  # noqa: BLE001
         print(f"[pping-vllm] .so 准备失败,降级(无 Kernel 级采集,其余照常):{e}", file=sys.stderr)

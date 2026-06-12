@@ -52,6 +52,20 @@ int pping_pcs_drain(PpingStallRow* out, int max_rows);
  * 写入 buf(最多 buflen-1 + 结尾 0);返回写入长度,负数表未知索引。 */
 int pping_pcs_stall_reason_name(unsigned int idx, char* buf, int buflen);
 
+/* P3 源码行级:一条 per-PC 聚合行 —— 某 kernel 内某指令地址(cubinCrc+pcOffset)的累计
+ * stall 样本(已扣 issued)。配合 cubin 反汇编的 offset→源码行表,可归因到 .py 行 / SASS
+ * 偏移。固定大小,便于 ctypes 镜像。默认不开,PPING_LANG_PCS_PC_HIST=1 启用。 */
+typedef struct {
+    unsigned long long cubin_crc;                /* CUpti cubinCrc,关联具体 cubin */
+    unsigned long long pc_offset;                /* 函数内指令偏移 */
+    unsigned long long samples;                  /* 该 PC 的累计 stall 样本 */
+    char               kernel[PPING_KERNEL_NAME_LEN];  /* kernel 函数名(截断) */
+} PpingPcRow;
+
+/* 拉走 per-PC 直方图(snapshot-swap,内部清零)。仅当 PPING_LANG_PCS_PC_HIST=1 时有数据。
+ * 最多写 max_rows 行;返回写入行数(>=0),负数表错误。超出容量的并入 dropped。 */
+int pping_pcs_drain_pc(PpingPcRow* out, int max_rows);
+
 /* 自我观测(5% 预算可见性):
  *   getdata_ms = 自 start 起 cuptiPCSamplingGetData 累计墙钟(ms)
  *   dropped    = 丢弃样本数(HW 满)+ drain 容量溢出丢的行

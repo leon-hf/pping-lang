@@ -20,6 +20,7 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include <unistd.h>
@@ -48,6 +49,14 @@ struct State {
     // 聚合:kernel 名 -> (stallReason 索引 -> 样本数)。drain 线程写,pping_pcs_drain 换出。
     std::mutex mu;
     std::unordered_map<std::string, std::unordered_map<unsigned int, unsigned long long>> live;
+
+    // P3 源码行级:per-(cubinCrc, pcOffset) -> {kernel 名, 累计样本}。默认不开
+    // (PPING_LANG_PCS_PC_HIST=1 才填),否则每样本多一次 hash 写,白付开销。
+    // 结构:crc -> (offset -> {kernel, samples})。pping_pcs_drain_pc 换出。
+    bool pc_hist = false;
+    std::unordered_map<unsigned long long,
+        std::unordered_map<unsigned long long,
+            std::pair<std::string, unsigned long long>>> live_pc;
     // 串行化所有 PC sampling API 调用(GetData)与 module load/unload —— vLLM 推理中持续 JIT
     // triton kernel,cuModuleLoad/Unload 改 CUPTI 内部函数表,与 worker 的 GetData 并发会
     // use-after-free 崩(§11)。worker GetData 与 module load/unload 的 driver 回调都持此锁,
@@ -116,9 +125,18 @@ size_t drain_sd_apilocked() {
             CUpti_PCSamplingPCData& pc = g.sd.pPcData[i];
             const char* nm = pc.functionName ? pc.functionName : "?";
             auto& byReason = g.live[nm];
-            for (size_t j = 0; j < pc.stallReasonCount; ++j)
-                byReason[pc.stallReason[j].pcSamplingStallReasonIndex] +=
-                    pc.stallReason[j].samples;
+            unsigned long long pcSamples = 0;
+            for (size_t j = 0; j < pc.stallReasonCount; ++j) {
+                unsigned long long s = pc.stallReason[j].samples;
+                byReason[pc.stallReason[j].pcSamplingStallReasonIndex] += s;
+                pcSamples += s;
+            }
+            // P3:per-PC 直方图(cubinCrc + pcOffset 是连到源码行的钥匙)。仅开启时累加。
+            if (g.pc_hist && pcSamples) {
+                auto& slot = g.live_pc[pc.cubinCrc][pc.pcOffset];
+                if (slot.first.empty()) slot.first = nm;  // 首见时记 kernel 名
+                slot.second += pcSamples;
+            }
         }
     }
     return g.sd.totalNumPcs;
@@ -279,6 +297,9 @@ int pping_pcs_start(int period_log2) {
     }
     g.ctx = ctx;
     if (period_log2 <= 0) period_log2 = 12;
+    // P3:per-PC 直方图开关(默认关,避免每样本多付一次 hash)。
+    if (const char* e = std::getenv("PPING_LANG_PCS_PC_HIST"))
+        g.pc_hist = (*e && *e != '0');
 
     // 订阅 + 开 module/library load/unload 的 DRIVER_API 回调(§11:vLLM 推理持续 JIT,
     // 整个 load/unload 调用要与 GetData 串行防崩)。**唯一槽**:CUDA 13 只允许一个 CUPTI
@@ -467,6 +488,30 @@ int pping_pcs_drain(PpingStallRow* out, int max_rows) {
             row._pad = 0;
             row.samples = rs.second;
             std::strncpy(row.kernel, kv.first.c_str(), PPING_KERNEL_NAME_LEN - 1);
+            row.kernel[PPING_KERNEL_NAME_LEN - 1] = 0;
+        }
+    }
+    return n;
+}
+
+int pping_pcs_drain_pc(PpingPcRow* out, int max_rows) {
+    if (out == nullptr || max_rows <= 0) return 0;
+    std::unordered_map<unsigned long long,
+        std::unordered_map<unsigned long long,
+            std::pair<std::string, unsigned long long>>> snap;
+    {
+        std::lock_guard<std::mutex> lk(g.mu);
+        snap.swap(g.live_pc);  // snapshot-swap,与 stall 聚合同一把锁
+    }
+    int n = 0;
+    for (auto& byCrc : snap) {
+        for (auto& byOff : byCrc.second) {
+            if (n >= max_rows) { g.dropped.fetch_add(byOff.second.second); continue; }
+            PpingPcRow& row = out[n++];
+            row.cubin_crc = byCrc.first;
+            row.pc_offset = byOff.first;
+            row.samples = byOff.second.second;
+            std::strncpy(row.kernel, byOff.second.first.c_str(), PPING_KERNEL_NAME_LEN - 1);
             row.kernel[PPING_KERNEL_NAME_LEN - 1] = 0;
         }
     }

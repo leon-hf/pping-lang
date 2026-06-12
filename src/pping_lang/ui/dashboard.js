@@ -781,6 +781,12 @@ function dashboard() {
         return '指令延迟为主,通常由 kernel 内部结构决定,优化空间有限。';
       return '';
     },
+    // P3 行级归因:取该 kernel 的"最深热点"(源码行 / SASS 偏移)。按 .so 原始 functionName 精确匹配
+    kernelHotspot(k) {
+      if (!k) return null;
+      const hs = (this.deep.result && this.deep.result.pc_hotspots) || [];
+      return hs.find(h => h.kernel === k.kernel) || null;
+    },
     // === Deep Evidence(全局 / warp 效率 / 方法论)辅助 ===
     // Warp 周期三态(占全部样本):发指令 / 就绪未选中(余量) / 真 stall(在等)
     warpSplit() {
