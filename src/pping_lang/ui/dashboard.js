@@ -93,15 +93,17 @@ function _makeRooflineChart(ctx) {
         },
       },
       scales: {
+        // log-log 轴的网格会按次刻度密画(1,2,3…10,20,30…),两轴都开直接变坐标纸 —— 全关,
+        // roofline 的参照系是两条 roof 线本身,不需要网格
         x: {
           type: 'logarithmic',
           title: { display: true, text: 'Arithmetic Intensity (FLOPs / byte)', color: '#7a6e63', font: { size: 11.5, weight: '600' } },
-          ticks: { color: '#a8998a', font: { size: 11 } }, grid: { color: '#f3ebdb', drawBorder: false },
+          ticks: { color: '#a8998a', font: { size: 11 } }, grid: { display: false },
         },
         y: {
           type: 'logarithmic',
           title: { display: true, text: 'Achieved Throughput (TFLOPs/s)', color: '#7a6e63', font: { size: 11.5, weight: '600' } },
-          ticks: { color: '#a8998a', font: { size: 11 } }, grid: { color: '#f3ebdb', drawBorder: false },
+          ticks: { color: '#a8998a', font: { size: 11 } }, grid: { display: false },
         },
       },
     },
