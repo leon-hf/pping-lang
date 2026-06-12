@@ -943,6 +943,8 @@ def build_app(
             "data_source": data_source,        # "measured" | "analytical"
             "formula": formula,                # analytical only — explanation string
             "params_billion": (_params / 1e9) if _params else None,
+            # P0-C:最近一次实测 scaling sweep(没跑过为 None)→ 图上叠实测扩展曲线
+            "scaling": _scaling["result"],
         }
 
     # === GET /api/diagnoses ===
@@ -1129,6 +1131,138 @@ def build_app(
                 logger.exception("[bench] failed to record failure for %s", run_id)
         finally:
             _bench_runs.pop(run_id, None)
+
+    # === P0-C:roofline 实测 scaling 闭环 ===
+    # 理论 batch-scaling envelope 是线性带宽外推;这里串行压测 B∈{1,4,16,64} 把**实测**
+    # 扩展曲线叠上去 —— 缺口从哪个 B 张开 = 真实瓶颈位置(调度/KV/launch),外推变实测。
+    _scaling: dict[str, Any] = {"running": False, "progress": None, "result": None, "error": None}
+
+    def _vllm_base_url() -> str:
+        """vLLM OpenAI 端点:插件与 vllm 同机,从启动 cmdline 解析 --host/--port。"""
+        host, port = "127.0.0.1", "8000"
+        args = cmdline or []
+        for i, a in enumerate(args):
+            if a == "--port" and i + 1 < len(args):
+                port = args[i + 1]
+            elif a.startswith("--port="):
+                port = a.split("=", 1)[1]
+            elif a == "--host" and i + 1 < len(args):
+                host = args[i + 1]
+            elif a.startswith("--host="):
+                host = a.split("=", 1)[1]
+        if host in ("0.0.0.0", "::"):
+            host = "127.0.0.1"
+        return f"http://{host}:{port}/v1"
+
+    def _served_model() -> str | None:
+        mc = getattr(vllm_config, "model_config", None)
+        if mc is None:
+            return None
+        smn = getattr(mc, "served_model_name", None)
+        if isinstance(smn, (list, tuple)) and smn:
+            return str(smn[0])
+        if isinstance(smn, str) and smn:
+            return smn
+        m = getattr(mc, "model", None)
+        return str(m) if m else None
+
+    def _scaling_verdict(pts: list[dict[str, Any]]) -> dict[str, Any] | None:
+        """实测点 vs 理论 envelope 的缺口分析 → 可行动结论(P0-C 的'给结论'层)。
+
+        decode AI≈并发 B → envelope(B) = min(mem_bw_tbs×B, peak_tflops)。
+        缺口 <30% 视为"跟随";首个 ≥30% 的 B = 瓶颈转移点。
+        """
+        if gpu_peak is None or not pts:
+            return None
+        peak_c = gpu_peak.bf16_tflops
+        bw_tbs = gpu_peak.mem_bw_gbs / 1000.0
+        rows: list[dict[str, Any]] = []
+        for p in pts:
+            if not p.get("tflops"):
+                continue
+            env = min(bw_tbs * p["b"], peak_c)
+            gap = max(0.0, 1.0 - p["tflops"] / env) * 100.0
+            rows.append({**p, "envelope_tflops": round(env, 2), "gap_pct": round(gap, 1)})
+        if not rows:
+            return None
+        gap_t = 30.0
+        follow = [r for r in rows if r["gap_pct"] < gap_t]
+        diverge = [r for r in rows if r["gap_pct"] >= gap_t]
+        if not diverge:
+            last = rows[-1]
+            text = (f"实测扩展曲线贴合理论 envelope(并发 {last['b']} 缺口仅 {last['gap_pct']:.0f}%)"
+                    f"—— 带宽余量真实可兑现,继续加并发仍有收益。")
+        else:
+            d0 = diverge[0]
+            head = f"并发 ≤{follow[-1]['b']} 跟随 envelope;" if follow else ""
+            text = (head + f"并发 {d0['b']} 实测偏离理论 {d0['gap_pct']:.0f}% —— 瓶颈转移到"
+                    f"调度/KV cache/launch 开销,扩并发收益递减;检查 max_num_seqs、"
+                    f"gpu_memory_utilization(KV 容量)与 cudagraph 覆盖。")
+        return {"rows": rows, "text": text}
+
+    async def _run_scaling_sweep(levels: list[int], per_level_s: int,
+                                 endpoint: str, model: str) -> None:
+        try:
+            pts: list[dict[str, Any]] = []
+            for i, b in enumerate(levels):
+                _scaling["progress"] = f"并发 {b} 压测中({i + 1}/{len(levels)})"
+                scenario = StaticScenario(
+                    name=f"scaling-b{b}", endpoint=endpoint, model=model,
+                    prompt_tokens=64, output_tokens=200, concurrency=b,
+                    duration_s=per_level_s, warmup_s=4, timeout_s=90.0,
+                    api="completions", prompt_source="synthetic",
+                )
+                scenario.validate()
+                async with OpenAIStreamClient(endpoint, timeout_s=scenario.timeout_s) as client:
+                    summary = await run_static(scenario, client)
+                tps = summary.output_throughput_tps
+                pts.append({
+                    "b": b, "tps": round(tps, 1),
+                    # decode 每 token FLOPs ≈ 2·params(与 roofline analytical 同口径)
+                    "tflops": round(2.0 * _params * tps / 1e12, 3) if _params else None,
+                    "ok": summary.ok, "errors": summary.errors,
+                    "tpot_p50_ms": summary.tpot_ms.p50,
+                })
+            _scaling["result"] = {
+                "points": pts,
+                "verdict": _scaling_verdict(pts),
+                "per_level_s": per_level_s,
+                "finished_at": time.time(),
+            }
+        except Exception as e:  # noqa: BLE001
+            logger.exception("[pping-lang] scaling sweep failed")
+            _scaling["error"] = f"{type(e).__name__}: {e}"
+        finally:
+            _scaling["running"] = False
+            _scaling["progress"] = None
+
+    @app.post("/api/roofline/scaling_sweep", status_code=202)
+    async def roofline_scaling_sweep(
+        levels: str = Query("1,4,16,64", description="并发档,逗号分隔"),
+        per_level_s: int = Query(25, ge=5, le=120, description="每档压测秒数"),
+    ) -> dict[str, Any]:
+        if _scaling["running"]:
+            raise HTTPException(409, "scaling sweep 已在运行")
+        if not _params:
+            raise HTTPException(400, "缺模型架构信息,无法把 tok/s 换算成 TFLOPs")
+        model = _served_model()
+        if not model:
+            raise HTTPException(400, "拿不到模型名(vllm_config 不可用)")
+        try:
+            lv = sorted({int(x) for x in levels.split(",") if x.strip()})
+        except ValueError:
+            raise HTTPException(422, f"levels 解析失败: {levels!r}")
+        if not lv:
+            raise HTTPException(422, "levels 为空")
+        _scaling.update(running=True, error=None, progress="启动中")
+        asyncio.create_task(_run_scaling_sweep(lv, per_level_s, _vllm_base_url(), model))
+        return {"status": "running", "levels": lv, "per_level_s": per_level_s,
+                "eta_s": len(lv) * (per_level_s + 6)}
+
+    @app.get("/api/roofline/scaling")
+    def roofline_scaling() -> dict[str, Any]:
+        return {"running": _scaling["running"], "progress": _scaling["progress"],
+                "error": _scaling["error"], "result": _scaling["result"]}
 
     # === GET /api/bench/prompt-sources — UI dropdown discovery ===
     @app.get("/api/bench/prompt-sources")
