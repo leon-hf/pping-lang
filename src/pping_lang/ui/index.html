@@ -672,19 +672,25 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
                             <div style="font-size: 11px; font-weight: 600; color: var(--muted); margin-bottom: 7px; text-transform: uppercase; letter-spacing: 0.04em;">
                               最深热点 <span style="font-weight: 400; text-transform: none; color: var(--muted-2);">· PC sampling 落到指令地址(stall 样本集中在哪)</span>
                             </div>
-                            <!-- 轨一:可映射 → 源码行 -->
+                            <!-- 轨一:可映射 → Python 源码行(行号 + 占比条 + 该行代码原文)-->
                             <template x-if="kernelHotspot(k).mappable && kernelHotspot(k).lines.length">
-                              <div style="display: flex; flex-direction: column; gap: 4px; max-width: 580px;">
+                              <div style="display: flex; flex-direction: column; gap: 9px; max-width: 640px;">
                                 <template x-for="ln in kernelHotspot(k).lines" :key="ln.loc">
-                                  <div style="display: flex; align-items: center; gap: 8px;">
-                                    <div style="flex: 1; font-size: 11.5px; font-family: var(--mono, ui-monospace, monospace); color: var(--indigo);" x-text="ln.loc"></div>
-                                    <div style="width: 140px; background: #e9ebee; border-radius: 3px; height: 12px; overflow: hidden;">
-                                      <div :style="`width:${Math.min(100, ln.pct)}%;height:100%;background:var(--indigo)`"></div>
+                                  <div>
+                                    <div style="display: flex; align-items: center; gap: 8px;">
+                                      <div style="flex: 1; font-size: 11.5px; font-family: var(--mono, ui-monospace, monospace); color: var(--indigo);" x-text="ln.loc"></div>
+                                      <div style="width: 140px; background: #e9ebee; border-radius: 3px; height: 12px; overflow: hidden;">
+                                        <div :style="`width:${Math.min(100, ln.pct)}%;height:100%;background:var(--indigo)`"></div>
+                                      </div>
+                                      <div style="width: 46px; text-align: right; font-size: 11px; font-variant-numeric: tabular-nums;" x-text="fmt(ln.pct, 1) + '%'"></div>
                                     </div>
-                                    <div style="width: 46px; text-align: right; font-size: 11px; font-variant-numeric: tabular-nums;" x-text="fmt(ln.pct, 1) + '%'"></div>
+                                    <!-- 该行 Python 源码原文(浅色代码块,GitHub-light 风)-->
+                                    <div x-show="ln.code" style="margin-top: 3px; padding: 5px 10px; background: var(--surface-alt); border: 1px solid var(--border); border-radius: 5px; overflow-x: auto;">
+                                      <code style="font-family: var(--mono, ui-monospace, monospace); font-size: 11.5px; color: var(--text); white-space: pre;"><span style="color: var(--muted-2); user-select: none;" x-text="ln.line + ' │ '"></span><span x-text="ln.code"></span></code>
+                                    </div>
                                   </div>
                                 </template>
-                                <div style="font-size: 11px; color: var(--muted-2); margin-top: 3px;" x-text="'源文件:' + (kernelHotspot(k).lines[0].path || '')"></div>
+                                <div style="font-size: 11px; color: var(--muted-2);" x-text="'源文件:' + (kernelHotspot(k).lines[0].path || '')"></div>
                               </div>
                             </template>
                             <!-- 轨二:闭源库 → SASS 偏移 + kernel 名解码 -->
