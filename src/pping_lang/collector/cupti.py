@@ -1344,6 +1344,8 @@ class PcSamplingController:
     # P3 行级归因:每窗最多关联的 kernel 数 / 每 kernel 取样关联的热点 PC 数(界定开销)
     _PC_TOP_KERNELS = 12
     _PC_TOP_OFFSETS = 40
+    # top-N 之外再多扫这么多 kernel,专门捞"能映射到源码行"的(让源码行轨即使不在最热也可见)
+    _PC_EXTRA_SCAN = 20
 
     def _get_correlator(self) -> Any:
         if not self._correlator_init:
@@ -1372,25 +1374,20 @@ class PcSamplingController:
         corr = self._get_correlator()
         from pping_lang.native.sass_source import decode_kernel_name  # noqa: PLC0415
 
-        out: list[dict[str, Any]] = []
-        for kernel, samples in ranked[:self._PC_TOP_KERNELS]:
+        def build_entry(kernel: str, samples: list[PcSample],
+                        *, minor: bool = False) -> dict[str, Any] | None:
             total = sum(s.samples for s in samples)
             if total <= 0:
-                continue
+                return None
             samples.sort(key=lambda s: s.samples, reverse=True)
             entry: dict[str, Any] = {
-                "kernel": kernel,
-                "samples": total,
+                "kernel": kernel, "samples": total, "minor": minor,
                 "decode": decode_kernel_name(kernel),
-                "mappable": False,
-                "lines": [],
-                "sass": [],
+                "mappable": False, "lines": [], "sass": [],
             }
             # 源码行聚合(只关联本 kernel 最热的若干 PC,界定开销)
             by_line: dict[str, dict[str, Any]] = {}
-            mapped_samp = 0
             if corr is not None and corr.available:
-                hot = samples[0]
                 for s in samples[:self._PC_TOP_OFFSETS]:
                     src = corr.correlate(s.cubin_crc, s.pc_offset, kernel)
                     if src:
@@ -1398,20 +1395,31 @@ class PcSamplingController:
                         rec = by_line.setdefault(loc, {"loc": loc, "samples": 0,
                                                        "path": src[1], "line": src[0]})
                         rec["samples"] += s.samples
-                        mapped_samp += s.samples
             if by_line:
                 entry["mappable"] = True
-                top_lines = sorted(by_line.values(), key=lambda r: r["samples"], reverse=True)[:4]
-                for r in top_lines:
-                    entry["lines"].append({"loc": r["loc"], "path": r["path"],
-                                           "line": r["line"],
+                for r in sorted(by_line.values(), key=lambda r: r["samples"], reverse=True)[:4]:
+                    entry["lines"].append({"loc": r["loc"], "path": r["path"], "line": r["line"],
                                            "pct": round(100.0 * r["samples"] / total, 1)})
             else:
-                # 闭源轨:给最热 SASS 偏移(top 3)
-                for s in samples[:3]:
+                for s in samples[:3]:  # 闭源轨:最热 SASS 偏移(top 3)
                     entry["sass"].append({"offset": f"0x{s.pc_offset:x}",
                                           "pct": round(100.0 * s.samples / total, 1)})
-            out.append(entry)
+            return entry
+
+        out: list[dict[str, Any]] = []
+        for kernel, samples in ranked[:self._PC_TOP_KERNELS]:
+            e = build_entry(kernel, samples)
+            if e:
+                out.append(e)
+        # 额外扫一截,把能映射到源码行的 kernel 也带出来(标 minor)——让源码行轨即便不在最热也可见。
+        # 闭源(映射不到)的不重复加,避免一堆小 SASS 条目噪音。
+        seen = {e["kernel"] for e in out}
+        for kernel, samples in ranked[self._PC_TOP_KERNELS:self._PC_TOP_KERNELS + self._PC_EXTRA_SCAN]:
+            if kernel in seen:
+                continue
+            e = build_entry(kernel, samples, minor=True)
+            if e and e["mappable"]:
+                out.append(e)
         return out
 
     def _push_metrics(self, stats: dict[str, float]) -> None:
