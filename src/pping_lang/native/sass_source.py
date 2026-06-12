@@ -112,6 +112,12 @@ def decode_kernel_name(name: str) -> str | None:
             return "vLLM 自定义 · SiLU/激活"
         if low.find("3c10") >= 0 and "vllm" in low:
             return "vLLM 自定义 CUDA kernel"
+        if "flashinfer" in low:
+            if "sampling" in low or "topk" in low or "topp" in low:
+                return "FlashInfer · 采样 kernel"
+            return "FlashInfer kernel"
+        if "gemvx" in low or "gemv" in low:
+            return "cuBLAS GEMV(矩阵×向量,小 batch 典型)"
         if "at6native" in low or "at::native" in low:
             return "PyTorch · 原生 elementwise/reduce kernel"
         if "elementwise" in low:
