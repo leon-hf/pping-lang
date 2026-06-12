@@ -345,6 +345,20 @@ class StallSample:
     samples: int      # 该 (kernel, reason) 本批样本数
 
 
+@dataclass(slots=True, frozen=True)
+class PcSample:
+    """P3:一条 per-PC 聚合行(某 kernel 内某指令地址的累计样本)。
+
+    cubinCrc + pcOffset 是连到源码行/SASS 偏移的钥匙(见 native/sass_source.py)。
+    同样在库内预聚合,只在 deep-evidence 窗末取一次,不过单样本桥。
+    """
+
+    kernel: str       # kernel 函数名(关联用,须与 cubin 符号同源)
+    cubin_crc: int    # CUpti cubinCrc(匹配磁盘 cubin)
+    pc_offset: int    # 函数内指令偏移
+    samples: int      # 该 PC 的累计样本数
+
+
 class StallAggregator:
     """累加一窗内的 stall 样本,roll-up 时算出语义类占比 + per-kernel stall 画像。
 
@@ -1018,6 +1032,16 @@ class _PpingStallRow(ctypes.Structure):
     ]
 
 
+class _PpingPcRow(ctypes.Structure):
+    """镜像 PpingPcRow(P3 per-PC 直方图行):cubinCrc + pcOffset + samples + kernel。"""
+    _fields_ = [
+        ("cubin_crc", ctypes.c_ulonglong),
+        ("pc_offset", ctypes.c_ulonglong),
+        ("samples", ctypes.c_ulonglong),
+        ("kernel", ctypes.c_char * 256),
+    ]
+
+
 def _default_so_path() -> str:
     """libppingcupti.so 路径:env 覆盖 > 仓库内 native/ 构建产物。"""
     env = os.environ.get("PPING_LANG_PCS_SO")
@@ -1033,6 +1057,7 @@ class PcSamplingLib(Protocol):
     def start(self, period_log2: int) -> int: ...        # 0=成功,负=错误码
     def stop(self) -> int: ...
     def drain(self) -> list[StallSample]: ...            # 已聚合行(reason 已解析成名)
+    def drain_pc(self) -> list[PcSample]: ...            # P3 per-PC 直方图(可空=未开/老 .so)
     def overhead(self) -> tuple[float, int, int]: ...    # (getdata_ms, dropped, hwfull)
     def last_error(self) -> str: ...
 
@@ -1045,9 +1070,11 @@ class CtypesPcSamplingLib:
     """
 
     _MAX_ROWS = 16384
+    _MAX_PC_ROWS = 200000   # per-PC 直方图行远多于 (kernel,reason);宽裕些,溢出计入 dropped
 
     def __init__(self, so_path: str | None = None) -> None:
         self._lib: Any = None
+        self._pc_buf: Any = None
         self._reason_cache: dict[int, str] = {}
         path = so_path or _default_so_path()
         try:
@@ -1066,6 +1093,10 @@ class CtypesPcSamplingLib:
         c.pping_pcs_stop.restype = ctypes.c_int
         c.pping_pcs_drain.argtypes = [ctypes.POINTER(_PpingStallRow), ctypes.c_int]
         c.pping_pcs_drain.restype = ctypes.c_int
+        # P3 per-PC 直方图 drain(老 .so 没有此符号 → getattr 容错,降级为空)
+        if hasattr(c, "pping_pcs_drain_pc"):
+            c.pping_pcs_drain_pc.argtypes = [ctypes.POINTER(_PpingPcRow), ctypes.c_int]
+            c.pping_pcs_drain_pc.restype = ctypes.c_int
         c.pping_pcs_stall_reason_name.argtypes = [ctypes.c_uint, ctypes.c_char_p, ctypes.c_int]
         c.pping_pcs_stall_reason_name.restype = ctypes.c_int
         c.pping_pcs_overhead.argtypes = [
@@ -1116,6 +1147,25 @@ class CtypesPcSamplingLib:
             ))
         return out
 
+    def drain_pc(self) -> list[PcSample]:
+        """P3:拉走 per-PC 直方图(snapshot-swap)。需 .so 带 drain_pc 符号 + 运行时
+        PPING_LANG_PCS_PC_HIST=1 才有数据;否则返回空(优雅降级)。"""
+        if self._lib is None or not hasattr(self._lib, "pping_pcs_drain_pc"):
+            return []
+        if getattr(self, "_pc_buf", None) is None:
+            self._pc_buf = (_PpingPcRow * self._MAX_PC_ROWS)()
+        n = int(self._lib.pping_pcs_drain_pc(self._pc_buf, self._MAX_PC_ROWS))
+        out: list[PcSample] = []
+        for i in range(max(0, n)):
+            row = self._pc_buf[i]
+            out.append(PcSample(
+                kernel=row.kernel.decode(errors="replace"),
+                cubin_crc=int(row.cubin_crc),
+                pc_offset=int(row.pc_offset),
+                samples=int(row.samples),
+            ))
+        return out
+
     def overhead(self) -> tuple[float, int, int]:
         if self._lib is None:
             return (0.0, 0, 0)
@@ -1136,10 +1186,12 @@ class FakePcSamplingLib:
     """测试 / 无 GPU 用的 PC Sampling 库替身。脚本化 drain 返回的合成行。"""
 
     def __init__(self, *, available: bool = True, start_rc: int = 0,
-                 drain_batches: list[list[StallSample]] | None = None) -> None:
+                 drain_batches: list[list[StallSample]] | None = None,
+                 pc_batches: list[list[PcSample]] | None = None) -> None:
         self._available = available
         self._start_rc = start_rc
         self._batches = list(drain_batches or [])
+        self._pc_batches = list(pc_batches or [])
         self._overhead = (0.0, 0, 0)
         self.started = False
 
@@ -1157,6 +1209,9 @@ class FakePcSamplingLib:
 
     def drain(self) -> list[StallSample]:
         return self._batches.pop(0) if self._batches else []
+
+    def drain_pc(self) -> list[PcSample]:
+        return list(self._pc_batches.pop(0)) if self._pc_batches else []
 
     def overhead(self) -> tuple[float, int, int]:
         return self._overhead
@@ -1195,6 +1250,8 @@ class PcSamplingController:
         self._busy = Lock()
         self._started = False
         self._last_result: dict[str, Any] | None = None
+        self._correlator: Any = None       # P3 SourceCorrelator,惰性建
+        self._correlator_init = False
 
     @property
     def available(self) -> bool:
@@ -1248,11 +1305,13 @@ class PcSamplingController:
                     return p
             agg = StallAggregator(self._classifier)
             self._lib.drain()  # 清掉窗开始前已累计的,只取本窗
+            self._lib.drain_pc()  # P3:同样清掉 per-PC 直方图,只取本窗
             t0 = clock()
             while clock() - t0 < window_s:
                 sleep(drain_interval_s)
                 agg.add(self._lib.drain())
             agg.add(self._lib.drain())  # 收尾再 drain 一次
+            pcs = self._lib.drain_pc()  # P3:窗末取 per-PC 直方图(整窗累计)
             getdata_ms, dropped, hwfull = self._lib.overhead()
             table = agg.kernel_stall_table(self._top_n)
             class_shares = agg.kernel_class_shares()    # 须在 snapshot_and_reset(清零)之前取
@@ -1272,6 +1331,7 @@ class PcSamplingController:
                 "kernel_class_shares": class_shares,
                 "reason_detail": reason_detail,
                 "kernel_table": table,
+                "pc_hotspots": self._pc_hotspots(pcs),
                 "overhead": {"getdata_ms": getdata_ms, "dropped": dropped, "hwfull": hwfull},
                 "error": None,
             }
@@ -1280,6 +1340,79 @@ class PcSamplingController:
             return result
         finally:
             self._busy.release()
+
+    # P3 行级归因:每窗最多关联的 kernel 数 / 每 kernel 取样关联的热点 PC 数(界定开销)
+    _PC_TOP_KERNELS = 12
+    _PC_TOP_OFFSETS = 40
+
+    def _get_correlator(self) -> Any:
+        if not self._correlator_init:
+            self._correlator_init = True
+            try:
+                from pping_lang.native.sass_source import SourceCorrelator  # noqa: PLC0415
+                self._correlator = SourceCorrelator()
+            except Exception:  # noqa: BLE001 — 关联是增益,失败不影响采集
+                self._correlator = None
+        return self._correlator
+
+    def _pc_hotspots(self, pcs: list[PcSample]) -> list[dict[str, Any]]:
+        """把 per-PC 直方图压成 per-kernel"最深热点"(双轨:源码行 / SASS 偏移+名解码)。
+
+        可映射(Triton/带 lineinfo)→ 按源码行聚合,给 top 行 + 占比;
+        闭源(cutlass/flash)→ 给最热 SASS 偏移 + kernel 名解码(tile/dtype)。
+        """
+        if not pcs:
+            return []
+        # 按 kernel 聚合
+        by_kernel: dict[str, list[PcSample]] = {}
+        for p in pcs:
+            by_kernel.setdefault(p.kernel, []).append(p)
+        ranked = sorted(by_kernel.items(),
+                        key=lambda kv: sum(s.samples for s in kv[1]), reverse=True)
+        corr = self._get_correlator()
+        from pping_lang.native.sass_source import decode_kernel_name  # noqa: PLC0415
+
+        out: list[dict[str, Any]] = []
+        for kernel, samples in ranked[:self._PC_TOP_KERNELS]:
+            total = sum(s.samples for s in samples)
+            if total <= 0:
+                continue
+            samples.sort(key=lambda s: s.samples, reverse=True)
+            entry: dict[str, Any] = {
+                "kernel": kernel,
+                "samples": total,
+                "decode": decode_kernel_name(kernel),
+                "mappable": False,
+                "lines": [],
+                "sass": [],
+            }
+            # 源码行聚合(只关联本 kernel 最热的若干 PC,界定开销)
+            by_line: dict[str, dict[str, Any]] = {}
+            mapped_samp = 0
+            if corr is not None and corr.available:
+                hot = samples[0]
+                for s in samples[:self._PC_TOP_OFFSETS]:
+                    src = corr.correlate(s.cubin_crc, s.pc_offset, kernel)
+                    if src:
+                        loc = f"{os.path.basename(src[1])}:{src[0]}"
+                        rec = by_line.setdefault(loc, {"loc": loc, "samples": 0,
+                                                       "path": src[1], "line": src[0]})
+                        rec["samples"] += s.samples
+                        mapped_samp += s.samples
+            if by_line:
+                entry["mappable"] = True
+                top_lines = sorted(by_line.values(), key=lambda r: r["samples"], reverse=True)[:4]
+                for r in top_lines:
+                    entry["lines"].append({"loc": r["loc"], "path": r["path"],
+                                           "line": r["line"],
+                                           "pct": round(100.0 * r["samples"] / total, 1)})
+            else:
+                # 闭源轨:给最热 SASS 偏移(top 3)
+                for s in samples[:3]:
+                    entry["sass"].append({"offset": f"0x{s.pc_offset:x}",
+                                          "pct": round(100.0 * s.samples / total, 1)})
+            out.append(entry)
+        return out
 
     def _push_metrics(self, stats: dict[str, float]) -> None:
         if self._sink is None:
