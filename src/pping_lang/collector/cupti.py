@@ -1350,6 +1350,18 @@ class PcSamplingController:
         self._started = True
         return {"available": True}
 
+    def reprime(self, period_log2: int = 12) -> dict[str, Any]:
+        """停止再启动采样 —— 自愈被打断的采样(实测:cudagraph capture 会把早 prime 的
+        采样打停,之后 drain 全是空窗;capture 后重启即恢复)。start-after-workload 实测可行
+        (与 §12 的"enable 须早于 workload"不冲突:那是首次 enable 的硬约束,重启是已 enable
+        过的 reconfigure)。"""
+        try:
+            self._lib.stop()
+        except Exception:  # noqa: BLE001
+            pass
+        self._started = False
+        return self.prime(period_log2)
+
     def close(self) -> None:
         """停止采样(进程收尾)。幂等。"""
         if self._started:
