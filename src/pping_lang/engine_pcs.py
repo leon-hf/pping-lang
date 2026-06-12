@@ -80,7 +80,16 @@ def _driver_loop() -> None:
         logger.warning("[pping-lang] PCS 驱动:绑定 CUDA context 失败 %s", e)
         return
 
-    # 3) prime(复用注入的 subscriber)
+    # 3) prime —— 关键:必须在 cudagraph capture **之后**(实测,见 §cudagraph):
+    #    早 prime(capture 前)会被 capture 把 CUPTI 采样状态污染,且 stop+start 在同进程内
+    #    救不回来(进程级污染,每窗 0 样本 / getdata_ms≈0.1ms)。而 capture 后干净 start 稳定
+    #    工作(实测 172 万样本)。capture 发生在引擎 warmup 阶段(serving 之前),故延迟首 prime
+    #    跨过它。延迟默认 30s,大模型(capture 久)用 PPING_LANG_PCS_PRIME_DELAY_S 调大。
+    prime_delay_s = float(os.environ.get("PPING_LANG_PCS_PRIME_DELAY_S", "30"))
+    logger.info("[pping-lang] PCS 驱动:延迟 %.0fs 等 cudagraph capture 完成再 prime(避免污染)",
+                prime_delay_s)
+    time.sleep(prime_delay_s)
+
     from pping_lang.collector.cupti import (  # noqa: PLC0415
         CtypesPcSamplingLib, PcSamplingController,
     )
@@ -100,12 +109,18 @@ def _driver_loop() -> None:
     seen_samples = False
     dry_windows = 0
     last_reprime = 0.0
+    reprime_count = 0
+    window_count = 0
     reprime_cooldown_s = float(os.environ.get("PPING_LANG_PCS_REPRIME_COOLDOWN_S", "20"))
     dry_threshold = int(os.environ.get("PPING_LANG_PCS_REPRIME_DRY_WINDOWS", "1"))
+    status_file = result_file + ".status"
     while True:
         try:
             res = ctl.run_window(window_s=window_s, period_log2=period_log2)
+            window_count += 1
             samples = (res.get("sample_total") or 0) if res.get("available") else 0
+            ov = res.get("overhead") or {}
+            did_reprime = False
             if samples > 0:
                 seen_samples = True
                 dry_windows = 0
@@ -118,9 +133,19 @@ def _driver_loop() -> None:
                         and now - last_reprime >= reprime_cooldown_s):
                     logger.info("[pping-lang] PCS 驱动:采样枯竭(连续 %d 空窗),重启采样自愈"
                                 "(疑似 cudagraph capture 打断)", dry_windows)
-                    ctl.reprime(period_log2)
+                    rp = ctl.reprime(period_log2)
                     last_reprime = now
                     dry_windows = 0
+                    reprime_count += 1
+                    did_reprime = True
+                    res.setdefault("_reprime", {})["result"] = rp
+            # 心跳:每窗写状态(诊断 cudagraph 自愈),与主结果文件分开
+            _atomic_write_json(status_file, {
+                "window": window_count, "samples": samples, "seen": seen_samples,
+                "dry": dry_windows, "reprimes": reprime_count, "did_reprime": did_reprime,
+                "getdata_ms": ov.get("getdata_ms"), "available": res.get("available"),
+                "err": res.get("error"),
+            })
         except Exception:  # noqa: BLE001
             logger.exception("[pping-lang] PCS 驱动:窗口失败")
             time.sleep(2.0)
