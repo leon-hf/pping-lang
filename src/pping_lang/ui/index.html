@@ -1052,13 +1052,17 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
         <!-- 结果 -->
         <template x-if="deep.result && deep.result.available">
           <div style="margin-top: 14px;">
-            <div x-show="deep.findings.length" style="display: flex; flex-direction: column; gap: 14px; margin-bottom: 20px;">
-              <template x-for="(f, i) in deep.findings" :key="i">
-                <div class="kfinding" :class="f.level">
-                  <div class="kf-title" x-text="f.title"></div>
-                  <div class="kf-detail" x-text="f.detail"></div>
-                </div>
-              </template>
+            <!-- 注意:x-show 和内联 display:flex 不能放同一元素 —— Alpine 切回显示时把
+                 display 置空回退成 block,flex/gap 全丢(实测踩过:卡片黏死)。拆两层。 -->
+            <div x-show="deep.findings.length" style="margin-bottom: 20px;">
+              <div style="display: flex; flex-direction: column; gap: 14px;">
+                <template x-for="(f, i) in deep.findings" :key="i">
+                  <div class="kfinding" :class="f.level">
+                    <div class="kf-title" x-text="f.title"></div>
+                    <div class="kf-detail" x-text="f.detail"></div>
+                  </div>
+                </template>
+              </div>
             </div>
 
             <!-- #1 Warp 周期三态:发指令 / 就绪未选中(余量) / 真 stall -->
