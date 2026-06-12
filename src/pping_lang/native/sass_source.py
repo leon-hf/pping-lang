@@ -216,7 +216,12 @@ class SourceCorrelator:
             p.pcOffset = offset
             try:
                 if self._lib.cuptiGetSassToSourceCorrelation(ctypes.byref(p)) == 0 and p.lineNumber:
-                    res = (int(p.lineNumber), p.fileName.decode() if p.fileName else "?")
+                    fname = p.fileName.decode() if p.fileName else "?"
+                    dname = p.dirName.decode() if p.dirName else ""
+                    # CUPTI 把目录(dirName)和文件名(fileName)分开返回 —— 拼成全路径才能读到
+                    # 源码原文(os.path.join 对 fname 已是绝对路径的情况也安全)
+                    full = os.path.join(dname, fname) if dname else fname
+                    res = (int(p.lineNumber), full)
             except Exception:  # noqa: BLE001
                 res = None
         self._line_cache[key] = res
