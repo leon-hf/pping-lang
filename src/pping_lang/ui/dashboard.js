@@ -968,13 +968,10 @@ function dashboard() {
       }
     },
     // kernel 数据是否"实时"(采集时刻够近),用于新鲜度横幅
-    // 延迟分位分布条:返回 [0..p50, p50..p95, p95..p99] 三段占 p99 的宽度%
-    pctSeg(d) {
-      if (!d || !d.p99 || d.p99 <= 0) return [0, 0, 0];
-      const w1 = 100 * d.p50 / d.p99;
-      const w2 = 100 * (d.p95 - d.p50) / d.p99;
-      const w3 = 100 * (d.p99 - d.p95) / d.p99;
-      return [Math.max(0, w1), Math.max(0, w2), Math.max(0, w3)];
+    // 延迟分位条(三行式):某分位占 p99 的宽度%(p99=满刻度;三段挤一条看不清,实测反馈)
+    pctW(d, q) {
+      if (!d || !d.p99 || d.p99 <= 0 || d[q] == null) return 0;
+      return Math.max(2, Math.min(100, 100 * d[q] / d.p99));
     },
     kernelFresh() {
       const a = this.kernels.snapshot_age_s;

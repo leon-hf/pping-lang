@@ -201,14 +201,11 @@
 SLA 常见档：<200ms 即时；<500ms 流畅；<1s 可接受；>2s 用户开始流失。">
           <div class="label">TTFT 平均 <span class="kpi-sub-label">首 token 延迟 · <span x-text="kpis.ttft?.n ?? 0"></span> 请求</span></div>
           <div class="value"><span x-text="fmt(kpis.ttft?.avg, 0)"></span><span class="unit">ms</span></div>
-          <div x-show="kpis.ttft && kpis.ttft.p99" title="分位分布:深色 0→p50,中 p50→p95,浅 p95→p99。条整体越短越好,浅色段越长 = 尾部越差。">
-            <div class="pct-bar">
-              <i :style="`width:${pctSeg(kpis.ttft)[0]}%`"></i><i :style="`width:${pctSeg(kpis.ttft)[1]}%`"></i><i :style="`width:${pctSeg(kpis.ttft)[2]}%`"></i>
-            </div>
-            <div class="pct-labels">
-              <span>p50 <b x-text="fmt(kpis.ttft?.p50, 0)"></b></span>
-              <span>p95 <b x-text="fmt(kpis.ttft?.p95, 0)"></b></span>
-              <span>p99 <b x-text="fmt(kpis.ttft?.p99, 0)"></b></span>
+          <div x-show="kpis.ttft && kpis.ttft.p99" title="分位分布:每行一条,p99 = 满刻度。p95/p99 行越接近 p50 行 = 尾部越稳;p99 远长于 p50 = 尾延迟恶化。">
+            <div class="pct-rows">
+              <div class="pct-row"><span class="pq">p50</span><div class="pr-track"><i :style="`width:${pctW(kpis.ttft,'p50')}%`"></i></div><b x-text="fmt(kpis.ttft?.p50, 0)"></b></div>
+              <div class="pct-row"><span class="pq">p95</span><div class="pr-track"><i :style="`width:${pctW(kpis.ttft,'p95')}%`"></i></div><b x-text="fmt(kpis.ttft?.p95, 0)"></b></div>
+              <div class="pct-row"><span class="pq">p99</span><div class="pr-track"><i :style="`width:${pctW(kpis.ttft,'p99')}%`"></i></div><b x-text="fmt(kpis.ttft?.p99, 0)"></b></div>
             </div>
           </div>
         </div>
@@ -227,14 +224,11 @@ ITL fallback：vllm <0.20 不发 TPOT 时，用 iter 间隔近似（语义略不
           </div>
           <div class="value"><span x-text="fmt(kpis.tpot?.avg, 0)"></span><span class="unit">ms</span></div>
           <div x-show="kpis.tpot && kpis.tpot.p99"
-               :title="(kpis.tpot_source === 'itl' ? '注意:当前 vllm 未发 TPOT,回退到 ITL 近似。' : '') + '分位分布:深色 0→p50,中 p50→p95,浅 p95→p99。浅色段越长 = 尾部越差。告警颜色按 p99。'">
-            <div class="pct-bar">
-              <i :style="`width:${pctSeg(kpis.tpot)[0]}%`"></i><i :style="`width:${pctSeg(kpis.tpot)[1]}%`"></i><i :style="`width:${pctSeg(kpis.tpot)[2]}%`"></i>
-            </div>
-            <div class="pct-labels">
-              <span>p50 <b x-text="fmt(kpis.tpot?.p50, 0)"></b></span>
-              <span>p95 <b x-text="fmt(kpis.tpot?.p95, 0)"></b></span>
-              <span>p99 <b x-text="fmt(kpis.tpot?.p99, 0)"></b></span>
+               :title="(kpis.tpot_source === 'itl' ? '注意:当前 vllm 未发 TPOT,回退到 ITL 近似。' : '') + '分位分布:每行一条,p99 = 满刻度。p99 远长于 p50 = 尾延迟恶化。告警颜色按 p99。'">
+            <div class="pct-rows">
+              <div class="pct-row"><span class="pq">p50</span><div class="pr-track"><i :style="`width:${pctW(kpis.tpot,'p50')}%`"></i></div><b x-text="fmt(kpis.tpot?.p50, 0)"></b></div>
+              <div class="pct-row"><span class="pq">p95</span><div class="pr-track"><i :style="`width:${pctW(kpis.tpot,'p95')}%`"></i></div><b x-text="fmt(kpis.tpot?.p95, 0)"></b></div>
+              <div class="pct-row"><span class="pq">p99</span><div class="pr-track"><i :style="`width:${pctW(kpis.tpot,'p99')}%`"></i></div><b x-text="fmt(kpis.tpot?.p99, 0)"></b></div>
             </div>
           </div>
         </div>
