@@ -80,15 +80,17 @@ def _driver_loop() -> None:
         logger.warning("[pping-lang] PCS 驱动:绑定 CUDA context 失败 %s", e)
         return
 
-    # 3) prime —— 关键:必须在 cudagraph capture **之后**(实测,见 §cudagraph):
-    #    早 prime(capture 前)会被 capture 把 CUPTI 采样状态污染,且 stop+start 在同进程内
-    #    救不回来(进程级污染,每窗 0 样本 / getdata_ms≈0.1ms)。而 capture 后干净 start 稳定
-    #    工作(实测 172 万样本)。capture 发生在引擎 warmup 阶段(serving 之前),故延迟首 prime
-    #    跨过它。延迟默认 30s,大模型(capture 久)用 PPING_LANG_PCS_PRIME_DELAY_S 调大。
-    prime_delay_s = float(os.environ.get("PPING_LANG_PCS_PRIME_DELAY_S", "30"))
-    logger.info("[pping-lang] PCS 驱动:延迟 %.0fs 等 cudagraph capture 完成再 prime(避免污染)",
-                prime_delay_s)
-    time.sleep(prime_delay_s)
+    # 3) prime。
+    #    ★ cudagraph 已知限制(实测,见 _design-notes):eager serve 工作良好(2700万样本/窗);
+    #    但 cudagraph serve 稳态下,decode 的 FULL graph 回放 kernel **采不到**(每窗 0 样本 /
+    #    getdata_ms≈0.1ms),只有启动期 eager/piecewise 部分能采。延迟 prime 跨过 capture 也无效
+    #    (晚 prime 仍 0)→ 不是 prime 时机问题,疑为 CUPTI×cudagraph 回放的底层限制。
+    #    故默认不延迟(=0,eager 立即可用);需排查时用 PPING_LANG_PCS_PRIME_DELAY_S 调。
+    #    要可靠的 kernel 级数据,当前用 `--enforce-eager`(诊断会话)。
+    prime_delay_s = float(os.environ.get("PPING_LANG_PCS_PRIME_DELAY_S", "0"))
+    if prime_delay_s > 0:
+        logger.info("[pping-lang] PCS 驱动:延迟 %.0fs 再 prime", prime_delay_s)
+        time.sleep(prime_delay_s)
 
     from pping_lang.collector.cupti import (  # noqa: PLC0415
         CtypesPcSamplingLib, PcSamplingController,
