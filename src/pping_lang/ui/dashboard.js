@@ -56,6 +56,12 @@ function _makeRooflineChart(ctx) {
           borderDash: [5, 4], borderWidth: 1.5, pointRadius: 3.5, pointStyle: 'rectRot',
           backgroundColor: '#a8998a', fill: false, order: 4,
         },
+        {
+          // P0-C:实测 scaling 曲线(压测扫并发档)—— 缺口从哪个 B 张开 = 真实瓶颈位置
+          label: '实测 scaling', data: [], showLine: true, borderColor: '#0d8b80',
+          borderWidth: 2, pointRadius: 5, pointHoverRadius: 8, pointStyle: 'circle',
+          backgroundColor: '#0d8b80', fill: false, order: 5,
+        },
       ],
     },
     options: {
@@ -75,6 +81,11 @@ function _makeRooflineChart(ctx) {
               }
               if (ds === 'batch scaling envelope') {
                 return `B=${ctx.raw.b}: bandwidth-bound 上界 ${ctx.parsed.y.toFixed(1)} TFLOPs/s`;
+              }
+              if (ds === '实测 scaling') {
+                return [`实测 并发${ctx.raw.b}: ${ctx.parsed.y.toFixed(2)} TFLOPs/s`,
+                        `理论 envelope: ${(ctx.raw.env || 0).toFixed(2)} TFLOPs/s`,
+                        `缺口: ${(ctx.raw.gap || 0).toFixed(0)}%`];
               }
               return `${ds}: ${ctx.parsed.y.toFixed(1)} TFLOPs/s`;
             },
@@ -157,6 +168,12 @@ function _applyRooflineData(chart, data) {
     chart.data.datasets[2].data = [];
     chart.data.datasets[3].data = [];
   }
+  // P0-C:实测 scaling 曲线(压测扫出来的真实扩展点,叠在理论 envelope 上)
+  const rows = (data.scaling && data.scaling.verdict && data.scaling.verdict.rows) || [];
+  chart.data.datasets[4].data = rows.map((r, i) => ({
+    x: r.b, y: r.tflops, b: r.b, env: r.envelope_tflops, gap: r.gap_pct,
+    label: i === rows.length - 1 ? '实测' : '', labelDy: 14, labelColor: '#0d8b80', labelBold: true,
+  }));
   chart.update('none');
 }
 
@@ -634,6 +651,7 @@ function dashboard() {
     // Verdict card — populated each refresh from the recent points
     rooflineVerdict: null,    // {bound, computeUtil, bwUtil, knee, suggestions[]}
     rooflineScale: null,      // 调优指引:{ai, cur, t32, gain, knee}(decode 强度≈并发 → 扩并发能到哪)
+    scalingSweep: { running: false, progress: null, error: null, verdict: null },  // P0-C 实测 scaling
     ttftHasData: false,
     tpotHasData: false,
     e2eHasData: false,
@@ -894,6 +912,35 @@ function dashboard() {
         if (_lastRoofline) _applyRooflineData(_kRoofChart, _lastRoofline);
       }, 60);
     },
+    // P0-C:启动实测 scaling 压测(串扫并发 1/4/16/64,约 2 分钟),轮询直到出结果
+    async startScalingSweep() {
+      if (this.scalingSweep.running) return;
+      this.scalingSweep.running = true;
+      this.scalingSweep.error = null;
+      this.scalingSweep.progress = '启动中…';
+      try {
+        const r = await fetch('/api/roofline/scaling_sweep', { method: 'POST' });
+        if (!r.ok) {
+          const e = await r.json().catch(() => ({}));
+          throw new Error(e.detail || `HTTP ${r.status}`);
+        }
+        // 轮询状态;结束后强刷一次 roofline(图 + verdict 同步上屏)
+        while (true) {
+          await new Promise(res => setTimeout(res, 4000));
+          const s = await fetch('/api/roofline/scaling').then(x => x.json());
+          if (s.error) throw new Error(s.error);
+          if (!s.running) break;
+          this.scalingSweep.progress = s.progress || '压测中…';
+        }
+        const data = await fetch('/api/roofline?seconds=60').then(x => x.json());
+        this.updateRoofline(data);
+      } catch (e) {
+        this.scalingSweep.error = String(e.message || e);
+      } finally {
+        this.scalingSweep.running = false;
+        this.scalingSweep.progress = null;
+      }
+    },
     // 读最近一次取证结果(开 Kernel tab 时调,不触发新采集)
     async loadDeepEvidence() {
       try {
@@ -1086,6 +1133,8 @@ function dashboard() {
       // verdict(roofline 本身不直观,用中位 AI/吞吐 判定,免单点 outlier 翻转结论)
       this.rooflineVerdict = this._computeRooflineVerdict(data);
       _lastRoofline = data;
+      // P0-C:实测 scaling verdict(随 roofline 响应带回)
+      this.scalingSweep.verdict = (data.scaling && data.scaling.verdict) || null;
       // 调优指引(decode 强度≈并发):当前簇 → 并发32 的带宽上界 → 拐点
       this.rooflineScale = null;
       if (data.peak && data.peak.compute_tflops && data.peak.mem_bw_tbs && (data.points || []).length) {
