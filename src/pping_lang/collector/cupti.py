@@ -359,6 +359,43 @@ class PcSample:
     samples: int      # 该 PC 的累计样本数
 
 
+@dataclass(slots=True, frozen=True)
+class LaunchSample:
+    """P3 launch 栈(MVP):某 kernel 的 native 启动栈 + 本批 launch 次数。
+
+    向外归因 —— 即便闭源 GEMM 进不去,也知道它从哪段 host 代码(nn.Linear / vLLM 自定义算子)
+    launch。kernel 名可能是 cuFuncGetName 解析的真名,或解析失败时的 func_<ptr>(此时靠 stack
+    里的算子帧识别)。
+    """
+
+    kernel: str       # cuFuncGetName 名,或 func_<ptr>(runtime 注册 kernel 解析不到名)
+    launches: int     # 本批 launch 次数
+    stack: str        # 符号化 native 栈(" <- " 连接,top→down 到 Python 解释器边界)
+
+
+# launch 栈里的"启动原语"帧(跳过它们,下一帧才是真正的算子 / kernel 身份)
+_LAUNCH_PRIM_PREFIXES = ("cudaLaunchKernel", "cuLaunchKernel", "cublas")
+
+
+def _launch_identity(stack: str) -> str:
+    """从 launch 栈取算子身份 token —— 跳过启动原语帧,取第一帧算子名的基名。
+    例:'cudaLaunchKernel <- fused_add_rms_norm(at::Tensor&...) <- ...' → 'fused_add_rms_norm'。"""
+    for frame in stack.split(" <- "):
+        f = frame.strip()
+        if any(f.startswith(p) for p in _LAUNCH_PRIM_PREFIXES):
+            continue
+        base = f[5:] if f.startswith("void ") else f
+        for sep in ("(", "<"):
+            i = base.find(sep)
+            if i > 0:
+                base = base[:i]
+        base = base.strip().split("::")[-1]
+        token = "".join(ch for ch in base if ch.isalnum() or ch == "_")
+        if len(token) >= 4:
+            return token
+    return ""
+
+
 class StallAggregator:
     """累加一窗内的 stall 样本,roll-up 时算出语义类占比 + per-kernel stall 画像。
 
@@ -1042,6 +1079,15 @@ class _PpingPcRow(ctypes.Structure):
     ]
 
 
+class _PpingLaunchRow(ctypes.Structure):
+    """镜像 PpingLaunchRow(P3 launch 栈 MVP):launches + kernel 名 + 符号化 native 栈。"""
+    _fields_ = [
+        ("launches", ctypes.c_ulonglong),
+        ("kernel", ctypes.c_char * 256),
+        ("stack", ctypes.c_char * 768),
+    ]
+
+
 def _default_so_path() -> str:
     """libppingcupti.so 路径:env 覆盖 > 仓库内 native/ 构建产物。"""
     env = os.environ.get("PPING_LANG_PCS_SO")
@@ -1058,6 +1104,7 @@ class PcSamplingLib(Protocol):
     def stop(self) -> int: ...
     def drain(self) -> list[StallSample]: ...            # 已聚合行(reason 已解析成名)
     def drain_pc(self) -> list[PcSample]: ...            # P3 per-PC 直方图(可空=未开/老 .so)
+    def drain_launches(self) -> list[LaunchSample]: ...  # P3 launch 栈(可空=未开/老 .so)
     def overhead(self) -> tuple[float, int, int]: ...    # (getdata_ms, dropped, hwfull)
     def last_error(self) -> str: ...
 
@@ -1075,6 +1122,7 @@ class CtypesPcSamplingLib:
     def __init__(self, so_path: str | None = None) -> None:
         self._lib: Any = None
         self._pc_buf: Any = None
+        self._lc_buf: Any = None
         self._reason_cache: dict[int, str] = {}
         path = so_path or _default_so_path()
         try:
@@ -1097,6 +1145,10 @@ class CtypesPcSamplingLib:
         if hasattr(c, "pping_pcs_drain_pc"):
             c.pping_pcs_drain_pc.argtypes = [ctypes.POINTER(_PpingPcRow), ctypes.c_int]
             c.pping_pcs_drain_pc.restype = ctypes.c_int
+        # P3 launch 栈 drain(同上,老 .so 无此符号则降级)
+        if hasattr(c, "pping_pcs_drain_launches"):
+            c.pping_pcs_drain_launches.argtypes = [ctypes.POINTER(_PpingLaunchRow), ctypes.c_int]
+            c.pping_pcs_drain_launches.restype = ctypes.c_int
         c.pping_pcs_stall_reason_name.argtypes = [ctypes.c_uint, ctypes.c_char_p, ctypes.c_int]
         c.pping_pcs_stall_reason_name.restype = ctypes.c_int
         c.pping_pcs_overhead.argtypes = [
@@ -1166,6 +1218,23 @@ class CtypesPcSamplingLib:
             ))
         return out
 
+    def drain_launches(self) -> list[LaunchSample]:
+        """P3:拉走 per-kernel launch 栈。需 .so 带符号 + PPING_LANG_PCS_LAUNCH_STACK=1。"""
+        if self._lib is None or not hasattr(self._lib, "pping_pcs_drain_launches"):
+            return []
+        if getattr(self, "_lc_buf", None) is None:
+            self._lc_buf = (_PpingLaunchRow * 4096)()
+        n = int(self._lib.pping_pcs_drain_launches(self._lc_buf, 4096))
+        out: list[LaunchSample] = []
+        for i in range(max(0, n)):
+            row = self._lc_buf[i]
+            out.append(LaunchSample(
+                kernel=row.kernel.decode(errors="replace"),
+                launches=int(row.launches),
+                stack=row.stack.decode(errors="replace"),
+            ))
+        return out
+
     def overhead(self) -> tuple[float, int, int]:
         if self._lib is None:
             return (0.0, 0, 0)
@@ -1187,11 +1256,13 @@ class FakePcSamplingLib:
 
     def __init__(self, *, available: bool = True, start_rc: int = 0,
                  drain_batches: list[list[StallSample]] | None = None,
-                 pc_batches: list[list[PcSample]] | None = None) -> None:
+                 pc_batches: list[list[PcSample]] | None = None,
+                 launch_batches: list[list[LaunchSample]] | None = None) -> None:
         self._available = available
         self._start_rc = start_rc
         self._batches = list(drain_batches or [])
         self._pc_batches = list(pc_batches or [])
+        self._launch_batches = list(launch_batches or [])
         self._overhead = (0.0, 0, 0)
         self.started = False
 
@@ -1212,6 +1283,9 @@ class FakePcSamplingLib:
 
     def drain_pc(self) -> list[PcSample]:
         return list(self._pc_batches.pop(0)) if self._pc_batches else []
+
+    def drain_launches(self) -> list[LaunchSample]:
+        return list(self._launch_batches.pop(0)) if self._launch_batches else []
 
     def overhead(self) -> tuple[float, int, int]:
         return self._overhead
@@ -1312,6 +1386,7 @@ class PcSamplingController:
                 agg.add(self._lib.drain())
             agg.add(self._lib.drain())  # 收尾再 drain 一次
             pcs = self._lib.drain_pc()  # P3:窗末取 per-PC 直方图(整窗累计)
+            launches = self._lib.drain_launches()  # P3:per-kernel launch 栈
             getdata_ms, dropped, hwfull = self._lib.overhead()
             table = agg.kernel_stall_table(self._top_n)
             class_shares = agg.kernel_class_shares()    # 须在 snapshot_and_reset(清零)之前取
@@ -1321,6 +1396,8 @@ class PcSamplingController:
                 ({"cls": cls, "pct": stats[STALL_CLASS_TO_METRIC[cls]]} for cls in STALL_CLASSES),
                 key=lambda d: d["pct"], reverse=True,
             )
+            hotspots = self._pc_hotspots(pcs)
+            self._attach_launch_stacks(hotspots, launches)
             result: dict[str, Any] = {
                 "available": True,
                 "window_s": window_s,
@@ -1331,7 +1408,7 @@ class PcSamplingController:
                 "kernel_class_shares": class_shares,
                 "reason_detail": reason_detail,
                 "kernel_table": table,
-                "pc_hotspots": self._pc_hotspots(pcs),
+                "pc_hotspots": hotspots,
                 "overhead": {"getdata_ms": getdata_ms, "dropped": dropped, "hwfull": hwfull},
                 "error": None,
             }
@@ -1422,6 +1499,36 @@ class PcSamplingController:
             if e and e["mappable"]:
                 out.append(e)
         return out
+
+    def _attach_launch_stacks(self, hotspots: list[dict[str, Any]],
+                              launches: list[LaunchSample]) -> None:
+        """P3:把 launch 栈接到 pc_hotspots —— 向外归因(闭源 GEMM ← nn.Linear)。
+
+        join:① 精确名匹配(cuFuncGetName 解析到名的 cutlass/cuBLAS,与 PC functionName 同源);
+        ② 解析不到名(runtime 注册 kernel,func_<ptr>)→ 从栈里第一帧算子名取 token,
+        看是否是该 hotspot mangled 名的子串(覆盖 vLLM 自定义算子 fused_add_rms_norm 等)。
+        """
+        if not hotspots or not launches:
+            return
+        by_name = {lc.kernel: lc for lc in launches}
+        # 只为"解析不到名"的 launch 算 token(已解析的走精确匹配,避免 ::impl 之类泛 token 误配)
+        ident: list[tuple[str, LaunchSample]] = []
+        for lc in launches:
+            if lc.kernel.startswith("func_"):
+                tok = _launch_identity(lc.stack)
+                if tok:
+                    ident.append((tok, lc))
+        for h in hotspots:
+            k = h["kernel"]
+            chosen = by_name.get(k)
+            if chosen is None:
+                best: LaunchSample | None = None
+                for tok, lc in ident:
+                    if tok in k and (best is None or lc.launches > best.launches):
+                        best = lc
+                chosen = best
+            if chosen is not None and chosen.stack:
+                h["launch"] = {"stack": chosen.stack, "launches": chosen.launches}
 
     def _push_metrics(self, stats: dict[str, float]) -> None:
         if self._sink is None:

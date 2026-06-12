@@ -29,6 +29,9 @@ def pping_vllm_main() -> None:
         # P3 行级归因:开 per-PC 直方图(源码行/SASS 热点)。每样本多一次 hash,默认开,
         # 想省这点开销可显式设 0。
         os.environ.setdefault("PPING_LANG_PCS_PC_HIST", "1")
+        # P3 launch 栈:kernel ← 启动它的 host 代码(向外归因,闭源 GEMM ← nn.Linear)。
+        # 首见某 kernel 抓一次栈,开销极小;默认开。
+        os.environ.setdefault("PPING_LANG_PCS_LAUNCH_STACK", "1")
         print(f"[pping-vllm] PC sampling 就绪:.so={so}", file=sys.stderr)
     except Exception as e:  # noqa: BLE001
         print(f"[pping-vllm] .so 准备失败,降级(无 Kernel 级采集,其余照常):{e}", file=sys.stderr)

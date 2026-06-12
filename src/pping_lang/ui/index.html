@@ -746,6 +746,22 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
                                 </div>
                               </div>
                             </template>
+                            <!-- launch 栈:向外归因 —— 这个 kernel 从哪段 host 代码启动(闭源 GEMM ← nn.Linear)-->
+                            <template x-if="launchFrames(kernelHotspot(k)).length">
+                              <div style="margin-top: 9px; padding-top: 9px; border-top: 1px dashed var(--border);">
+                                <div style="font-size: 11px; color: var(--muted); margin-bottom: 5px;">
+                                  ↗ <strong>启动来源</strong>（launch 栈,向外归因到调用它的 host 代码）
+                                </div>
+                                <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 4px 2px;">
+                                  <template x-for="(fr, fi) in launchFrames(kernelHotspot(k))" :key="fi">
+                                    <span style="display: inline-flex; align-items: center; gap: 4px;">
+                                      <span x-show="fi" style="color: var(--muted-2);">→</span>
+                                      <span :style="`font-family: var(--mono, ui-monospace, monospace); font-size: 11px; padding: 1px 6px; border-radius: 4px; background: var(--surface-alt); ${fi === 0 ? 'color: var(--indigo); font-weight: 600;' : 'color: var(--muted);'}`" x-text="fr"></span>
+                                    </span>
+                                  </template>
+                                </div>
+                              </div>
+                            </template>
                           </div>
                         </template>
                       </div>
