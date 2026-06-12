@@ -1185,19 +1185,34 @@ def build_app(
             rows.append({**p, "envelope_tflops": round(env, 2), "gap_pct": round(gap, 1)})
         if not rows:
             return None
-        gap_t = 30.0
-        follow = [r for r in rows if r["gap_pct"] < gap_t]
-        diverge = [r for r in rows if r["gap_pct"] >= gap_t]
-        if not diverge:
+        # 扩展效率(关键口径):B=1 的缺口是**每步固定开销**(调度/采样/launch,不随并发变),
+        # 不能当扩展问题报。真正要看的是相对基线的加速比 ÷ 理想加速比:
+        #   eff(B) = (tps_B / tps_b0) / (B / b0)
+        # eff ≈100% = 线性扩展(固定开销被摊薄,贴 envelope 斜率);掉头点 = 收益递减点。
+        base = rows[0]
+        for r in rows:
+            ideal = r["b"] / base["b"]
+            actual = (r["tps"] / base["tps"]) if base["tps"] else 0.0
+            r["eff_pct"] = round(100.0 * actual / ideal, 1) if ideal > 0 else None
+        eff_t = 70.0
+        linear = [r for r in rows[1:] if (r["eff_pct"] or 0) >= eff_t]
+        diverge = [r for r in rows[1:] if (r["eff_pct"] or 0) < eff_t]
+        base_note = (f"基线(并发 {base['b']})距 envelope 有 {base['gap_pct']:.0f}% 固定开销"
+                     f"(调度/采样/launch,摊薄即可,不是扩展问题)。")
+        if not rows[1:]:
+            text = base_note
+        elif not diverge:
             last = rows[-1]
-            text = (f"实测扩展曲线贴合理论 envelope(并发 {last['b']} 缺口仅 {last['gap_pct']:.0f}%)"
-                    f"—— 带宽余量真实可兑现,继续加并发仍有收益。")
+            text = (base_note + f"扩展到并发 {last['b']} 仍保持 {last['eff_pct']:.0f}% 线性效率"
+                    f"—— 余量真实可兑现,继续加并发仍有收益。")
         else:
             d0 = diverge[0]
-            head = f"并发 ≤{follow[-1]['b']} 跟随 envelope;" if follow else ""
-            text = (head + f"并发 {d0['b']} 实测偏离理论 {d0['gap_pct']:.0f}% —— 瓶颈转移到"
-                    f"调度/KV cache/launch 开销,扩并发收益递减;检查 max_num_seqs、"
-                    f"gpu_memory_utilization(KV 容量)与 cudagraph 覆盖。")
+            head = (f"并发 ≤{linear[-1]['b']} 近线性扩展(效率 ≥{eff_t:.0f}%);"
+                    if linear else "")
+            text = (base_note + head +
+                    f"并发 {d0['b']} 扩展效率掉到 {d0['eff_pct']:.0f}% —— 收益递减,瓶颈转向"
+                    f"调度/KV cache/带宽饱和;检查 max_num_seqs、gpu_memory_utilization(KV 容量),"
+                    f"或就此并发档做容量规划。")
         return {"rows": rows, "text": text}
 
     async def _run_scaling_sweep(levels: list[int], per_level_s: int,
