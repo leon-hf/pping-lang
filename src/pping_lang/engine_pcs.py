@@ -94,13 +94,33 @@ def _driver_loop() -> None:
 
     # 4) 持续 drain → 每窗原子写共享文件
     logger.info("[pping-lang] PCS 驱动:开始持续采样,结果写 %s", result_file)
+    # 自愈:cudagraph capture 会把早 prime 的采样打停(实测:capture 后 drain 全空窗,
+    # 但 capture 后重启采样即恢复)。检测"曾有样本→连续空窗"的打断特征,重启采样。
+    # 纯空闲(从未有样本)不触发,避免无谓重启;重启有冷却,避免抖动。
+    seen_samples = False
+    dry_windows = 0
+    last_reprime = 0.0
+    reprime_cooldown_s = float(os.environ.get("PPING_LANG_PCS_REPRIME_COOLDOWN_S", "20"))
+    dry_threshold = int(os.environ.get("PPING_LANG_PCS_REPRIME_DRY_WINDOWS", "1"))
     while True:
         try:
             res = ctl.run_window(window_s=window_s, period_log2=period_log2)
-            # 空窗(无流量 → 0 样本)不覆盖:保留上一个有数据的窗,避免前端刷新正好
-            # 赶上空闲窗看到"无数据"。真停流量时显示的是最近一次真实采样(配合前端新鲜度提示)。
-            if res.get("available") and (res.get("sample_total") or 0) > 0:
-                _atomic_write_json(result_file, res)
+            samples = (res.get("sample_total") or 0) if res.get("available") else 0
+            if samples > 0:
+                seen_samples = True
+                dry_windows = 0
+                _atomic_write_json(result_file, res)  # 空窗不覆盖,保留最近真实采样
+            else:
+                dry_windows += 1
+                now = time.monotonic()
+                # 曾经有样本、现在连续空窗 → 疑似被 capture(或其它)打断,重启采样自愈
+                if (seen_samples and dry_windows >= dry_threshold
+                        and now - last_reprime >= reprime_cooldown_s):
+                    logger.info("[pping-lang] PCS 驱动:采样枯竭(连续 %d 空窗),重启采样自愈"
+                                "(疑似 cudagraph capture 打断)", dry_windows)
+                    ctl.reprime(period_log2)
+                    last_reprime = now
+                    dry_windows = 0
         except Exception:  # noqa: BLE001
             logger.exception("[pping-lang] PCS 驱动:窗口失败")
             time.sleep(2.0)
