@@ -1399,7 +1399,8 @@ class PcSamplingController:
                 entry["mappable"] = True
                 for r in sorted(by_line.values(), key=lambda r: r["samples"], reverse=True)[:4]:
                     entry["lines"].append({"loc": r["loc"], "path": r["path"], "line": r["line"],
-                                           "pct": round(100.0 * r["samples"] / total, 1)})
+                                           "pct": round(100.0 * r["samples"] / total, 1),
+                                           "code": corr.source_line(r["path"], r["line"])})
             else:
                 for s in samples[:3]:  # 闭源轨:最热 SASS 偏移(top 3)
                     entry["sass"].append({"offset": f"0x{s.pc_offset:x}",

@@ -139,6 +139,7 @@ class SourceCorrelator:
         self._lib: Any = None
         self._crc_to_cubin: dict[int, bytes] | None = None
         self._line_cache: dict[tuple[int, int, str], tuple[int, str] | None] = {}
+        self._file_cache: dict[str, list[str]] = {}  # 源码文件 → 行列表(读一次缓存)
         path = libcupti_path or _find_libcupti()
         if not path:
             logger.info("[pping-lang] sass_source:未找到 libcupti,源码行关联禁用(SASS 偏移仍可用)")
@@ -220,6 +221,23 @@ class SourceCorrelator:
                 res = None
         self._line_cache[key] = res
         return res
+
+    def source_line(self, path: str, line: int) -> str | None:
+        """读取源码文件第 line 行原文(带缓存)。文件在引擎机磁盘上(triton/vLLM 安装的 .py);
+        读不到 / 越界返回 None。"""
+        if not path or line <= 0:
+            return None
+        lines = self._file_cache.get(path)
+        if lines is None:
+            try:
+                with open(path, encoding="utf-8", errors="replace") as f:
+                    lines = f.read().splitlines()
+            except Exception:  # noqa: BLE001
+                lines = []
+            self._file_cache[path] = lines
+        if 1 <= line <= len(lines):
+            return lines[line - 1].strip()
+        return None
 
     def hotspot(self, crc: int, offset: int, fn: str) -> dict[str, Any]:
         """单个热点 PC → 双轨结果(源码行 / SASS 偏移 + kernel 名解码)。"""
