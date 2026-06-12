@@ -565,28 +565,50 @@
   }
   .kpi .sub-line span { color: var(--text); font-weight: 600; }
 
-  /* 延迟分位分布条:p50→p95→p99 三段,卡片强调色渐淡(快的部分深,尾部浅) */
-  .kpi .pct-bar {
+  /* 延迟分位分布:三行式,每分位一条(p99=满刻度;三段挤一条看不清,实测反馈改的)。
+     行间颜色渐淡:p50 深(典型)、p99 浅(尾部),长度差一眼即尾部恶化程度 */
+  .kpi .pct-rows {
     display: flex;
-    height: 7px;
-    border-radius: 4px;
-    overflow: hidden;
-    background: var(--surface-alt);
-    margin-top: 9px;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 10px;
   }
-  .kpi .pct-bar i { display: block; height: 100%; background: var(--accent-color, var(--muted)); }
-  .kpi .pct-bar i:nth-child(1) { opacity: 0.95; }
-  .kpi .pct-bar i:nth-child(2) { opacity: 0.55; }
-  .kpi .pct-bar i:nth-child(3) { opacity: 0.28; }
-  .kpi .pct-labels {
+  .kpi .pct-row {
     display: flex;
-    justify-content: space-between;
-    margin-top: 5px;
+    align-items: center;
+    gap: 7px;
+  }
+  .kpi .pct-row .pq {
+    width: 24px;
+    flex: none;
     font-size: 10.5px;
     color: var(--muted-2);
+  }
+  .kpi .pct-row .pr-track {
+    flex: 1;
+    height: 6px;
+    border-radius: 3px;
+    overflow: hidden;
+    background: var(--surface-alt);
+  }
+  .kpi .pct-row .pr-track i {
+    display: block;
+    height: 100%;
+    border-radius: 3px;
+    background: var(--accent-color, var(--muted));
+  }
+  .kpi .pct-row:nth-child(1) .pr-track i { opacity: 0.95; }
+  .kpi .pct-row:nth-child(2) .pr-track i { opacity: 0.6; }
+  .kpi .pct-row:nth-child(3) .pr-track i { opacity: 0.35; }
+  .kpi .pct-row b {
+    min-width: 26px;
+    flex: none;
+    text-align: right;
+    font-size: 11px;
+    color: var(--text);
+    font-weight: 600;
     font-variant-numeric: tabular-nums;
   }
-  .kpi .pct-labels b { color: var(--text); font-weight: 600; }
 
   /* === Roofline plain-language verdict === */
   .roofline-verdict {
