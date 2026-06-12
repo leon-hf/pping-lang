@@ -186,7 +186,8 @@ function _createMiniLatencyChart(canvasId, color) {
       labels: [],
       datasets: [
         {
-          label: 'p50',
+          // 浅线 = p99(尾部参考,弱化);实线 = 平均(典型体验,平均为主,用户反馈)
+          label: 'p99',
           data: [],
           borderColor: color + '55',
           backgroundColor: 'transparent',
@@ -196,7 +197,7 @@ function _createMiniLatencyChart(canvasId, color) {
           pointRadius: 0,
         },
         {
-          label: 'p99',
+          label: '平均',
           data: [],
           borderColor: color,
           backgroundColor: color + '1a',
@@ -252,8 +253,8 @@ function _createMiniLatencyChart(canvasId, color) {
 function _updateMiniLatencyChart(chart, buckets) {
   if (!chart) return;
   chart.data.labels = buckets.map(b => Math.round(b.t) + 's');
-  chart.data.datasets[0].data = buckets.map(b => b.p50);
-  chart.data.datasets[1].data = buckets.map(b => b.p99);
+  chart.data.datasets[0].data = buckets.map(b => b.p99);
+  chart.data.datasets[1].data = buckets.map(b => b.avg != null ? b.avg : b.p50);
   chart.update('none');
 }
 
@@ -655,7 +656,7 @@ function dashboard() {
     ttftHasData: false,
     tpotHasData: false,
     e2eHasData: false,
-    e2eP99: null,
+    e2eAvg: null,
     diagnoses: [],
     benchRunning: 0,
     showStartupInfo: false,
@@ -1214,7 +1215,7 @@ function dashboard() {
       this.tpotHasData = tpot.length > 0;
       this.e2eHasData  = e2e.length > 0;
       this.tpotSource  = data.tpot_source || 'tpot';
-      this.e2eP99 = this.e2eHasData ? e2e[e2e.length - 1].p99 : null;
+      this.e2eAvg = this.e2eHasData ? (e2e[e2e.length - 1].avg ?? e2e[e2e.length - 1].p50) : null;
       _updateMiniLatencyChart(_ttftChart, ttft);
       _updateMiniLatencyChart(_tpotChart, tpot);
       _updateMiniLatencyChart(_e2eChart, e2e);

@@ -789,6 +789,7 @@ def build_app(
             vals = groups[b]
             out.append({
                 "t":   (b * bucket_width_ns) / 1e9,
+                "avg": sum(vals) / len(vals),
                 "p50": _percentile(vals, 0.50),
                 "p99": _percentile(vals, 0.99),
                 "n":   len(vals),
