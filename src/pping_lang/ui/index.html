@@ -1494,12 +1494,12 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
             </div>
             <div class="bench-run-metrics">
               <div class="metric">
-                <div class="m-label">TTFT p99</div>
-                <div class="m-value" x-text="fmtMs(r.client_metrics?.ttft_ms?.p99)"></div>
+                <div class="m-label">TTFT 平均</div>
+                <div class="m-value" x-text="fmtMs(r.client_metrics?.ttft_ms?.mean)"></div>
               </div>
               <div class="metric">
-                <div class="m-label">TPOT p99</div>
-                <div class="m-value" x-text="fmtMs(r.client_metrics?.tpot_ms?.p99)"></div>
+                <div class="m-label">TPOT 平均</div>
+                <div class="m-value" x-text="fmtMs(r.client_metrics?.tpot_ms?.mean)"></div>
               </div>
               <div class="metric">
                 <div class="m-label">tok/s</div>
@@ -1523,9 +1523,9 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
                 <div>
                   <h4>客户端指标</h4>
                   <table class="bench-detail-tab">
-                    <tr><td>TTFT</td><td>p50 <span x-text="fmtMs(r.client_metrics?.ttft_ms?.p50)"></span> / p99 <span x-text="fmtMs(r.client_metrics?.ttft_ms?.p99)"></span></td></tr>
-                    <tr><td>TPOT</td><td>p50 <span x-text="fmtMs(r.client_metrics?.tpot_ms?.p50)"></span> / p99 <span x-text="fmtMs(r.client_metrics?.tpot_ms?.p99)"></span></td></tr>
-                    <tr><td>E2E</td><td>p50 <span x-text="fmtMs(r.client_metrics?.e2e_ms?.p50)"></span> / p99 <span x-text="fmtMs(r.client_metrics?.e2e_ms?.p99)"></span></td></tr>
+                    <tr><td>TTFT</td><td>平均 <strong x-text="fmtMs(r.client_metrics?.ttft_ms?.mean)"></strong> · p50 <span x-text="fmtMs(r.client_metrics?.ttft_ms?.p50)"></span> / p95 <span x-text="fmtMs(r.client_metrics?.ttft_ms?.p95)"></span> / p99 <span x-text="fmtMs(r.client_metrics?.ttft_ms?.p99)"></span></td></tr>
+                    <tr><td>TPOT</td><td>平均 <strong x-text="fmtMs(r.client_metrics?.tpot_ms?.mean)"></strong> · p50 <span x-text="fmtMs(r.client_metrics?.tpot_ms?.p50)"></span> / p95 <span x-text="fmtMs(r.client_metrics?.tpot_ms?.p95)"></span> / p99 <span x-text="fmtMs(r.client_metrics?.tpot_ms?.p99)"></span></td></tr>
+                    <tr><td>E2E</td><td>平均 <strong x-text="fmtMs(r.client_metrics?.e2e_ms?.mean)"></strong> · p50 <span x-text="fmtMs(r.client_metrics?.e2e_ms?.p50)"></span> / p95 <span x-text="fmtMs(r.client_metrics?.e2e_ms?.p95)"></span> / p99 <span x-text="fmtMs(r.client_metrics?.e2e_ms?.p99)"></span></td></tr>
                     <tr><td>Output</td><td><span x-text="fmtTps(r.client_metrics?.output_throughput_tps)"></span></td></tr>
                     <tr><td>Input</td><td><span x-text="fmtTps(r.client_metrics?.input_throughput_tps)"></span></td></tr>
                     <tr><td>Tokens</td><td>out <span x-text="r.client_metrics?.output_tokens_total ?? '—'"></span> · in <span x-text="r.client_metrics?.input_tokens_total ?? '—'"></span></td></tr>
