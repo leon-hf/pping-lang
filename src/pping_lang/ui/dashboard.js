@@ -787,6 +787,19 @@ function dashboard() {
       const hs = (this.deep.result && this.deep.result.pc_hotspots) || [];
       return hs.find(h => h.kernel === k.kernel) || null;
     },
+    // P3:所有"能定位到 Python 源码行"的 kernel(差异化能力,单独提到顶部,免得埋在长表里)
+    sourceHotspots() {
+      const hs = (this.deep.result && this.deep.result.pc_hotspots) || [];
+      return hs.filter(h => h.mappable && h.lines && h.lines.length);
+    },
+    // 这些可映射 kernel 合计占多少 GPU 时间(诚实标注:小模型上往往很小,主导在闭源 GEMM)
+    sourceHotspotsTimePct() {
+      const kt = (this.deep.result && this.deep.result.kernel_table) || [];
+      const names = new Set(this.sourceHotspots().map(h => h.kernel));
+      let sum = 0;
+      for (const k of kt) if (names.has(k.kernel)) sum += (k.time_pct || 0);
+      return sum;
+    },
     // === Deep Evidence(全局 / warp 效率 / 方法论)辅助 ===
     // Warp 周期三态(占全部样本):发指令 / 就绪未选中(余量) / 真 stall(在等)
     warpSplit() {
