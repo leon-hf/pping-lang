@@ -463,22 +463,22 @@ function benchTab() {
       const len = s.duration_s ? `${s.duration_s}s` : `${s.num_requests} req`;
       return `并发 ${s.concurrency} · ${s.prompt_tokens}/${s.output_tokens} tok · ${len}`;
     },
-    // 对比表:逐指标 A/B/Δ%。延迟类越低越好,吞吐越高越好;|Δ|<2% 视为持平(测量噪声)
+    // 对比卡数据:逐指标 A/B 双横条(按本指标 max 归一,免得 ms 与 tok/s 挤同轴)+ Δ%。
+    // 延迟类越低越好,吞吐越高越好;|Δ|<2% 视为持平(压测运行间噪声)
     cmpTable() {
       const pair = this.cmpRuns();
       if (!pair) return [];
       const [A, B] = pair;
       const g = (r, p) => p.split('.').reduce((o, k) => (o == null ? null : o[k]), r);
       const defs = [
-        { label: 'TTFT 平均', path: 'client_metrics.ttft_ms.mean', lower: true, ms: true },
-        { label: 'TTFT p99',  path: 'client_metrics.ttft_ms.p99',  lower: true, ms: true },
-        { label: 'TPOT 平均', path: 'client_metrics.tpot_ms.mean', lower: true, ms: true },
-        { label: 'TPOT p99',  path: 'client_metrics.tpot_ms.p99',  lower: true, ms: true },
-        { label: 'E2E 平均',  path: 'client_metrics.e2e_ms.mean',  lower: true, ms: true },
-        { label: 'E2E p99',   path: 'client_metrics.e2e_ms.p99',   lower: true, ms: true },
-        { label: 'Output tok/s', path: 'client_metrics.output_throughput_tps', lower: false },
-        { label: '完成数',    path: 'client_metrics.ok',     lower: false },
-        { label: '错误数',    path: 'client_metrics.errors', lower: true },
+        { label: 'TTFT 平均', path: 'client_metrics.ttft_ms.mean', lower: true, unit: 'ms' },
+        { label: 'TTFT p99',  path: 'client_metrics.ttft_ms.p99',  lower: true, unit: 'ms' },
+        { label: 'TPOT 平均', path: 'client_metrics.tpot_ms.mean', lower: true, unit: 'ms' },
+        { label: 'TPOT p99',  path: 'client_metrics.tpot_ms.p99',  lower: true, unit: 'ms' },
+        { label: 'E2E 平均',  path: 'client_metrics.e2e_ms.mean',  lower: true, unit: 'ms' },
+        { label: 'E2E p99',   path: 'client_metrics.e2e_ms.p99',   lower: true, unit: 'ms' },
+        { label: 'Output 吞吐', path: 'client_metrics.output_throughput_tps', lower: false, unit: 'tok/s' },
+        { label: '完成 / 错误', path: 'client_metrics.ok', path2: 'client_metrics.errors', lower: false, unit: '' },
       ];
       return defs.map(d => {
         const a = g(A, d.path), b = g(B, d.path);
@@ -487,8 +487,14 @@ function benchTab() {
           pct = 100 * (b - a) / a;
           if (Math.abs(pct) >= 2) good = d.lower ? pct < 0 : pct > 0;
         }
-        const f = (v) => v == null ? '—' : (d.ms ? `${Number(v).toFixed(1)}` : `${Number(v).toFixed(0)}`);
-        return { label: d.label + (d.ms ? ' (ms)' : ''), a: f(a), b: f(b), pct, good };
+        const mx = Math.max(Number(a) || 0, Number(b) || 0);
+        const bar = (v) => (v == null || mx <= 0) ? 0 : Math.max(2, 100 * Number(v) / mx);
+        const f = (v) => v == null ? '—'
+          : (d.unit === 'ms' ? Number(v).toFixed(1) : Number(v).toFixed(0)) + (d.unit ? ' ' + d.unit : '');
+        // "完成 / 错误"特例:数值文案带上错误数
+        const fa = d.path2 ? `${f(a)} / ${g(A, d.path2) ?? '—'}` : f(a);
+        const fb = d.path2 ? `${f(b)} / ${g(B, d.path2) ?? '—'}` : f(b);
+        return { label: d.label, aText: fa, bText: fb, barA: bar(a), barB: bar(b), pct, good };
       });
     },
 
