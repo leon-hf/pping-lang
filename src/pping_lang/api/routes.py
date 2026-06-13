@@ -218,6 +218,72 @@ def _kernel_findings(
     return findings
 
 
+_STALL_LABEL: dict[str, str] = {
+    "memory_dependency": "访存依赖", "shared_dependency": "shared/MIO 依赖",
+    "memory_throttle": "访存子系统压力", "math_pipe": "计算管线",
+    "exec_dependency": "执行依赖", "sync": "同步", "fetch_control": "取指/控制流",
+    "dispatch": "调度分发", "scheduler_slack": "调度余量", "other": "其它",
+}
+_STALL_ADVICE: dict[str, str] = {
+    "memory_dependency": "kernel 大量时间在等全局/本地内存返回。结合 batch/shape 判断是延迟还是带宽"
+                         " —— 增大 batch 摊薄、改 tiling、提高 L2 命中。",
+    "math_pipe": "数学/Tensor 管线接近饱和(compute-bound)。可量化/降精度;Tensor Core kernel 别一概归为算力不足。",
+    "shared_dependency": "shared memory 依赖 —— 查 tiling、bank conflict、MMA pipeline。",
+    "memory_throttle": "内存子系统资源入口被塞(MIO/LG/常量缓存),区别于单纯依赖等待。",
+    "exec_dependency": "指令级执行依赖链长 —— 看能否打散依赖、提高 ILP。",
+    "sync": "同步/屏障开销偏高 —— 查 tile/block 同步粒度。",
+    "fetch_control": "取指/控制流开销 —— fused mega-kernel 或动态分支较多。",
+}
+
+
+def _stall_findings(result: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """把 PC Sampling stall 分解翻成人话结论(Deep Evidence 的"给结论"层)。
+
+    口径遵循设计文档 §11(Codex 评审):不过度归因(访存依赖不单独断言带宽 vs 延迟);
+    scheduler_slack 高是好事(非 latency-starved);真瓶颈排除 slack/other。
+    """
+    findings: list[dict[str, Any]] = []
+    if not result or not result.get("available"):
+        return findings
+    shares: list[dict[str, Any]] = result.get("stall_shares") or []
+    # 1. 真瓶颈主导类(排除调度余量 / 其它)
+    real = [s for s in shares if s["cls"] not in ("scheduler_slack", "other")]
+    if real and real[0]["pct"] >= 35:
+        c = real[0]
+        lbl = _STALL_LABEL.get(c["cls"], c["cls"])
+        findings.append({
+            "level": "info", "title": f"{lbl}主导 stall",
+            "detail": f"stall 样本 {c['pct']:.0f}% 集中在{lbl}。" + _STALL_ADVICE.get(c["cls"], ""),
+        })
+    # 2. scheduler_slack 高 → 非 latency-starved(好事,提示瓶颈在别处)
+    slack = next((s for s in shares if s["cls"] == "scheduler_slack"), None)
+    if slack and slack["pct"] >= 40:
+        findings.append({
+            "level": "info", "title": "调度余量充足(非 latency-starved)",
+            "detail": f"{slack['pct']:.0f}% 的 stall 是 not-selected(warp 就绪但调度器选了别的)——"
+                      f" eligible warp 充足,当前不是延迟瓶颈,真正瓶颈看主导 stall 类。",
+        })
+    # 3. 主导 kernel 的 stall
+    table: list[dict[str, Any]] = result.get("kernel_table") or []
+    if table and table[0].get("dominant_stall"):
+        k = table[0]
+        dom = _STALL_LABEL.get(k["dominant_stall"], k["dominant_stall"])
+        findings.append({
+            "level": "info", "title": "主导 kernel 的 stall",
+            "detail": f"采样最多的 kernel（{k['kernel'][:46]}）主要卡在 {dom}"
+                      f"（{k['dominant_pct']:.0f}%）。",
+        })
+    # 4. 诚实:取证采样有丢样就标注
+    ov: dict[str, Any] = result.get("overhead") or {}
+    if (ov.get("hwfull") or 0) > 0 or (ov.get("dropped") or 0) > 0:
+        findings.append({
+            "level": "warning", "title": "取证采样有丢样",
+            "detail": f"HW 缓冲满 {ov.get('hwfull', 0)} 次、丢样 {ov.get('dropped', 0)} ——"
+                      f" 采样周期可调长;本次分布仍可参考但非全量。",
+        })
+    return findings
+
+
 _BUILTIN_DESCRIPTIONS: dict[str, str] = {
     "mixed-short": "短问答 + 闲聊 + 简单指令（每条 50–180 tokens）",
     "mixed-long":  "长上下文：文档摘要 / 长指令 / 转录稿（每条 1000–3000 tokens）",
@@ -268,19 +334,36 @@ def build_app(
     ui_html = _read_ui("index.html", "<h1>pping-lang UI missing</h1>")
     ui_css = _read_ui("dashboard.css")
     ui_js = _read_ui("dashboard.js")
+    # vendor 资源本地化:Alpine/Chart 不再走 CDN,离线/air-gapped GPU 机也能渲染
+    ui_vendor_alpine = _read_ui("vendor/alpine.min.js")
+    ui_vendor_chart = _read_ui("vendor/chart.umd.min.js")
 
     # === GET / — dashboard ===
     @app.get("/", response_class=HTMLResponse)
     def index() -> HTMLResponse:
-        return HTMLResponse(ui_html)
+        # index.html 同样 no-cache:无缓存头时浏览器走启发式缓存,普通 F5 可能拿旧版
+        # (实测踩过:布局改了用户刷新看不到)。js/css 的同款处理见下。
+        return HTMLResponse(ui_html, headers={"Cache-Control": "no-cache, must-revalidate"})
+
+    # 自研 JS/CSS 每次部署都会变 —— no-cache 让浏览器每次校验(没变 304,很便宜),
+    # 避免普通 F5 复用旧 dashboard.js 导致新功能(如行级归因)静默不渲染。
+    _NOCACHE = {"Cache-Control": "no-cache, must-revalidate"}
 
     @app.get("/dashboard.css")
     def dashboard_css() -> Response:
-        return Response(ui_css, media_type="text/css; charset=utf-8")
+        return Response(ui_css, media_type="text/css; charset=utf-8", headers=_NOCACHE)
 
     @app.get("/dashboard.js")
     def dashboard_js() -> Response:
-        return Response(ui_js, media_type="application/javascript; charset=utf-8")
+        return Response(ui_js, media_type="application/javascript; charset=utf-8", headers=_NOCACHE)
+
+    @app.get("/vendor/alpine.min.js")
+    def vendor_alpine() -> Response:
+        return Response(ui_vendor_alpine, media_type="application/javascript; charset=utf-8")
+
+    @app.get("/vendor/chart.umd.min.js")
+    def vendor_chart() -> Response:
+        return Response(ui_vendor_chart, media_type="application/javascript; charset=utf-8")
 
     # === GET /api/health ===
     @app.get("/api/health")
@@ -656,6 +739,31 @@ def build_app(
         tr = cupti.chrome_trace() if cupti is not None else None
         return {"available": tr is not None, "trace": tr}
 
+    # === Deep Evidence(阶段 2 PC Sampling 按需取证)===
+    # POST 触发一个短窗取证(阻塞 ~window 秒,FastAPI 在 threadpool 跑 sync def,
+    # 不卡事件循环)。不可用时 fail-closed 返回 available=False + error,不抛。
+    @app.post("/api/kernels/deep_evidence")
+    def deep_evidence(
+        window: float = Query(5.0, ge=0.0, le=30.0, description="取证窗时长(秒)"),
+        period_log2: int = Query(16, ge=5, le=31, description="采样周期 2^N 周期(过小会打满 HW 缓冲楔死采样)"),
+    ) -> dict[str, Any]:
+        if cupti is None:
+            return {"available": False, "error": "CUPTI collector 未配置", "findings": []}
+        result = cupti.run_deep_evidence(window_s=window, period_log2=period_log2)
+        result["findings"] = _stall_findings(result)
+        return result
+
+    # GET 读最近一次取证结果 + 当前是否可用(给 UI 渲染面板,不触发新采集)。
+    @app.get("/api/kernels/deep_evidence")
+    def deep_evidence_last() -> dict[str, Any]:
+        last = cupti.last_stall_result() if cupti is not None else None
+        available = cupti.pc_sampling_available() if cupti is not None else False
+        return {
+            "available_now": available,
+            "last": last,
+            "findings": _stall_findings(last) if last else [],
+        }
+
     # === GET /api/latency_trends — TTFT / TPOT / E2E bucketed p50+p99 over time ===
     # Same dual-path strategy as /api/kpis: ≤200s windows served from the live
     # ring buffer (per-metric ring holds ~2000 points; at typical req rates
@@ -681,6 +789,7 @@ def build_app(
             vals = groups[b]
             out.append({
                 "t":   (b * bucket_width_ns) / 1e9,
+                "avg": sum(vals) / len(vals),
                 "p50": _percentile(vals, 0.50),
                 "p99": _percentile(vals, 0.99),
                 "n":   len(vals),
@@ -837,6 +946,8 @@ def build_app(
             "data_source": data_source,        # "measured" | "analytical"
             "formula": formula,                # analytical only — explanation string
             "params_billion": (_params / 1e9) if _params else None,
+            # P0-C:最近一次实测 scaling sweep(没跑过为 None)→ 图上叠实测扩展曲线
+            "scaling": _scaling["result"],
         }
 
     # === GET /api/diagnoses ===
@@ -1023,6 +1134,153 @@ def build_app(
                 logger.exception("[bench] failed to record failure for %s", run_id)
         finally:
             _bench_runs.pop(run_id, None)
+
+    # === P0-C:roofline 实测 scaling 闭环 ===
+    # 理论 batch-scaling envelope 是线性带宽外推;这里串行压测 B∈{1,4,16,64} 把**实测**
+    # 扩展曲线叠上去 —— 缺口从哪个 B 张开 = 真实瓶颈位置(调度/KV/launch),外推变实测。
+    _scaling: dict[str, Any] = {"running": False, "progress": None, "result": None, "error": None}
+
+    def _vllm_base_url() -> str:
+        """vLLM OpenAI 端点:插件与 vllm 同机,从启动 cmdline 解析 --host/--port。"""
+        host, port = "127.0.0.1", "8000"
+        args = cmdline or []
+        for i, a in enumerate(args):
+            if a == "--port" and i + 1 < len(args):
+                port = args[i + 1]
+            elif a.startswith("--port="):
+                port = a.split("=", 1)[1]
+            elif a == "--host" and i + 1 < len(args):
+                host = args[i + 1]
+            elif a.startswith("--host="):
+                host = a.split("=", 1)[1]
+        if host in ("0.0.0.0", "::"):
+            host = "127.0.0.1"
+        return f"http://{host}:{port}/v1"
+
+    def _served_model() -> str | None:
+        mc = getattr(vllm_config, "model_config", None)
+        if mc is None:
+            return None
+        smn = getattr(mc, "served_model_name", None)
+        if isinstance(smn, (list, tuple)) and smn:
+            return str(smn[0])
+        if isinstance(smn, str) and smn:
+            return smn
+        m = getattr(mc, "model", None)
+        return str(m) if m else None
+
+    def _scaling_verdict(pts: list[dict[str, Any]]) -> dict[str, Any] | None:
+        """实测点 vs 理论 envelope 的缺口分析 → 可行动结论(P0-C 的'给结论'层)。
+
+        decode AI≈并发 B → envelope(B) = min(mem_bw_tbs×B, peak_tflops)。
+        缺口 <30% 视为"跟随";首个 ≥30% 的 B = 瓶颈转移点。
+        """
+        if gpu_peak is None or not pts:
+            return None
+        peak_c = gpu_peak.bf16_tflops
+        bw_tbs = gpu_peak.mem_bw_gbs / 1000.0
+        rows: list[dict[str, Any]] = []
+        for p in pts:
+            if not p.get("tflops"):
+                continue
+            env = min(bw_tbs * p["b"], peak_c)
+            gap = max(0.0, 1.0 - p["tflops"] / env) * 100.0
+            rows.append({**p, "envelope_tflops": round(env, 2), "gap_pct": round(gap, 1)})
+        if not rows:
+            return None
+        # 扩展效率(关键口径):B=1 的缺口是**每步固定开销**(调度/采样/launch,不随并发变),
+        # 不能当扩展问题报。真正要看的是相对基线的加速比 ÷ 理想加速比:
+        #   eff(B) = (tps_B / tps_b0) / (B / b0)
+        # eff ≈100% = 线性扩展(固定开销被摊薄,贴 envelope 斜率);掉头点 = 收益递减点。
+        base = rows[0]
+        for r in rows:
+            ideal = r["b"] / base["b"]
+            actual = (r["tps"] / base["tps"]) if base["tps"] else 0.0
+            r["eff_pct"] = round(100.0 * actual / ideal, 1) if ideal > 0 else None
+        eff_t = 70.0
+        linear = [r for r in rows[1:] if (r["eff_pct"] or 0) >= eff_t]
+        diverge = [r for r in rows[1:] if (r["eff_pct"] or 0) < eff_t]
+        base_note = (f"基线(并发 {base['b']})距 envelope 有 {base['gap_pct']:.0f}% 固定开销"
+                     f"(调度/采样/launch,摊薄即可,不是扩展问题)。")
+        if not rows[1:]:
+            text = base_note
+        elif not diverge:
+            last = rows[-1]
+            text = (base_note + f"扩展到并发 {last['b']} 仍保持 {last['eff_pct']:.0f}% 线性效率"
+                    f"—— 余量真实可兑现,继续加并发仍有收益。")
+        else:
+            d0 = diverge[0]
+            head = (f"并发 ≤{linear[-1]['b']} 近线性扩展(效率 ≥{eff_t:.0f}%);"
+                    if linear else "")
+            text = (base_note + head +
+                    f"并发 {d0['b']} 扩展效率掉到 {d0['eff_pct']:.0f}% —— 收益递减,瓶颈转向"
+                    f"调度/KV cache/带宽饱和;检查 max_num_seqs、gpu_memory_utilization(KV 容量),"
+                    f"或就此并发档做容量规划。")
+        return {"rows": rows, "text": text}
+
+    async def _run_scaling_sweep(levels: list[int], per_level_s: int,
+                                 endpoint: str, model: str) -> None:
+        try:
+            pts: list[dict[str, Any]] = []
+            for i, b in enumerate(levels):
+                _scaling["progress"] = f"并发 {b} 压测中({i + 1}/{len(levels)})"
+                scenario = StaticScenario(
+                    name=f"scaling-b{b}", endpoint=endpoint, model=model,
+                    prompt_tokens=64, output_tokens=200, concurrency=b,
+                    duration_s=per_level_s, warmup_s=4, timeout_s=90.0,
+                    api="completions", prompt_source="synthetic",
+                )
+                scenario.validate()
+                async with OpenAIStreamClient(endpoint, timeout_s=scenario.timeout_s) as client:
+                    summary = await run_static(scenario, client)
+                tps = summary.output_throughput_tps
+                pts.append({
+                    "b": b, "tps": round(tps, 1),
+                    # decode 每 token FLOPs ≈ 2·params(与 roofline analytical 同口径)
+                    "tflops": round(2.0 * _params * tps / 1e12, 3) if _params else None,
+                    "ok": summary.ok, "errors": summary.errors,
+                    "tpot_p50_ms": summary.tpot_ms.p50,
+                })
+            _scaling["result"] = {
+                "points": pts,
+                "verdict": _scaling_verdict(pts),
+                "per_level_s": per_level_s,
+                "finished_at": time.time(),
+            }
+        except Exception as e:  # noqa: BLE001
+            logger.exception("[pping-lang] scaling sweep failed")
+            _scaling["error"] = f"{type(e).__name__}: {e}"
+        finally:
+            _scaling["running"] = False
+            _scaling["progress"] = None
+
+    @app.post("/api/roofline/scaling_sweep", status_code=202)
+    async def roofline_scaling_sweep(
+        levels: str = Query("1,4,16,64", description="并发档,逗号分隔"),
+        per_level_s: int = Query(25, ge=5, le=120, description="每档压测秒数"),
+    ) -> dict[str, Any]:
+        if _scaling["running"]:
+            raise HTTPException(409, "scaling sweep 已在运行")
+        if not _params:
+            raise HTTPException(400, "缺模型架构信息,无法把 tok/s 换算成 TFLOPs")
+        model = _served_model()
+        if not model:
+            raise HTTPException(400, "拿不到模型名(vllm_config 不可用)")
+        try:
+            lv = sorted({int(x) for x in levels.split(",") if x.strip()})
+        except ValueError:
+            raise HTTPException(422, f"levels 解析失败: {levels!r}")
+        if not lv:
+            raise HTTPException(422, "levels 为空")
+        _scaling.update(running=True, error=None, progress="启动中")
+        asyncio.create_task(_run_scaling_sweep(lv, per_level_s, _vllm_base_url(), model))
+        return {"status": "running", "levels": lv, "per_level_s": per_level_s,
+                "eta_s": len(lv) * (per_level_s + 6)}
+
+    @app.get("/api/roofline/scaling")
+    def roofline_scaling() -> dict[str, Any]:
+        return {"running": _scaling["running"], "progress": _scaling["progress"],
+                "error": _scaling["error"], "result": _scaling["result"]}
 
     # === GET /api/bench/prompt-sources — UI dropdown discovery ===
     @app.get("/api/bench/prompt-sources")

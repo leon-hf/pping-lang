@@ -80,7 +80,7 @@ def aggregate_metric(
 def bucketed_quantiles(
     conn: Any, name: str, since_ns: int, until_ns: int, buckets: int = 30,
 ) -> list[dict[str, Any]]:
-    """Time-bucket a metric, return [{t, p50, p99, n}, ...] aligned to buckets.
+    """Time-bucket a metric, return [{t, avg, p50, p99, n}, ...] aligned to buckets.
 
     `t` is bucket-start in seconds relative to `since_ns`. Empty buckets are omitted.
     """
@@ -93,6 +93,7 @@ def bucketed_quantiles(
             """
             SELECT
                 CAST((ts_ns - ?) / ? AS INTEGER) AS bucket,
+                AVG(value) AS avg,
                 QUANTILE_CONT(value, 0.5) AS p50,
                 QUANTILE_CONT(value, 0.99) AS p99,
                 COUNT(*) AS n
@@ -106,12 +107,13 @@ def bucketed_quantiles(
     except Exception:
         return []
     out = []
-    for bucket, p50, p99, n in rows:
+    for bucket, avg, p50, p99, n in rows:
         if bucket < 0 or bucket >= buckets:
             continue
         t_s = (bucket * bucket_width_ns) / 1e9
         out.append({
             "t": t_s,
+            "avg": float(avg) if avg is not None else None,
             "p50": float(p50) if p50 is not None else None,
             "p99": float(p99) if p99 is not None else None,
             "n": int(n),

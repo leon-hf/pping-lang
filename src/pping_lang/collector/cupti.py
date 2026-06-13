@@ -18,12 +18,15 @@
 """
 from __future__ import annotations
 
+import ctypes
 import logging
+import os
 import sys
 import time
 from collections import defaultdict, deque
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from threading import Event, Lock
 from typing import Any, Protocol, runtime_checkable
 
@@ -46,6 +49,22 @@ KERNEL_CLASS_TO_METRIC: dict[str, str] = {
     "other": M.KERNEL_SHARE_OTHER_PCT,
 }
 KERNEL_CLASSES: tuple[str, ...] = tuple(KERNEL_CLASS_TO_METRIC)
+
+# stall 语义类 → 占比 metric 名(阶段 2 PC Sampling)。"issued" 不在此(非 stall,
+# 单独走 KERNEL_STALL_ISSUED_PCT)。各类相加 ≈ 100(占 stall 样本)。映射见设计文档 §11。
+STALL_CLASS_TO_METRIC: dict[str, str] = {
+    "memory_dependency": M.KERNEL_STALL_MEMORY_DEP_PCT,
+    "shared_dependency": M.KERNEL_STALL_SHARED_DEP_PCT,
+    "memory_throttle": M.KERNEL_STALL_MEMORY_THROTTLE_PCT,
+    "math_pipe": M.KERNEL_STALL_MATH_PIPE_PCT,
+    "exec_dependency": M.KERNEL_STALL_EXEC_DEP_PCT,
+    "sync": M.KERNEL_STALL_SYNC_PCT,
+    "fetch_control": M.KERNEL_STALL_FETCH_CONTROL_PCT,
+    "dispatch": M.KERNEL_STALL_DISPATCH_PCT,
+    "scheduler_slack": M.KERNEL_STALL_SCHEDULER_SLACK_PCT,
+    "other": M.KERNEL_STALL_OTHER_PCT,
+}
+STALL_CLASSES: tuple[str, ...] = tuple(STALL_CLASS_TO_METRIC)
 
 
 # === 采集源接口(可替换边界) =========================================
@@ -107,6 +126,14 @@ DEFAULT_CLASSIFY_RULES: list[tuple[tuple[str, ...], str]] = [
     (("rms_norm", "rmsnorm", "layernorm", "layer_norm", "fused_add_rms"), "norm"),
     (("rotary", "rope"), "rotary"),
     (("silu", "swiglu", "geglu", "gelu", "act_and_mul", "activation"), "activation"),
+    # 采样/解码(softmax/argmax/分布采样)—— 必须在 elementwise 之前:分布采样核名里
+    # 含 "elementwise"(distribution_elementwise_grid_stride_kernel),否则会被误归逐元素。
+    (("softmax", "argmax", "distribution", "exponential", "multinomial",
+      "topk", "top_k", "gumbel"), "sampling"),
+    # 索引/聚集/embedding 查表(comm 的 all_gather/reduce_scatter 已在前面先被吃掉)
+    (("indexselect", "index_select", "embedding", "gather", "scatter"), "index"),
+    # 逐元素 / 拷贝 / 类型转换(大算子之间的 glue:add/mul/div/copy/cast)
+    (("elementwise", "direct_copy", "copy_kernel", "_cast", "fill_kernel"), "elementwise"),
 ]
 
 
@@ -130,6 +157,59 @@ class KernelClassifier:
 
     def _match(self, name: str) -> str:
         low = name.lower()
+        for needles, cls in self._rules:
+            for n in needles:
+                if n in low:
+                    return cls
+        return "other"
+
+    @property
+    def cache_size(self) -> int:
+        return len(self._cache)
+
+
+# === stall reason → 语义类(阶段 2 PC Sampling,带记忆化) ==============
+
+# (子串列表, 语义类)。小写子串匹配,首个命中胜出 —— **顺序敏感**。
+# 输入是 Ada/sm_89 的 PerfWorks 名,如 `smsp__pcsamp_warps_issue_stalled_long_scoreboard`;
+# `_not_issued` 变体(同 reason 但该 cycle 未发射)由子串自然归到同类。
+# 归类口径见设计文档 §11(Codex 评审细化):
+#   - long_scoreboard=访存依赖;short_scoreboard 不并入(shared/MIO);throttle/miss=子系统压力;
+#   - not_selected 必须在 selected 之前(前者含后者子串);selected=已发射,非 stall。
+DEFAULT_STALL_RULES: list[tuple[tuple[str, ...], str]] = [
+    (("not_selected",), "scheduler_slack"),          # 必须先于 selected
+    (("selected",), "issued"),                        # 非 stall:已发射指令
+    (("long_scoreboard",), "memory_dependency"),
+    (("short_scoreboard",), "shared_dependency"),
+    (("mio_throttle", "lg_throttle", "tex_throttle", "imc_miss"), "memory_throttle"),
+    (("math_pipe", "fma", "alu", "tensor"), "math_pipe"),
+    (("barrier", "membar", "sync"), "sync"),
+    (("wait",), "exec_dependency"),
+    (("no_instruction", "inst_fetch", "branch_resolving"), "fetch_control"),
+    (("dispatch",), "dispatch"),
+    (("drain", "sleeping", "misc"), "other"),
+]
+
+
+class StallClassifier:
+    """PerfWorks stall reason 名 → 语义类,记忆化(同 KernelClassifier 套路)。
+
+    产出的类 ∈ STALL_CLASSES ∪ {"issued"}。未命中 → "other"。
+    """
+
+    def __init__(self, rules: list[tuple[tuple[str, ...], str]] | None = None) -> None:
+        self._rules = rules if rules is not None else DEFAULT_STALL_RULES
+        self._cache: dict[str, str] = {}
+
+    def classify(self, reason: str) -> str:
+        cls = self._cache.get(reason)
+        if cls is None:
+            cls = self._match(reason)
+            self._cache[reason] = cls
+        return cls
+
+    def _match(self, reason: str) -> str:
+        low = reason.lower()
         for needles, cls in self._rules:
             for n in needles:
                 if n in low:
@@ -248,6 +328,202 @@ class WindowAggregator:
                 })
             rows.sort(key=lambda r: r["pct"], reverse=True)
             return rows[:limit]
+
+
+# === stall 聚合(阶段 2 PC Sampling / Deep Evidence) ===================
+
+@dataclass(slots=True, frozen=True)
+class StallSample:
+    """一条已聚合的 stall 记录 —— 原生 .so 每次 drain 在库内预聚合后吐过来的最小载荷。
+
+    不是单个 PC 样本(那是百万/s,绝不过桥);而是 (kernel, reason) 在本批的累计样本数。
+    这就是 5% 预算的命门:原生侧聚合,Python 只收这种小行。
+    """
+
+    kernel: str       # kernel 名(mangled / demangled)
+    reason: str       # 原始 PerfWorks stall reason 名(如 ..._long_scoreboard)
+    samples: int      # 该 (kernel, reason) 本批样本数
+
+
+@dataclass(slots=True, frozen=True)
+class PcSample:
+    """P3:一条 per-PC 聚合行(某 kernel 内某指令地址的累计样本)。
+
+    cubinCrc + pcOffset 是连到源码行/SASS 偏移的钥匙(见 native/sass_source.py)。
+    同样在库内预聚合,只在 deep-evidence 窗末取一次,不过单样本桥。
+    """
+
+    kernel: str       # kernel 函数名(关联用,须与 cubin 符号同源)
+    cubin_crc: int    # CUpti cubinCrc(匹配磁盘 cubin)
+    pc_offset: int    # 函数内指令偏移
+    samples: int      # 该 PC 的累计样本数
+
+
+@dataclass(slots=True, frozen=True)
+class LaunchSample:
+    """P3 launch 栈(MVP):某 kernel 的 native 启动栈 + 本批 launch 次数。
+
+    向外归因 —— 即便闭源 GEMM 进不去,也知道它从哪段 host 代码(nn.Linear / vLLM 自定义算子)
+    launch。kernel 名可能是 cuFuncGetName 解析的真名,或解析失败时的 func_<ptr>(此时靠 stack
+    里的算子帧识别)。
+    """
+
+    kernel: str       # cuFuncGetName 名,或 func_<ptr>(runtime 注册 kernel 解析不到名)
+    launches: int     # 本批 launch 次数
+    stack: str        # 符号化 native 栈(" <- " 连接,top→down 到 Python 解释器边界)
+
+
+# launch 栈里的"启动原语"帧(跳过它们,下一帧才是真正的算子 / kernel 身份)
+_LAUNCH_PRIM_PREFIXES = ("cudaLaunchKernel", "cuLaunchKernel", "cublas")
+
+
+def _launch_identity(stack: str) -> str:
+    """从 launch 栈取算子身份 token —— 跳过启动原语帧,取第一帧算子名的基名。
+    例:'cudaLaunchKernel <- fused_add_rms_norm(at::Tensor&...) <- ...' → 'fused_add_rms_norm'。"""
+    for frame in stack.split(" <- "):
+        f = frame.strip()
+        if any(f.startswith(p) for p in _LAUNCH_PRIM_PREFIXES):
+            continue
+        base = f[5:] if f.startswith("void ") else f
+        for sep in ("(", "<"):
+            i = base.find(sep)
+            if i > 0:
+                base = base[:i]
+        base = base.strip().split("::")[-1]
+        token = "".join(ch for ch in base if ch.isalnum() or ch == "_")
+        if len(token) >= 4:
+            return token
+    return ""
+
+
+class StallAggregator:
+    """累加一窗内的 stall 样本,roll-up 时算出语义类占比 + per-kernel stall 画像。
+
+    口径(设计文档 §11):各语义类占 **stall 样本**(= 总样本 − issued);`issued`(selected)
+    是已发射、非 stall,单独占总样本。线程安全同 WindowAggregator。
+    """
+
+    def __init__(self, classifier: StallClassifier | None = None) -> None:
+        self._clf = classifier or StallClassifier()
+        self._kcls = KernelClassifier()  # mangled kernel 名 → 算子类(gemm/attention/comm/...)
+        self._lock = Lock()
+        self._reset_locked()
+
+    def _reset_locked(self) -> None:
+        self._cat_samples: dict[str, int] = defaultdict(int)  # 语义类(不含 issued)→ 样本
+        self._issued = 0                                      # selected
+        self._total = 0
+        # per-kernel:kernel → {语义类/issued → 样本, "_total" → 样本}
+        self._kernel: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+        # 语义类 → {原始 PerfWorks reason 名 → 样本}(专家下钻用,保留归并前的真实指标名)
+        self._reasons: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+        self._has_data = False
+
+    @property
+    def has_data(self) -> bool:
+        return self._has_data
+
+    def add(self, samples: list[StallSample]) -> None:
+        with self._lock:
+            for s in samples:
+                if s.samples <= 0:
+                    continue
+                self._has_data = True
+                cat = self._clf.classify(s.reason)
+                self._total += s.samples
+                if cat == "issued":
+                    self._issued += s.samples
+                else:
+                    self._cat_samples[cat] += s.samples
+                self._reasons[cat][s.reason] += s.samples  # 留住原始 reason 名
+                k = self._kernel[s.kernel]
+                k[cat] += s.samples
+                k["_total"] += s.samples
+
+    def snapshot_and_reset(self) -> dict[str, float]:
+        """语义类占比(占 stall 样本)+ issued 占比(占总样本)+ 总样本数,然后清零。"""
+        with self._lock:
+            stall_total = sum(self._cat_samples.values())     # = total − issued
+            out: dict[str, float] = {}
+            for cls in STALL_CLASSES:
+                pct = 100.0 * self._cat_samples.get(cls, 0) / stall_total if stall_total else 0.0
+                out[STALL_CLASS_TO_METRIC[cls]] = pct
+            out[M.KERNEL_STALL_ISSUED_PCT] = (
+                100.0 * self._issued / self._total if self._total else 0.0
+            )
+            out[M.KERNEL_STALL_SAMPLE_TOTAL] = float(self._total)
+            self._reset_locked()
+            return out
+
+    def kernel_stall_table(self, limit: int = 25) -> list[dict[str, Any]]:
+        """per-kernel stall 画像(未 reset):每行含样本数 + 主导 stall 类 + 明细。
+
+        主导类**排除** issued(非 stall)与 scheduler_slack(高值常是好事,非瓶颈),
+        这样"主导"指的是真正值得动手的 stall。按总样本降序。
+        """
+        with self._lock:
+            # 总样本数:PC sampling 按固定周期采样,故某 kernel 的样本数 ∝ 它占用的 GPU
+            # 时间。time_pct = 该 kernel 样本 / 全部样本 = 这个 kernel 的 GPU 时间占比
+            # (采样估计,非精确 μs)。这让同一次采样既给"为什么慢",也给"时间花在哪"。
+            grand_total = sum(c.get("_total", 0) for c in self._kernel.values())
+            rows: list[dict[str, Any]] = []
+            for kname, cats in self._kernel.items():
+                ktotal = cats.get("_total", 0)
+                if ktotal <= 0:
+                    continue
+                stall_total = ktotal - cats.get("issued", 0)
+                dom: str | None = None
+                dom_pct = 0.0
+                for cls, n in cats.items():
+                    if cls in ("_total", "issued", "scheduler_slack"):
+                        continue
+                    pct = 100.0 * n / stall_total if stall_total else 0.0
+                    if pct > dom_pct:
+                        dom_pct = pct
+                        dom = cls
+                rows.append({
+                    "kernel": kname,
+                    "cls": self._kcls.classify(kname),   # 算子类(gemm/attention/comm/...)
+                    "samples": ktotal,
+                    "time_pct": (100.0 * ktotal / grand_total) if grand_total else 0.0,
+                    "stall_samples": stall_total,
+                    "dominant_stall": dom,
+                    "dominant_pct": dom_pct,
+                    "breakdown": {c: v for c, v in cats.items() if c != "_total"},
+                })
+            rows.sort(key=lambda r: r["samples"], reverse=True)
+            return rows[:limit]
+
+    def kernel_class_shares(self) -> list[dict[str, Any]]:
+        """按算子类聚合的 GPU 时间占比(全部 kernel,非 top-N)。样本数 ∝ GPU 时间,
+        故每类样本占比 = 该类算子吃掉的 GPU 时间占比。按占比降序。"""
+        with self._lock:
+            grand_total = sum(c.get("_total", 0) for c in self._kernel.values())
+            acc: dict[str, int] = defaultdict(int)
+            for kname, cats in self._kernel.items():
+                acc[self._kcls.classify(kname)] += cats.get("_total", 0)
+            shares = [
+                {"cls": cls, "time_pct": (100.0 * n / grand_total) if grand_total else 0.0}
+                for cls, n in acc.items()
+            ]
+            shares.sort(key=lambda d: d["time_pct"], reverse=True)
+            return shares
+
+    def stall_reason_detail(self, top_per_class: int = 6) -> dict[str, list[dict[str, Any]]]:
+        """每个语义类底下的原始 PerfWorks stall reason 名 + 样本(专家下钻)。
+        排除 issued(非 stall)。每类按样本降序取 top。"""
+        with self._lock:
+            out: dict[str, list[dict[str, Any]]] = {}
+            for cls, reasons in self._reasons.items():
+                if cls == "issued":
+                    continue
+                rows = sorted(
+                    ({"reason": r, "samples": n} for r, n in reasons.items()),
+                    key=lambda d: d["samples"], reverse=True,
+                )
+                if rows:
+                    out[cls] = rows[:top_per_class]
+            return out
 
 
 # === 火焰图聚合(on-demand 深度模式) ==================================
@@ -406,10 +682,13 @@ class CuptiKernelCollector:
         clock: Callable[[], int] = time.monotonic_ns,
         top_n: int = 100,
         capture_stacks: bool = False,
+        pc_sampling: PcSamplingController | None = None,
     ) -> None:
         self._sink = sink
         self._engine_index = engine_index
         self._source = source if source is not None else _default_source(capture_stacks)
+        # Deep Evidence(阶段 2 PC Sampling)按需取证控制器;None=未配置(优雅缺省)
+        self._pcs = pc_sampling
         self._classifier = classifier or KernelClassifier()
         self._agg = WindowAggregator(self._classifier)
         self._flame = FlamegraphAggregator()           # 火焰图(仅 capture_stacks 模式有数据)
@@ -447,6 +726,30 @@ class CuptiKernelCollector:
     def chrome_trace(self) -> dict[str, Any] | None:
         """最近 kernel 的 Chrome Trace JSON(Perfetto/chrome://tracing 打开)。"""
         return self._timeline.chrome_trace()
+
+    # === Deep Evidence(阶段 2 PC Sampling 按需取证)===
+
+    def pc_sampling_available(self) -> bool:
+        """PC Sampling 取证当前能不能用。
+
+        优先看 `started`(已 prime/start,可靠且与线程无关)——`available` 走
+        `pping_pcs_available()` 查的是**当前线程**的 CUDA context,在 API 线程池里
+        没 context 会误报 False,虽然采样在 worker 线程好好跑着。已 prime 即视为可用。
+        """
+        if self._pcs is None:
+            return False
+        return self._pcs.started or self._pcs.available
+
+    def run_deep_evidence(self, window_s: float = 5.0, period_log2: int = 16) -> dict[str, Any]:
+        """跑一个 PC Sampling 取证短窗(阻塞 ~window_s),返回 stall 分解结论。
+        未配置 / 不可用 → fail-closed 的 {available: False, error: ...}。"""
+        if self._pcs is None:
+            return {"available": False, "error": "PC Sampling 未配置(Deep Evidence 不可用)"}
+        return self._pcs.run_window(window_s=window_s, period_log2=period_log2)
+
+    def last_stall_result(self) -> dict[str, Any] | None:
+        """最近一次取证结果(给 API 读)。None=从未跑过。"""
+        return self._pcs.last_result() if self._pcs is not None else None
 
     @property
     def last_snapshot_ts(self) -> int | None:
@@ -744,3 +1047,509 @@ def _import_cupti():  # noqa: ANN202 - 动态模块
 def _default_source(capture_stacks: bool = False) -> KernelActivitySource:
     # 总是返回实例;collector.start() 用 available() 决定启用还是优雅禁用。
     return CuptiPythonSource(capture_stacks=capture_stacks)
+
+
+# === PC Sampling 原生桥(阶段 2 Deep Evidence)========================
+#
+# 这是 libppingcupti.so 的 ctypes 封装。**Deep Evidence Mode**(设计文档 §11):
+# PC Sampling 不是 always-on,而是操作员/规则按需触发的短窗取证。失败一律 fail-closed
+# (库加载失败 / start 失败 → available()=False),绝不阻塞 always-on 主干。
+#
+# 集成现状(§12):in-process 与 torch 共存时 start 可能失效(torch 占 CUPTI),
+# 彻底解决靠 1b 注入式。这里的 fail-closed 让"不可用"成为优雅降级而非崩溃。
+
+
+class _PpingStallRow(ctypes.Structure):
+    """镜像 pping_lang/native/ppingcupti.h 的 PpingStallRow(固定 272 字节)。"""
+    _fields_ = [
+        ("stall_reason", ctypes.c_uint),
+        ("_pad", ctypes.c_uint),
+        ("samples", ctypes.c_ulonglong),
+        ("kernel", ctypes.c_char * 256),
+    ]
+
+
+class _PpingPcRow(ctypes.Structure):
+    """镜像 PpingPcRow(P3 per-PC 直方图行):cubinCrc + pcOffset + samples + kernel。"""
+    _fields_ = [
+        ("cubin_crc", ctypes.c_ulonglong),
+        ("pc_offset", ctypes.c_ulonglong),
+        ("samples", ctypes.c_ulonglong),
+        ("kernel", ctypes.c_char * 256),
+    ]
+
+
+class _PpingLaunchRow(ctypes.Structure):
+    """镜像 PpingLaunchRow(P3 launch 栈 MVP):launches + kernel 名 + 符号化 native 栈。"""
+    _fields_ = [
+        ("launches", ctypes.c_ulonglong),
+        ("kernel", ctypes.c_char * 256),
+        ("stack", ctypes.c_char * 768),
+    ]
+
+
+def _default_so_path() -> str:
+    """libppingcupti.so 路径:env 覆盖 > 仓库内 native/ 构建产物。"""
+    env = os.environ.get("PPING_LANG_PCS_SO")
+    if env:
+        return env
+    return str(Path(__file__).resolve().parents[3] / "native" / "ppingcupti" / "libppingcupti.so")
+
+
+class PcSamplingLib(Protocol):
+    """libppingcupti.so 的窄接口。真实=ctypes;测试=FakePcSamplingLib。"""
+
+    def available(self) -> bool: ...
+    def start(self, period_log2: int) -> int: ...        # 0=成功,负=错误码
+    def stop(self) -> int: ...
+    def drain(self) -> list[StallSample]: ...            # 已聚合行(reason 已解析成名)
+    def drain_pc(self) -> list[PcSample]: ...            # P3 per-PC 直方图(可空=未开/老 .so)
+    def drain_launches(self) -> list[LaunchSample]: ...  # P3 launch 栈(可空=未开/老 .so)
+    def overhead(self) -> tuple[float, int, int]: ...    # (getdata_ms, dropped, hwfull)
+    def last_error(self) -> str: ...
+
+
+class CtypesPcSamplingLib:
+    """真实 libppingcupti.so via ctypes(RTLD_DEEPBIND)。
+
+    加载失败(非 Linux / 无 .so / 缺 CUPTI)→ available() False,fail-closed。
+    DEEPBIND:进程里可能并存多个 libcupti,让 .so 优先用自己 rpath 的版本(§12)。
+    """
+
+    _MAX_ROWS = 16384
+    _MAX_PC_ROWS = 200000   # per-PC 直方图行远多于 (kernel,reason);宽裕些,溢出计入 dropped
+
+    def __init__(self, so_path: str | None = None) -> None:
+        self._lib: Any = None
+        self._pc_buf: Any = None
+        self._lc_buf: Any = None
+        self._reason_cache: dict[int, str] = {}
+        path = so_path or _default_so_path()
+        try:
+            mode = getattr(os, "RTLD_NOW", 2) | getattr(os, "RTLD_DEEPBIND", 0)
+            self._lib = ctypes.CDLL(path, mode=mode)
+            self._bind()
+        except Exception as e:  # noqa: BLE001 — 加载失败必须优雅降级
+            logger.warning("[pping-lang] libppingcupti 加载失败(PC Sampling 禁用): %s", e)
+            self._lib = None
+
+    def _bind(self) -> None:
+        c = self._lib
+        c.pping_pcs_available.restype = ctypes.c_int
+        c.pping_pcs_start.argtypes = [ctypes.c_int]
+        c.pping_pcs_start.restype = ctypes.c_int
+        c.pping_pcs_stop.restype = ctypes.c_int
+        c.pping_pcs_drain.argtypes = [ctypes.POINTER(_PpingStallRow), ctypes.c_int]
+        c.pping_pcs_drain.restype = ctypes.c_int
+        # P3 per-PC 直方图 drain(老 .so 没有此符号 → getattr 容错,降级为空)
+        if hasattr(c, "pping_pcs_drain_pc"):
+            c.pping_pcs_drain_pc.argtypes = [ctypes.POINTER(_PpingPcRow), ctypes.c_int]
+            c.pping_pcs_drain_pc.restype = ctypes.c_int
+        # P3 launch 栈 drain(同上,老 .so 无此符号则降级)
+        if hasattr(c, "pping_pcs_drain_launches"):
+            c.pping_pcs_drain_launches.argtypes = [ctypes.POINTER(_PpingLaunchRow), ctypes.c_int]
+            c.pping_pcs_drain_launches.restype = ctypes.c_int
+        c.pping_pcs_stall_reason_name.argtypes = [ctypes.c_uint, ctypes.c_char_p, ctypes.c_int]
+        c.pping_pcs_stall_reason_name.restype = ctypes.c_int
+        c.pping_pcs_overhead.argtypes = [
+            ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_ulonglong),
+            ctypes.POINTER(ctypes.c_ulonglong),
+        ]
+        c.pping_pcs_last_error.restype = ctypes.c_char_p
+        self._buf = (_PpingStallRow * self._MAX_ROWS)()
+
+    def available(self) -> bool:
+        if self._lib is None:
+            return False
+        try:
+            return bool(self._lib.pping_pcs_available())
+        except Exception:
+            return False
+
+    def start(self, period_log2: int) -> int:
+        if self._lib is None:
+            return -100
+        return int(self._lib.pping_pcs_start(period_log2))
+
+    def stop(self) -> int:
+        if self._lib is None:
+            return -100
+        return int(self._lib.pping_pcs_stop())
+
+    def _reason_name(self, idx: int) -> str:
+        nm = self._reason_cache.get(idx)
+        if nm is None:
+            buf = ctypes.create_string_buffer(160)
+            self._lib.pping_pcs_stall_reason_name(idx, buf, 160)
+            nm = buf.value.decode(errors="replace") or f"reason_{idx}"
+            self._reason_cache[idx] = nm
+        return nm
+
+    def drain(self) -> list[StallSample]:
+        if self._lib is None:
+            return []
+        n = int(self._lib.pping_pcs_drain(self._buf, self._MAX_ROWS))
+        out: list[StallSample] = []
+        for i in range(max(0, n)):
+            row = self._buf[i]
+            out.append(StallSample(
+                kernel=row.kernel.decode(errors="replace"),
+                reason=self._reason_name(row.stall_reason),
+                samples=int(row.samples),
+            ))
+        return out
+
+    def drain_pc(self) -> list[PcSample]:
+        """P3:拉走 per-PC 直方图(snapshot-swap)。需 .so 带 drain_pc 符号 + 运行时
+        PPING_LANG_PCS_PC_HIST=1 才有数据;否则返回空(优雅降级)。"""
+        if self._lib is None or not hasattr(self._lib, "pping_pcs_drain_pc"):
+            return []
+        if getattr(self, "_pc_buf", None) is None:
+            self._pc_buf = (_PpingPcRow * self._MAX_PC_ROWS)()
+        n = int(self._lib.pping_pcs_drain_pc(self._pc_buf, self._MAX_PC_ROWS))
+        out: list[PcSample] = []
+        for i in range(max(0, n)):
+            row = self._pc_buf[i]
+            out.append(PcSample(
+                kernel=row.kernel.decode(errors="replace"),
+                cubin_crc=int(row.cubin_crc),
+                pc_offset=int(row.pc_offset),
+                samples=int(row.samples),
+            ))
+        return out
+
+    def drain_launches(self) -> list[LaunchSample]:
+        """P3:拉走 per-kernel launch 栈。需 .so 带符号 + PPING_LANG_PCS_LAUNCH_STACK=1。"""
+        if self._lib is None or not hasattr(self._lib, "pping_pcs_drain_launches"):
+            return []
+        if getattr(self, "_lc_buf", None) is None:
+            self._lc_buf = (_PpingLaunchRow * 4096)()
+        n = int(self._lib.pping_pcs_drain_launches(self._lc_buf, 4096))
+        out: list[LaunchSample] = []
+        for i in range(max(0, n)):
+            row = self._lc_buf[i]
+            out.append(LaunchSample(
+                kernel=row.kernel.decode(errors="replace"),
+                launches=int(row.launches),
+                stack=row.stack.decode(errors="replace"),
+            ))
+        return out
+
+    def overhead(self) -> tuple[float, int, int]:
+        if self._lib is None:
+            return (0.0, 0, 0)
+        gd = ctypes.c_double(); dr = ctypes.c_ulonglong(); hf = ctypes.c_ulonglong()
+        self._lib.pping_pcs_overhead(ctypes.byref(gd), ctypes.byref(dr), ctypes.byref(hf))
+        return (gd.value, int(dr.value), int(hf.value))
+
+    def last_error(self) -> str:
+        if self._lib is None:
+            return "libppingcupti not loaded"
+        try:
+            return (self._lib.pping_pcs_last_error() or b"").decode(errors="replace")
+        except Exception:
+            return ""
+
+
+class FakePcSamplingLib:
+    """测试 / 无 GPU 用的 PC Sampling 库替身。脚本化 drain 返回的合成行。"""
+
+    def __init__(self, *, available: bool = True, start_rc: int = 0,
+                 drain_batches: list[list[StallSample]] | None = None,
+                 pc_batches: list[list[PcSample]] | None = None,
+                 launch_batches: list[list[LaunchSample]] | None = None) -> None:
+        self._available = available
+        self._start_rc = start_rc
+        self._batches = list(drain_batches or [])
+        self._pc_batches = list(pc_batches or [])
+        self._launch_batches = list(launch_batches or [])
+        self._overhead = (0.0, 0, 0)
+        self.started = False
+
+    def available(self) -> bool:
+        return self._available
+
+    def start(self, period_log2: int) -> int:
+        if self._start_rc == 0:
+            self.started = True
+        return self._start_rc
+
+    def stop(self) -> int:
+        self.started = False
+        return 0
+
+    def drain(self) -> list[StallSample]:
+        return self._batches.pop(0) if self._batches else []
+
+    def drain_pc(self) -> list[PcSample]:
+        return list(self._pc_batches.pop(0)) if self._pc_batches else []
+
+    def drain_launches(self) -> list[LaunchSample]:
+        return list(self._launch_batches.pop(0)) if self._launch_batches else []
+
+    def overhead(self) -> tuple[float, int, int]:
+        return self._overhead
+
+    def set_overhead(self, getdata_ms: float, dropped: int, hwfull: int) -> None:
+        self._overhead = (getdata_ms, dropped, hwfull)
+
+    def last_error(self) -> str:
+        return "" if self._start_rc == 0 else f"fake start_rc={self._start_rc}"
+
+
+class PcSamplingController:
+    """Deep Evidence 编排:**早 prime 一次** + 按需 drain 短窗,聚合成"为什么慢"的结论。
+
+    ★ 关键(真机验证,设计文档 §12):PC Sampling 的 enable 必须在 workload 干重活**之前**
+    调(否则 `getNumStallReasons` 返 0)。所以模型不是"按需晚 start/stop",而是:
+      prime()  —— 早期(vLLM 启动前/warmup 后)enable+start 一次,drain 线程持续累。
+      run_window() —— 按需 drain 一段时间,取这段窗的 stall 分解;**不重新 start、不 stop**。
+    所有失败 fail-closed 成 {available: False, error: ...}。
+    """
+
+    def __init__(
+        self,
+        lib: PcSamplingLib | None = None,
+        *,
+        classifier: StallClassifier | None = None,
+        sink: Sink | None = None,
+        engine_index: int = 0,
+        top_n: int = 50,
+    ) -> None:
+        self._lib = lib if lib is not None else CtypesPcSamplingLib()
+        self._classifier = classifier or StallClassifier()
+        self._sink = sink
+        self._engine_index = engine_index
+        self._top_n = top_n
+        self._busy = Lock()
+        self._started = False
+        self._last_result: dict[str, Any] | None = None
+        self._correlator: Any = None       # P3 SourceCorrelator,惰性建
+        self._correlator_init = False
+
+    @property
+    def available(self) -> bool:
+        return self._lib.available()
+
+    @property
+    def started(self) -> bool:
+        return self._started
+
+    def last_result(self) -> dict[str, Any] | None:
+        return self._last_result
+
+    def prime(self, period_log2: int = 16) -> dict[str, Any]:
+        """早期 enable+start 一次(幂等)。必须在 workload 干重活前调。"""
+        if self._started:
+            return {"available": True}
+        if not self._lib.available():
+            return self._fail("PC Sampling 不可用(需 Linux + libppingcupti + 放开 profiling 权限)")
+        rc = self._lib.start(period_log2)
+        if rc != 0:
+            return self._fail(f"start 失败 rc={rc}: {self._lib.last_error()}(enable 须早于 workload 重活)")
+        self._started = True
+        return {"available": True}
+
+    def reprime(self, period_log2: int = 16) -> dict[str, Any]:
+        """停止再启动采样 —— 自愈被打断的采样(实测:cudagraph capture 会把早 prime 的
+        采样打停,之后 drain 全是空窗;capture 后重启即恢复)。start-after-workload 实测可行
+        (与 §12 的"enable 须早于 workload"不冲突:那是首次 enable 的硬约束,重启是已 enable
+        过的 reconfigure)。"""
+        try:
+            self._lib.stop()
+        except Exception:  # noqa: BLE001
+            pass
+        self._started = False
+        return self.prime(period_log2)
+
+    def close(self) -> None:
+        """停止采样(进程收尾)。幂等。"""
+        if self._started:
+            try:
+                self._lib.stop()
+            except Exception:
+                pass
+            self._started = False
+
+    def run_window(
+        self,
+        *,
+        window_s: float = 5.0,
+        period_log2: int = 16,   # 2^16:防 HW 缓冲溢出楔死(见 engine_pcs 注释)
+        drain_interval_s: float = 0.5,
+        clock: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], None] = time.sleep,
+    ) -> dict[str, Any]:
+        """drain 一段窗,返回这段的 stall 结论。同一时刻只允许一个窗(busy 锁)。
+        若尚未 prime 则懒 prime(注意:晚 prime 在 vLLM 已跑重活时会失败)。"""
+        if not self._busy.acquire(blocking=False):
+            return {"available": False, "error": "another deep-evidence window is running"}
+        try:
+            if not self._started:
+                p = self.prime(period_log2)
+                if not p.get("available"):
+                    return p
+            agg = StallAggregator(self._classifier)
+            self._lib.drain()  # 清掉窗开始前已累计的,只取本窗
+            self._lib.drain_pc()  # P3:同样清掉 per-PC 直方图,只取本窗
+            t0 = clock()
+            while clock() - t0 < window_s:
+                sleep(drain_interval_s)
+                agg.add(self._lib.drain())
+            agg.add(self._lib.drain())  # 收尾再 drain 一次
+            pcs = self._lib.drain_pc()  # P3:窗末取 per-PC 直方图(整窗累计)
+            launches = self._lib.drain_launches()  # P3:per-kernel launch 栈
+            getdata_ms, dropped, hwfull = self._lib.overhead()
+            table = agg.kernel_stall_table(self._top_n)
+            class_shares = agg.kernel_class_shares()    # 须在 snapshot_and_reset(清零)之前取
+            reason_detail = agg.stall_reason_detail()   # 同上,清零前取原始 reason 名
+            stats = agg.snapshot_and_reset()
+            shares = sorted(
+                ({"cls": cls, "pct": stats[STALL_CLASS_TO_METRIC[cls]]} for cls in STALL_CLASSES),
+                key=lambda d: d["pct"], reverse=True,
+            )
+            hotspots = self._pc_hotspots(pcs)
+            self._attach_launch_stacks(hotspots, launches)
+            result: dict[str, Any] = {
+                "available": True,
+                "window_s": window_s,
+                "period_log2": period_log2,
+                "sample_total": stats[M.KERNEL_STALL_SAMPLE_TOTAL],
+                "issued_pct": stats[M.KERNEL_STALL_ISSUED_PCT],
+                "stall_shares": shares,
+                "kernel_class_shares": class_shares,
+                "reason_detail": reason_detail,
+                "kernel_table": table,
+                "pc_hotspots": hotspots,
+                "overhead": {"getdata_ms": getdata_ms, "dropped": dropped, "hwfull": hwfull},
+                "error": None,
+            }
+            self._push_metrics(stats)
+            self._last_result = result
+            return result
+        finally:
+            self._busy.release()
+
+    # P3 行级归因:每窗最多关联的 kernel 数 / 每 kernel 取样关联的热点 PC 数(界定开销)
+    _PC_TOP_KERNELS = 12
+    _PC_TOP_OFFSETS = 40
+    # top-N 之外再多扫这么多 kernel,专门捞"能映射到源码行"的(让源码行轨即使不在最热也可见)
+    _PC_EXTRA_SCAN = 20
+
+    def _get_correlator(self) -> Any:
+        if not self._correlator_init:
+            self._correlator_init = True
+            try:
+                from pping_lang.native.sass_source import SourceCorrelator  # noqa: PLC0415
+                self._correlator = SourceCorrelator()
+            except Exception:  # noqa: BLE001 — 关联是增益,失败不影响采集
+                self._correlator = None
+        return self._correlator
+
+    def _pc_hotspots(self, pcs: list[PcSample]) -> list[dict[str, Any]]:
+        """把 per-PC 直方图压成 per-kernel"最深热点"(双轨:源码行 / SASS 偏移+名解码)。
+
+        可映射(Triton/带 lineinfo)→ 按源码行聚合,给 top 行 + 占比;
+        闭源(cutlass/flash)→ 给最热 SASS 偏移 + kernel 名解码(tile/dtype)。
+        """
+        if not pcs:
+            return []
+        # 按 kernel 聚合
+        by_kernel: dict[str, list[PcSample]] = {}
+        for p in pcs:
+            by_kernel.setdefault(p.kernel, []).append(p)
+        ranked = sorted(by_kernel.items(),
+                        key=lambda kv: sum(s.samples for s in kv[1]), reverse=True)
+        corr = self._get_correlator()
+        from pping_lang.native.sass_source import decode_kernel_name  # noqa: PLC0415
+
+        def build_entry(kernel: str, samples: list[PcSample],
+                        *, minor: bool = False) -> dict[str, Any] | None:
+            total = sum(s.samples for s in samples)
+            if total <= 0:
+                return None
+            samples.sort(key=lambda s: s.samples, reverse=True)
+            entry: dict[str, Any] = {
+                "kernel": kernel, "samples": total, "minor": minor,
+                "decode": decode_kernel_name(kernel),
+                "mappable": False, "lines": [], "sass": [],
+            }
+            # 源码行聚合(只关联本 kernel 最热的若干 PC,界定开销)
+            by_line: dict[str, dict[str, Any]] = {}
+            if corr is not None and corr.available:
+                for s in samples[:self._PC_TOP_OFFSETS]:
+                    src = corr.correlate(s.cubin_crc, s.pc_offset, kernel)
+                    if src:
+                        loc = f"{os.path.basename(src[1])}:{src[0]}"
+                        rec = by_line.setdefault(loc, {"loc": loc, "samples": 0,
+                                                       "path": src[1], "line": src[0]})
+                        rec["samples"] += s.samples
+            if by_line:
+                entry["mappable"] = True
+                for r in sorted(by_line.values(), key=lambda r: r["samples"], reverse=True)[:4]:
+                    entry["lines"].append({"loc": r["loc"], "path": r["path"], "line": r["line"],
+                                           "pct": round(100.0 * r["samples"] / total, 1),
+                                           "code": corr.source_line(r["path"], r["line"])})
+            else:
+                for s in samples[:3]:  # 闭源轨:最热 SASS 偏移(top 3)
+                    entry["sass"].append({"offset": f"0x{s.pc_offset:x}",
+                                          "pct": round(100.0 * s.samples / total, 1)})
+            return entry
+
+        out: list[dict[str, Any]] = []
+        for kernel, samples in ranked[:self._PC_TOP_KERNELS]:
+            e = build_entry(kernel, samples)
+            if e:
+                out.append(e)
+        # 额外扫一截,把能映射到源码行的 kernel 也带出来(标 minor)——让源码行轨即便不在最热也可见。
+        # 闭源(映射不到)的不重复加,避免一堆小 SASS 条目噪音。
+        seen = {e["kernel"] for e in out}
+        for kernel, samples in ranked[self._PC_TOP_KERNELS:self._PC_TOP_KERNELS + self._PC_EXTRA_SCAN]:
+            if kernel in seen:
+                continue
+            e = build_entry(kernel, samples, minor=True)
+            if e and e["mappable"]:
+                out.append(e)
+        return out
+
+    def _attach_launch_stacks(self, hotspots: list[dict[str, Any]],
+                              launches: list[LaunchSample]) -> None:
+        """P3:把 launch 栈接到 pc_hotspots —— 向外归因(闭源 GEMM ← nn.Linear)。
+
+        join:① 精确名匹配(cuFuncGetName 解析到名的 cutlass/cuBLAS,与 PC functionName 同源);
+        ② 解析不到名(runtime 注册 kernel,func_<ptr>)→ 从栈里第一帧算子名取 token,
+        看是否是该 hotspot mangled 名的子串(覆盖 vLLM 自定义算子 fused_add_rms_norm 等)。
+        """
+        if not hotspots or not launches:
+            return
+        by_name = {lc.kernel: lc for lc in launches}
+        # 只为"解析不到名"的 launch 算 token(已解析的走精确匹配,避免 ::impl 之类泛 token 误配)
+        ident: list[tuple[str, LaunchSample]] = []
+        for lc in launches:
+            if lc.kernel.startswith("func_"):
+                tok = _launch_identity(lc.stack)
+                if tok:
+                    ident.append((tok, lc))
+        for h in hotspots:
+            k = h["kernel"]
+            chosen = by_name.get(k)
+            if chosen is None:
+                best: LaunchSample | None = None
+                for tok, lc in ident:
+                    if tok in k and (best is None or lc.launches > best.launches):
+                        best = lc
+                chosen = best
+            if chosen is not None and chosen.stack:
+                h["launch"] = {"stack": chosen.stack, "launches": chosen.launches}
+
+    def _push_metrics(self, stats: dict[str, float]) -> None:
+        if self._sink is None:
+            return
+        now = time.monotonic_ns()
+        for name, value in stats.items():
+            self._sink.push_metric(MetricPoint(now, name, value, self._engine_index))
+
+    def _fail(self, msg: str) -> dict[str, Any]:
+        res = {"available": False, "error": msg}
+        self._last_result = res
+        return res

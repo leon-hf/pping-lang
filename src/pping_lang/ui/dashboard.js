@@ -4,6 +4,180 @@ let _tpotChart = null;
 let _e2eChart = null;
 let _kClassChart = null;   // kernel 类占比堆叠面积(实时)
 let _kUtilChart = null;    // GPU busy + 同步等待(实时)
+let _kRoofChart = null;    // Kernel tab 里复用的第二个 roofline 图(懒建,与 Overview 同数据)
+let _lastRoofline = null;  // 最近一次 /api/roofline 数据,懒建第二个图时回填
+
+// 在点旁绘制文字标签(簇语义 / 并发标记)—— data 点带 label 字段即画
+const _roofLabelsPlugin = {
+  id: 'roofLabels',
+  afterDatasetsDraw(chart) {
+    const { ctx } = chart;
+    chart.data.datasets.forEach((ds, di) => {
+      const meta = chart.getDatasetMeta(di);
+      if (!meta || meta.hidden) return;
+      ds.data.forEach((p, i) => {
+        if (!p || !p.label || !meta.data[i]) return;
+        const el = meta.data[i];
+        ctx.save();
+        ctx.font = (p.labelBold ? '600 ' : '400 ') + '10.5px Inter, "PingFang SC", sans-serif';
+        ctx.fillStyle = p.labelColor || '#7a6e63';
+        ctx.textAlign = 'left';
+        ctx.fillText(p.label, el.x + 9, el.y + (p.labelDy != null ? p.labelDy : 4));
+        ctx.restore();
+      });
+    });
+  },
+};
+
+// roofline 散点图配置工厂 —— Overview 与 Kernel tab 两个图共用同一份配置
+function _makeRooflineChart(ctx) {
+  return new Chart(ctx, {
+    type: 'scatter',
+    plugins: [_roofLabelsPlugin],
+    data: {
+      datasets: [
+        {
+          label: '当前样本', data: [],
+          backgroundColor: 'rgba(13, 139, 128, 0.55)', borderColor: '#0d8b80', borderWidth: 1,
+          pointRadius: 4, pointHoverRadius: 7, pointHoverBackgroundColor: '#0d8b80',
+          pointHoverBorderColor: '#fff', pointHoverBorderWidth: 2, showLine: false, order: 3,
+        },
+        {
+          label: 'Compute roof', data: [], showLine: true, borderColor: '#dc4d3e', borderWidth: 2.5,
+          pointRadius: 0, fill: 'origin', backgroundColor: 'rgba(220, 77, 62, 0.06)', tension: 0, order: 1,
+        },
+        {
+          label: 'Memory roof', data: [], showLine: true, borderColor: '#5147c8', borderWidth: 2.5,
+          pointRadius: 0, fill: 'origin', backgroundColor: 'rgba(81, 71, 200, 0.06)', tension: 0, order: 2,
+        },
+        {
+          // 调优地图:decode 的算术强度≈batch → 扩 batch 沿带宽上界向右爬,ridge point 后 compute-bound
+          label: 'batch scaling envelope', data: [], showLine: true, borderColor: '#a8998a',
+          borderDash: [5, 4], borderWidth: 1.5, pointRadius: 3.5, pointStyle: 'rectRot',
+          backgroundColor: '#a8998a', fill: false, order: 4,
+        },
+        {
+          // P0-C:实测 scaling 曲线(压测扫并发档)—— 缺口从哪个 B 张开 = 真实瓶颈位置
+          label: '实测 scaling', data: [], showLine: true, borderColor: '#0d8b80',
+          borderWidth: 2, pointRadius: 5, pointHoverRadius: 8, pointStyle: 'circle',
+          backgroundColor: '#0d8b80', fill: false, order: 5,
+        },
+      ],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: '#1c1410', titleColor: '#fff', bodyColor: '#fdf9f2', padding: 11,
+          cornerRadius: 8, displayColors: false, borderWidth: 0, titleFont: { weight: '600' },
+          callbacks: {
+            title: () => '',
+            label: (ctx) => {
+              const ds = ctx.dataset.label;
+              if (ds === '当前样本') {
+                const n = ctx.raw && ctx.raw.n > 1 ? [`合并 ${ctx.raw.n} 个 step`] : [];
+                return [`AI:  ${ctx.parsed.x.toFixed(2)} FLOPs/byte`, `TPut: ${ctx.parsed.y.toFixed(1)} TFLOPs/s`, ...n];
+              }
+              if (ds === 'batch scaling envelope') {
+                return `B=${ctx.raw.b}: bandwidth-bound 上界 ${ctx.parsed.y.toFixed(1)} TFLOPs/s`;
+              }
+              if (ds === '实测 scaling') {
+                return [`实测 并发${ctx.raw.b}: ${ctx.parsed.y.toFixed(2)} TFLOPs/s`,
+                        `理论 envelope: ${(ctx.raw.env || 0).toFixed(2)} TFLOPs/s`,
+                        `缺口: ${(ctx.raw.gap || 0).toFixed(0)}%`];
+              }
+              return `${ds}: ${ctx.parsed.y.toFixed(1)} TFLOPs/s`;
+            },
+          },
+        },
+      },
+      scales: {
+        // log-log 轴的网格会按次刻度密画(1,2,3…10,20,30…),两轴都开直接变坐标纸 —— 全关,
+        // roofline 的参照系是两条 roof 线本身,不需要网格
+        x: {
+          type: 'logarithmic',
+          title: { display: true, text: 'Arithmetic Intensity (FLOPs / byte)', color: '#7a6e63', font: { size: 11.5, weight: '600' } },
+          ticks: { color: '#a8998a', font: { size: 11 } }, grid: { display: false },
+        },
+        y: {
+          type: 'logarithmic',
+          title: { display: true, text: 'Achieved Throughput (TFLOPs/s)', color: '#7a6e63', font: { size: 11.5, weight: '600' } },
+          ticks: { color: '#a8998a', font: { size: 11 } }, grid: { display: false },
+        },
+      },
+    },
+  });
+}
+
+// 相近 step 合并成簇心:log 网格分桶(x 每十倍程 6 桶、y 4 桶),桶内取几何均值,
+// n = 合并步数 → 点大小。免得 60s 内每 step 一个点密密麻麻(信息在簇,不在单点)。
+function _aggRooflinePoints(raw) {
+  const bins = new Map();
+  for (const p of raw) {
+    if (!(p.x > 0) || !(p.y > 0)) continue;
+    const k = Math.round(Math.log10(p.x) * 6) + '|' + Math.round(Math.log10(p.y) * 4);
+    let b = bins.get(k);
+    if (!b) { b = { sx: 0, sy: 0, n: 0 }; bins.set(k, b); }
+    b.sx += Math.log10(p.x); b.sy += Math.log10(p.y); b.n++;
+  }
+  const out = [];
+  for (const b of bins.values()) {
+    out.push({ x: Math.pow(10, b.sx / b.n), y: Math.pow(10, b.sy / b.n), n: b.n });
+  }
+  return out;
+}
+
+// 把 /api/roofline 数据填进一个 roofline 图(点 + 两条 roof)
+function _applyRooflineData(chart, data) {
+  if (!chart) return;
+  const agg = _aggRooflinePoints((data.points || []).map(p => ({ x: p.ai, y: p.throughput_tflops })));
+  // A:簇语义标签 —— 步数最多的簇 = decode 主体(decode 步数远多于 prefill);
+  // 其余里 x 明显更大的标 prefill
+  if (agg.length) {
+    const dec = agg.reduce((a, p) => (p.n > a.n ? p : a));
+    dec.label = 'decode · operating point';
+    dec.labelBold = true;
+    dec.labelColor = '#0d8b80';
+    const rest = agg.filter(p => p !== dec && p.n > 0);
+    if (rest.length) {
+      const pf = rest.reduce((a, p) => (p.x > a.x ? p : a));
+      if (pf.x > dec.x * 2.5) { pf.label = 'prefill'; pf.labelColor = '#7a6e63'; }
+    }
+  }
+  chart.data.datasets[0].data = agg;
+  // 点半径 ∝ log(合并步数):单步 4px,几十步 ~10px,封顶 13px
+  chart.data.datasets[0].pointRadius = agg.map(p => Math.min(13, 3 + 2.2 * Math.log2(1 + p.n)));
+  chart.data.datasets[0].pointHoverRadius = agg.map(p => Math.min(15, 5 + 2.2 * Math.log2(1 + p.n)));
+  if (data.peak && data.peak.compute_tflops && data.peak.mem_bw_tbs) {
+    const peakC = data.peak.compute_tflops, peakBW = data.peak.mem_bw_tbs, knee = peakC / peakBW;
+    const xMin = 0.1, xMax = Math.max(1000, knee * 3);
+    chart.data.datasets[1].data = [{ x: knee, y: peakC }, { x: xMax, y: peakC }];
+    chart.data.datasets[2].data = [{ x: xMin, y: peakBW * xMin }, { x: knee, y: peakC }];
+    // B:batch scaling envelope —— decode AI≈batch,沿带宽上界标 B=1→ridge point
+    const traj = [];
+    for (const b of [1, 4, 8, 16, 32, 64, 128, 256, 512]) {
+      if (b > knee * 1.1) break;
+      traj.push({
+        x: b, y: Math.min(peakBW * b, peakC), b,
+        label: [1, 8, 32, 128].includes(b) ? `B=${b}` : '', labelDy: -9, labelColor: '#a8998a',
+      });
+    }
+    traj.push({ x: knee, y: peakC, b: Math.round(knee), label: `ridge point (AI=${knee.toFixed(0)})`, labelDy: -9, labelColor: '#dc4d3e' });
+    chart.data.datasets[3].data = traj;
+  } else {
+    chart.data.datasets[1].data = [];
+    chart.data.datasets[2].data = [];
+    chart.data.datasets[3].data = [];
+  }
+  // P0-C:实测 scaling 曲线(压测扫出来的真实扩展点,叠在理论 envelope 上)
+  const rows = (data.scaling && data.scaling.verdict && data.scaling.verdict.rows) || [];
+  chart.data.datasets[4].data = rows.map((r, i) => ({
+    x: r.b, y: r.tflops, b: r.b, env: r.envelope_tflops, gap: r.gap_pct,
+    label: i === rows.length - 1 ? '实测' : '', labelDy: 14, labelColor: '#0d8b80', labelBold: true,
+  }));
+  chart.update('none');
+}
 
 function _createMiniLatencyChart(canvasId, color) {
   const ctx = document.getElementById(canvasId);
@@ -14,7 +188,8 @@ function _createMiniLatencyChart(canvasId, color) {
       labels: [],
       datasets: [
         {
-          label: 'p50',
+          // 浅线 = p99(尾部参考,弱化);实线 = 平均(典型体验,平均为主,用户反馈)
+          label: 'p99',
           data: [],
           borderColor: color + '55',
           backgroundColor: 'transparent',
@@ -24,7 +199,7 @@ function _createMiniLatencyChart(canvasId, color) {
           pointRadius: 0,
         },
         {
-          label: 'p99',
+          label: '平均',
           data: [],
           borderColor: color,
           backgroundColor: color + '1a',
@@ -80,8 +255,8 @@ function _createMiniLatencyChart(canvasId, color) {
 function _updateMiniLatencyChart(chart, buckets) {
   if (!chart) return;
   chart.data.labels = buckets.map(b => Math.round(b.t) + 's');
-  chart.data.datasets[0].data = buckets.map(b => b.p50);
-  chart.data.datasets[1].data = buckets.map(b => b.p99);
+  chart.data.datasets[0].data = buckets.map(b => b.p99);
+  chart.data.datasets[1].data = buckets.map(b => b.avg != null ? b.avg : b.p50);
   chart.update('none');
 }
 
@@ -268,6 +443,59 @@ function benchTab() {
 
     toggle(id) {
       this.selectedId = (this.selectedId === id) ? null : id;
+    },
+
+    // ===== 压测结果对比:任选两个 run,A=先选(基准),B=后选,Δ=B 相对 A =====
+    cmpSel: [],
+    toggleCmp(id) {
+      const i = this.cmpSel.indexOf(id);
+      if (i >= 0) this.cmpSel.splice(i, 1);
+      else { this.cmpSel.push(id); if (this.cmpSel.length > 2) this.cmpSel.shift(); }
+    },
+    cmpRuns() {
+      if (this.cmpSel.length !== 2) return null;
+      const a = this.runs.find(r => r.run_id === this.cmpSel[0]);
+      const b = this.runs.find(r => r.run_id === this.cmpSel[1]);
+      return (a && b) ? [a, b] : null;
+    },
+    cmpScenario(r) {
+      const s = (r && r.scenario) || {};
+      const len = s.duration_s ? `${s.duration_s}s` : `${s.num_requests} req`;
+      return `并发 ${s.concurrency} · ${s.prompt_tokens}/${s.output_tokens} tok · ${len}`;
+    },
+    // 对比卡数据:逐指标 A/B 双横条(按本指标 max 归一,免得 ms 与 tok/s 挤同轴)+ Δ%。
+    // 延迟类越低越好,吞吐越高越好;|Δ|<2% 视为持平(压测运行间噪声)
+    cmpTable() {
+      const pair = this.cmpRuns();
+      if (!pair) return [];
+      const [A, B] = pair;
+      const g = (r, p) => p.split('.').reduce((o, k) => (o == null ? null : o[k]), r);
+      const defs = [
+        { label: 'TTFT 平均', path: 'client_metrics.ttft_ms.mean', lower: true, unit: 'ms' },
+        { label: 'TTFT p99',  path: 'client_metrics.ttft_ms.p99',  lower: true, unit: 'ms' },
+        { label: 'TPOT 平均', path: 'client_metrics.tpot_ms.mean', lower: true, unit: 'ms' },
+        { label: 'TPOT p99',  path: 'client_metrics.tpot_ms.p99',  lower: true, unit: 'ms' },
+        { label: 'E2E 平均',  path: 'client_metrics.e2e_ms.mean',  lower: true, unit: 'ms' },
+        { label: 'E2E p99',   path: 'client_metrics.e2e_ms.p99',   lower: true, unit: 'ms' },
+        { label: 'Output 吞吐', path: 'client_metrics.output_throughput_tps', lower: false, unit: 'tok/s' },
+        { label: '完成 / 错误', path: 'client_metrics.ok', path2: 'client_metrics.errors', lower: false, unit: '' },
+      ];
+      return defs.map(d => {
+        const a = g(A, d.path), b = g(B, d.path);
+        let pct = null, good = null;
+        if (a != null && b != null && Number(a) !== 0) {
+          pct = 100 * (b - a) / a;
+          if (Math.abs(pct) >= 2) good = d.lower ? pct < 0 : pct > 0;
+        }
+        const mx = Math.max(Number(a) || 0, Number(b) || 0);
+        const bar = (v) => (v == null || mx <= 0) ? 0 : Math.max(2, 100 * Number(v) / mx);
+        const f = (v) => v == null ? '—'
+          : (d.unit === 'ms' ? Number(v).toFixed(1) : Number(v).toFixed(0)) + (d.unit ? ' ' + d.unit : '');
+        // "完成 / 错误"特例:数值文案带上错误数
+        const fa = d.path2 ? `${f(a)} / ${g(A, d.path2) ?? '—'}` : f(a);
+        const fb = d.path2 ? `${f(b)} / ${g(B, d.path2) ?? '—'}` : f(b);
+        return { label: d.label, aText: fa, bText: fb, barA: bar(a), barB: bar(b), pct, good };
+      });
     },
 
     // ===== SLO row builder =====
@@ -460,8 +688,12 @@ function dashboard() {
       overhead_cb_ms: null, dropped_total: null,
       snapshot_age_s: null, rollup_window_s: null,
     },
+    // Deep Evidence(阶段 2 PC Sampling 按需取证):为什么这些 kernel 慢
+    deep: { running: false, available_now: false, result: null, findings: [], error: null },
     kernelShowAll: false,        // Kernel 明细表:false=只显示前 N 行
     kernelCollapsed: 10,         // 收起时显示的行数
+    kernelExpanded: null,        // 展开看 stall 构成 + 建议的行索引(null=都收起)
+    stallExpanded: null,         // Deep Evidence:展开看某 stall 类的原始 PerfWorks reason 名
     timeline: null,              // 执行时间线(最近 N 条 kernel 的 start/end/stream)
     tlFrozen: false,             // 冻结:停 2s 刷新,便于缩放/读
     tlPxPerMs: null,             // 时间线缩放:每毫秒像素;null=适应容器宽度
@@ -474,10 +706,12 @@ function dashboard() {
     rooflineParamsB: '0',
     // Verdict card — populated each refresh from the recent points
     rooflineVerdict: null,    // {bound, computeUtil, bwUtil, knee, suggestions[]}
+    rooflineScale: null,      // 调优指引:{ai, cur, t32, gain, knee}(decode 强度≈并发 → 扩并发能到哪)
+    scalingSweep: { running: false, progress: null, error: null, verdict: null },  // P0-C 实测 scaling
     ttftHasData: false,
     tpotHasData: false,
     e2eHasData: false,
-    e2eP99: null,
+    e2eAvg: null,
     diagnoses: [],
     benchRunning: 0,
     showStartupInfo: false,
@@ -493,17 +727,308 @@ function dashboard() {
       return {
         attention: '#0d8b80', gemm: '#5147c8', norm: '#c2660d',
         rotary: '#be1556', activation: '#5a8f1f', comm: '#dc4d3e',
+        elementwise: '#3f7fa8', sampling: '#9b59b6', index: '#b8860b',
         memcpy: '#7a6e63', other: '#a8998a',
       }[cls] || '#a8998a';
     },
     kernelLabel(cls) {
       return {
         attention: 'Attention', gemm: 'GEMM', norm: 'Norm',
-        rotary: 'Rotary', activation: 'Activation', comm: '通信 (NCCL)',
-        other: '其它',
+        rotary: 'Rotary', activation: 'Activation', comm: 'Comm (NCCL)',
+        elementwise: 'Elementwise', sampling: 'Sampling', index: 'Index/Gather',
+        other: 'Other',
       }[cls] || cls;
     },
+    // === Kernel tab 诊断辅助(全部从 deep.result 现有数据推导,无需后端)===
+    // #5 mangled 名 → 人话
+    kernelFriendly(name, cls) {
+      const n = (name || '').toLowerCase();
+      const has = (...xs) => xs.some(x => n.includes(x));
+      if (cls === 'gemm') {
+        if (has('cutlass') && has('wmma')) return 'GEMM · cutlass WMMA TensorOp';
+        if (has('cutlass')) return 'GEMM · cutlass TensorOp';
+        if (has('splitkreduce')) return 'GEMM · cuBLAS splitK reduce';
+        if (has('cublas')) return 'GEMM · cuBLAS';
+        return 'GEMM (matmul)';
+      }
+      if (cls === 'attention') {
+        if (has('splitkv')) return 'Attention · FlashAttention (split-KV)';
+        if (has('flash')) return 'Attention · FlashAttention';
+        if (has('reshape_and_cache')) return 'Attention · KV-cache write';
+        if (has('paged')) return 'Attention · PagedAttention';
+        return 'Attention';
+      }
+      if (cls === 'norm') {
+        if (has('fused_add_rms')) return 'Norm · fused add + RMSNorm';
+        if (has('rms')) return 'Norm · RMSNorm';
+        if (has('layernorm') || has('layer_norm')) return 'Norm · LayerNorm';
+        return 'Norm';
+      }
+      if (cls === 'rotary') return 'RoPE (rotary embedding)';
+      if (cls === 'activation') {
+        if (has('act_and_mul') || has('silu')) return 'Activation · SiLU×Mul';
+        if (has('gelu')) return 'Activation · GELU';
+        return 'Activation';
+      }
+      if (cls === 'sampling') {
+        if (has('softmax')) return 'Sampling · Softmax';
+        if (has('argmax')) return 'Sampling · ArgMax (greedy)';
+        if (has('exponential') || has('distribution')) return 'Sampling · random sample';
+        if (has('topk') || has('top_k')) return 'Sampling · Top-K';
+        return 'Sampling';
+      }
+      if (cls === 'index') {
+        if (has('gather')) return 'Index · gather';
+        if (has('index')) return 'Index · indexSelect';
+        return 'Index/Gather';
+      }
+      if (cls === 'elementwise') {
+        if (has('direct_copy') || has('copy')) return 'Elementwise · copy/cast';
+        if (has('div')) return 'Elementwise · div';
+        if (has('add')) return 'Elementwise · add';
+        if (has('mul')) return 'Elementwise · mul';
+        return 'Elementwise';
+      }
+      if (cls === 'comm') return 'Comm (NCCL)';
+      return this.kernelLabel(cls);
+    },
+    // #3 这个 kernel 浪费的"全局 GPU 时间"= 时间占比 × 它内部 stall 比例
+    kernelStallTimePct(k) {
+      if (!k || !k.samples) return 0;
+      return (k.time_pct || 0) * (k.stall_samples || 0) / k.samples;
+    },
+    // #1 GPU 在干活 vs 在等(issued = 真正发指令的样本占比)
+    issuedVerdict() {
+      const r = this.deep.result;
+      if (!r || !r.available) return null;
+      const issued = r.issued_pct || 0;
+      const stall = Math.max(0, 100 - issued);
+      return { issued, stall, level: stall >= 70 ? 'high' : (stall >= 45 ? 'mid' : 'low') };
+    },
+    // #2 访存 / 算力 / 延迟 瓶颈判定(取 stall_shares 头部,排除非瓶颈项)
+    bottleneckVerdict() {
+      const r = this.deep.result;
+      const sh = (r && r.stall_shares) || [];
+      const top = sh.filter(s => !['scheduler_slack', 'issued'].includes(s.cls))
+                    .slice().sort((a, b) => b.pct - a.pct)[0];
+      if (!top) return null;
+      const map = {
+        memory_dependency: { t: '访存瓶颈', a: '数据在等内存加载。可试 fp8/int8 量化减少访存、算子融合减少往返、确认 KV cache 复用。' },
+        memory_throttle: { t: '访存带宽瓶颈', a: '内存子系统被打满。降低精度 / 融合算子减少访存流量。' },
+        math_pipe: { t: '算力瓶颈', a: '计算单元接近饱和(好事,已高效)。再压只能靠更低精度或更优 kernel。' },
+        exec_dependency: { t: '指令延迟瓶颈', a: '指令间数据依赖等待,多由 kernel 内部结构决定,优化空间有限。' },
+        shared_dependency: { t: '共享内存瓶颈', a: '等共享内存 / L1。检查 tile 大小与 bank conflict。' },
+        sync: { t: '同步瓶颈', a: '线程在 barrier 等待。检查同步频率与负载均衡。' },
+        fetch_control: { t: '前端取指瓶颈', a: '指令获取 / 分支,一般非主因。' },
+        dispatch: { t: '发射瓶颈', a: '发射端口受限。' },
+      };
+      const m = map[top.cls] || { t: this.stallLabel(top.cls) + ' 为主', a: '' };
+      return { cls: top.cls, pct: top.pct, type: m.t, action: m.a };
+    },
+    // #3 全局最大可回收点:stall 时间占比最高的 kernel
+    topRecoverable() {
+      const kt = (this.deep.result && this.deep.result.kernel_table) || [];
+      let best = null, bestv = 0;
+      for (const k of kt) {
+        const v = this.kernelStallTimePct(k);
+        if (v > bestv) { bestv = v; best = k; }
+      }
+      return best ? { k: best, pct: bestv } : null;
+    },
+    // #6 单个 kernel 的优化建议
+    kernelSuggestion(k) {
+      if (!k) return '';
+      const ds = k.dominant_stall, c = k.cls;
+      if (c === 'gemm' && (ds === 'memory_dependency' || ds === 'memory_throttle'))
+        return '访存瓶颈的矩阵乘:fp8/int8 量化、增大 batch 提升计算密度、检查权重是否反复从显存读取。';
+      if (c === 'gemm' && ds === 'math_pipe')
+        return '矩阵乘已算力饱和(接近峰值),难再压;考虑更低精度。';
+      if (c === 'attention' && (ds === 'memory_dependency' || ds === 'memory_throttle'))
+        return '注意力访存瓶颈:确认 FlashAttention / PagedAttention 生效、KV cache 命中率。';
+      if (c === 'elementwise')
+        return '逐元素 / 拷贝:看能否算子融合,减少 kernel 数与显存往返。';
+      if (c === 'sampling')
+        return '采样 / 解码开销:批量解码、减少不必要的 host-device 往返。';
+      if (c === 'index')
+        return '索引 / 查表:确认访问模式连续,避免随机 gather 打散访存。';
+      if (ds === 'exec_dependency')
+        return '指令延迟为主,通常由 kernel 内部结构决定,优化空间有限。';
+      return '';
+    },
+    // P3 行级归因:取该 kernel 的"最深热点"(源码行 / SASS 偏移)。按 .so 原始 functionName 精确匹配
+    kernelHotspot(k) {
+      if (!k) return null;
+      const hs = (this.deep.result && this.deep.result.pc_hotspots) || [];
+      return hs.find(h => h.kernel === k.kernel) || null;
+    },
+    // P3 launch 栈:把 native 栈清洗成可读帧链(caller→callee:host 代码在前,启动原语在后)
+    launchFrames(h) {
+      if (!h || !h.launch || !h.launch.stack) return [];
+      let frames = h.launch.stack.split(' <- ').map(s => s.trim()).filter(Boolean);
+      frames = frames.map(f => {
+        let s = f.replace(/^void\s+/, '');
+        const lt = s.indexOf('<'), pr = s.indexOf('(');
+        let cut = s.length;
+        if (lt > 0) cut = Math.min(cut, lt);
+        if (pr > 0) cut = Math.min(cut, pr);
+        s = s.slice(0, cut).trim();
+        // 去 PyTorch 派发器噪音后缀(::impl / ::call / ::redispatch / ::out),露出真正的算子名
+        let parts = s.split('::').filter(Boolean);
+        while (parts.length > 1 && /^(impl|call|redispatch|out|cuda|reimpl)$/.test(parts[parts.length - 1]))
+          parts.pop();
+        // 去 at/at::_ops/c10/torch 这类命名空间前缀,留末段算子名
+        return parts[parts.length - 1] || s;
+      }).filter(f => f && !/^_PyEval|^_PyObject|^PyObject|^PyNumber|make_boxed|wrap_kernel|_get_operation|^Wrap/.test(f));
+      // 相邻重复(addmm::call 与 addmm::impl 清洗后同名)去重
+      frames = frames.filter((f, i) => i === 0 || f !== frames[i - 1]);
+      return frames.reverse();   // host 高层算子在前 → 启动原语在后
+    },
+    // P3:所有"能定位到 Python 源码行"的 kernel(差异化能力,单独提到顶部,免得埋在长表里)
+    sourceHotspots() {
+      const hs = (this.deep.result && this.deep.result.pc_hotspots) || [];
+      return hs.filter(h => h.mappable && h.lines && h.lines.length);
+    },
+    // 这些可映射 kernel 合计占多少 GPU 时间(诚实标注:小模型上往往很小,主导在闭源 GEMM)
+    sourceHotspotsTimePct() {
+      const kt = (this.deep.result && this.deep.result.kernel_table) || [];
+      const names = new Set(this.sourceHotspots().map(h => h.kernel));
+      let sum = 0;
+      for (const k of kt) if (names.has(k.kernel)) sum += (k.time_pct || 0);
+      return sum;
+    },
+    // === Deep Evidence(全局 / warp 效率 / 方法论)辅助 ===
+    // Warp 周期三态(占全部样本):发指令 / 就绪未选中(余量) / 真 stall(在等)
+    warpSplit() {
+      const r = this.deep.result;
+      if (!r || !r.available) return null;
+      const issued = r.issued_pct || 0;
+      const slackShare = ((r.stall_shares || []).find(s => s.cls === 'scheduler_slack') || {}).pct || 0;
+      const slack = slackShare * (100 - issued) / 100;   // slack 是"占 stall",换算回占全部
+      const stall = Math.max(0, 100 - issued - slack);
+      return { issued, slack, stall };
+    },
+    // 每个 stall 语义类一句话含义
+    stallMeaning(cls) {
+      return {
+        memory_dependency: '等全局/本地内存的数据返回(long scoreboard)',
+        shared_dependency: '等共享内存 / L1(short scoreboard)',
+        memory_throttle: '访存指令排队、内存子系统被打满',
+        math_pipe: '计算管线忙(Tensor / ALU / FMA),接近算力上限',
+        exec_dependency: '等前一条指令的结果(指令间依赖)',
+        sync: '在 barrier / membar 等其他线程',
+        fetch_control: '等取指 / 分支决议',
+        dispatch: '发射端口受限',
+        scheduler_slack: '有就绪 warp 但本周期没被选中(占用率有余量,非瓶颈)',
+        other: '其它 / 杂项',
+      }[cls] || '';
+    },
+    // 原始 PerfWorks reason 名:去掉公共前缀,留语义后缀(给专家看真实指标名)
+    prettyReason(raw) {
+      if (!raw) return '';
+      return raw
+        .replace(/^smsp__pcsamp_warps_issue_stalled_/, '')
+        .replace(/^smsp__pcsamp_warps_issue_/, '')
+        .replace(/^smsp__pcsamp_/, '')
+        .replace(/^smsp__/, '');
+    },
+
+    // stall 语义类 → 中文标签 / 颜色(Deep Evidence 分解条)
+    stallLabel(cls) {
+      return {
+        memory_dependency: '访存依赖', shared_dependency: 'shared/MIO 依赖',
+        memory_throttle: '访存子系统压力', math_pipe: '计算管线',
+        exec_dependency: '执行依赖', sync: '同步', fetch_control: '取指/控制流',
+        dispatch: '调度分发', scheduler_slack: '调度余量(非瓶颈)', other: '其它',
+      }[cls] || cls;
+    },
+    stallColor(cls) {
+      return {
+        memory_dependency: '#5147c8', shared_dependency: '#0d8b80',
+        memory_throttle: '#7a5cc8', math_pipe: '#c2660d', exec_dependency: '#be1556',
+        sync: '#dc4d3e', fetch_control: '#5a8f1f', dispatch: '#9a8f1f',
+        scheduler_slack: '#9bb04f', other: '#a8998a',
+      }[cls] || '#a8998a';
+    },
+    // 打开 Kernel tab 时调:先拉缓存结果;若可用且还没有结果,自动跑一次取证 ——
+    // 免得用户找不到/不点"采集 stall 证据"按钮就以为 tab 空的(§A)。
+    async onKernelTabOpen() {
+      this._ensureKernelRoofline();
+      await this.loadDeepEvidence();
+      if (this.deep.available_now && !this.deep.result && !this.deep.running) {
+        this.runDeepEvidence(5);
+      }
+    },
+    // 懒建 Kernel tab 里的第二个 roofline 图(canvas 在 x-show 容器内,tab 显示后才有尺寸)
+    _ensureKernelRoofline() {
+      setTimeout(() => {
+        const el = document.getElementById('kernel-roofline-chart');
+        if (!el) return;
+        if (_kRoofChart) { _kRoofChart.resize(); return; }
+        _kRoofChart = _makeRooflineChart(el.getContext('2d'));
+        if (_lastRoofline) _applyRooflineData(_kRoofChart, _lastRoofline);
+      }, 60);
+    },
+    // P0-C:启动实测 scaling 压测(串扫并发 1/4/16/64,约 2 分钟),轮询直到出结果
+    async startScalingSweep() {
+      if (this.scalingSweep.running) return;
+      this.scalingSweep.running = true;
+      this.scalingSweep.error = null;
+      this.scalingSweep.progress = '启动中…';
+      try {
+        const r = await fetch('/api/roofline/scaling_sweep', { method: 'POST' });
+        if (!r.ok) {
+          const e = await r.json().catch(() => ({}));
+          throw new Error(e.detail || `HTTP ${r.status}`);
+        }
+        // 轮询状态;结束后强刷一次 roofline(图 + verdict 同步上屏)
+        while (true) {
+          await new Promise(res => setTimeout(res, 4000));
+          const s = await fetch('/api/roofline/scaling').then(x => x.json());
+          if (s.error) throw new Error(s.error);
+          if (!s.running) break;
+          this.scalingSweep.progress = s.progress || '压测中…';
+        }
+        const data = await fetch('/api/roofline?seconds=60').then(x => x.json());
+        this.updateRoofline(data);
+      } catch (e) {
+        this.scalingSweep.error = String(e.message || e);
+      } finally {
+        this.scalingSweep.running = false;
+        this.scalingSweep.progress = null;
+      }
+    },
+    // 读最近一次取证结果(开 Kernel tab 时调,不触发新采集)
+    async loadDeepEvidence() {
+      try {
+        const r = await fetch('/api/kernels/deep_evidence').then(x => x.json());
+        this.deep.available_now = !!r.available_now;
+        if (r.last) { this.deep.result = r.last; this.deep.findings = r.findings || []; }
+      } catch (e) { /* fail-closed:静默 */ }
+    },
+    // 触发一个取证短窗(阻塞 ~window 秒)
+    async runDeepEvidence(window) {
+      if (this.deep.running) return;
+      this.deep.running = true; this.deep.error = null;
+      try {
+        const r = await fetch(`/api/kernels/deep_evidence?window=${window || 5}`,
+          { method: 'POST' }).then(x => x.json());
+        if (r.available) {
+          this.deep.result = r; this.deep.findings = r.findings || []; this.deep.available_now = true;
+        } else {
+          this.deep.error = r.error || 'PC Sampling 不可用'; this.deep.available_now = false;
+        }
+      } catch (e) {
+        this.deep.error = '请求失败:' + e;
+      } finally {
+        this.deep.running = false;
+      }
+    },
     // kernel 数据是否"实时"(采集时刻够近),用于新鲜度横幅
+    // 延迟分位条(三行式):某分位占 p99 的宽度%(p99=满刻度;三段挤一条看不清,实测反馈)
+    pctW(d, q) {
+      if (!d || !d.p99 || d.p99 <= 0 || d[q] == null) return 0;
+      return Math.max(2, Math.min(100, 100 * d[q] / d.p99));
+    },
     kernelFresh() {
       const a = this.kernels.snapshot_age_s;
       if (a == null) return true;  // 无 collector 信息时不显示过期
@@ -636,111 +1161,7 @@ function dashboard() {
     init() {
       const ctx = document.getElementById('gpu-chart').getContext('2d');
 
-      _chart = new Chart(ctx, {
-        type: 'scatter',
-        data: {
-          datasets: [
-            {
-              label: '当前样本',
-              data: [],
-              backgroundColor: 'rgba(13, 139, 128, 0.55)',
-              borderColor: '#0d8b80',
-              borderWidth: 1,
-              pointRadius: 4,
-              pointHoverRadius: 7,
-              pointHoverBackgroundColor: '#0d8b80',
-              pointHoverBorderColor: '#fff',
-              pointHoverBorderWidth: 2,
-              showLine: false,
-              order: 3,
-            },
-            {
-              // Compute roof: horizontal line + fill the compute-bound zone
-              // (right of knee). Soft coral wash hints "this is the compute
-              // wall, points here are bounded by FLOPS not bandwidth."
-              label: 'Compute roof',
-              data: [],
-              showLine: true,
-              borderColor: '#dc4d3e',
-              borderWidth: 2.5,
-              pointRadius: 0,
-              fill: 'origin',
-              backgroundColor: 'rgba(220, 77, 62, 0.06)',
-              tension: 0,
-              order: 1,
-            },
-            {
-              // Memory roof: diagonal + fill memory-bound zone (left of knee).
-              // Soft indigo wash hints "you're stuck on bandwidth here."
-              label: 'Memory roof',
-              data: [],
-              showLine: true,
-              borderColor: '#5147c8',
-              borderWidth: 2.5,
-              pointRadius: 0,
-              fill: 'origin',
-              backgroundColor: 'rgba(81, 71, 200, 0.06)',
-              tension: 0,
-              order: 2,
-            },
-          ],
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          animation: false,
-          plugins: {
-            legend: { display: false },
-            tooltip: {
-              backgroundColor: '#1c1410',
-              titleColor: '#fff',
-              bodyColor: '#fdf9f2',
-              padding: 11,
-              cornerRadius: 8,
-              displayColors: false,
-              borderWidth: 0,
-              titleFont: { weight: '600' },
-              callbacks: {
-                title: () => '',
-                label: (ctx) => {
-                  const ds = ctx.dataset.label;
-                  if (ds === '当前样本') {
-                    return [
-                      `AI:  ${ctx.parsed.x.toFixed(2)} FLOPs/byte`,
-                      `TPut: ${ctx.parsed.y.toFixed(1)} TFLOPs/s`,
-                    ];
-                  }
-                  return `${ds}: ${ctx.parsed.y.toFixed(1)} TFLOPs/s`;
-                },
-              },
-            },
-          },
-          scales: {
-            x: {
-              type: 'logarithmic',
-              title: {
-                display: true,
-                text: 'Arithmetic Intensity (FLOPs / byte)',
-                color: '#7a6e63',
-                font: { size: 11.5, weight: '600' },
-              },
-              ticks: { color: '#a8998a', font: { size: 11 } },
-              grid: { color: '#f3ebdb', drawBorder: false },
-            },
-            y: {
-              type: 'logarithmic',
-              title: {
-                display: true,
-                text: 'Achieved Throughput (TFLOPs/s)',
-                color: '#7a6e63',
-                font: { size: 11.5, weight: '600' },
-              },
-              ticks: { color: '#a8998a', font: { size: 11 } },
-              grid: { color: '#f3ebdb', drawBorder: false },
-            },
-          },
-        },
-      });
+      _chart = _makeRooflineChart(ctx);
       // Mini latency-trend charts (TTFT / TPOT / E2E)
       _ttftChart = _createMiniLatencyChart('ttft-chart', '#dc4d3e');
       _tpotChart = _createMiniLatencyChart('tpot-chart', '#5147c8');
@@ -750,6 +1171,8 @@ function dashboard() {
       this.fetchSystem();
       this.refresh();
       setInterval(() => this.refresh(), 2000);
+      // 打开 Kernel tab 自动取证(§A):进去就有真数据,不用手点按钮
+      this.$watch('tab', (v) => { if (v === 'kernel') this.onKernelTabOpen(); });
     },
 
     updateRoofline(data) {
@@ -760,39 +1183,28 @@ function dashboard() {
       this.rooflineParamsB = data.params_billion != null
         ? Number(data.params_billion).toFixed(2)
         : '?';
-      // Sample points
-      const points = (data.points || []).map(p => ({
-        x: p.ai,
-        y: p.throughput_tflops,
-      }));
-      _chart.data.datasets[0].data = points;
-      // Plain-language verdict — Roofline is unintuitive on its own. We
-      // pick the median AI / throughput of recent points so a single
-      // outlier doesn't flip the bound classification.
+      // verdict(roofline 本身不直观,用中位 AI/吞吐 判定,免单点 outlier 翻转结论)
       this.rooflineVerdict = this._computeRooflineVerdict(data);
-
-      // Roof lines from peak info
-      if (data.peak && data.peak.compute_tflops && data.peak.mem_bw_tbs) {
-        const peakC = data.peak.compute_tflops;
-        const peakBW = data.peak.mem_bw_tbs;
-        const knee = peakC / peakBW;
-        const xMin = 0.1;
-        const xMax = Math.max(1000, knee * 3);
-        // Compute roof: horizontal from knee to xMax
-        _chart.data.datasets[1].data = [
-          { x: knee, y: peakC },
-          { x: xMax, y: peakC },
-        ];
-        // Memory roof: diagonal from (xMin, bw*xMin) to knee
-        _chart.data.datasets[2].data = [
-          { x: xMin, y: peakBW * xMin },
-          { x: knee, y: peakC },
-        ];
-      } else {
-        _chart.data.datasets[1].data = [];
-        _chart.data.datasets[2].data = [];
+      _lastRoofline = data;
+      // P0-C:实测 scaling verdict(随 roofline 响应带回)
+      this.scalingSweep.verdict = (data.scaling && data.scaling.verdict) || null;
+      // 调优指引(decode 强度≈并发):当前簇 → 并发32 的带宽上界 → 拐点
+      this.rooflineScale = null;
+      if (data.peak && data.peak.compute_tflops && data.peak.mem_bw_tbs && (data.points || []).length) {
+        const peakC = data.peak.compute_tflops, peakBW = data.peak.mem_bw_tbs, knee = peakC / peakBW;
+        const agg = _aggRooflinePoints(data.points.map(p => ({ x: p.ai, y: p.throughput_tflops })));
+        const dec = agg.length ? agg.reduce((a, p) => (p.n > a.n ? p : a)) : null;
+        if (dec && dec.y > 0 && dec.x < knee) {
+          const t32 = Math.min(peakBW * 32, peakC);
+          this.rooflineScale = {
+            ai: dec.x, cur: dec.y, t32, gain: t32 / dec.y, knee: Math.round(knee),
+            // 该 AI 下的带宽上界利用率(实测吞吐 / envelope 值)
+            bwUtil: Math.min(100, 100 * dec.y / (peakBW * dec.x)),
+          };
+        }
       }
-      _chart.update('none');
+      _applyRooflineData(_chart, data);        // Overview 的图
+      _applyRooflineData(_kRoofChart, data);   // Kernel tab 的图(懒建后才非空)
     },
 
     async fetchSystem() {
@@ -858,7 +1270,7 @@ function dashboard() {
       this.tpotHasData = tpot.length > 0;
       this.e2eHasData  = e2e.length > 0;
       this.tpotSource  = data.tpot_source || 'tpot';
-      this.e2eP99 = this.e2eHasData ? e2e[e2e.length - 1].p99 : null;
+      this.e2eAvg = this.e2eHasData ? (e2e[e2e.length - 1].avg ?? e2e[e2e.length - 1].p50) : null;
       _updateMiniLatencyChart(_ttftChart, ttft);
       _updateMiniLatencyChart(_tpotChart, tpot);
       _updateMiniLatencyChart(_e2eChart, e2e);
