@@ -445,6 +445,53 @@ function benchTab() {
       this.selectedId = (this.selectedId === id) ? null : id;
     },
 
+    // ===== 压测结果对比:任选两个 run,A=先选(基准),B=后选,Δ=B 相对 A =====
+    cmpSel: [],
+    toggleCmp(id) {
+      const i = this.cmpSel.indexOf(id);
+      if (i >= 0) this.cmpSel.splice(i, 1);
+      else { this.cmpSel.push(id); if (this.cmpSel.length > 2) this.cmpSel.shift(); }
+    },
+    cmpRuns() {
+      if (this.cmpSel.length !== 2) return null;
+      const a = this.runs.find(r => r.run_id === this.cmpSel[0]);
+      const b = this.runs.find(r => r.run_id === this.cmpSel[1]);
+      return (a && b) ? [a, b] : null;
+    },
+    cmpScenario(r) {
+      const s = (r && r.scenario) || {};
+      const len = s.duration_s ? `${s.duration_s}s` : `${s.num_requests} req`;
+      return `并发 ${s.concurrency} · ${s.prompt_tokens}/${s.output_tokens} tok · ${len}`;
+    },
+    // 对比表:逐指标 A/B/Δ%。延迟类越低越好,吞吐越高越好;|Δ|<2% 视为持平(测量噪声)
+    cmpTable() {
+      const pair = this.cmpRuns();
+      if (!pair) return [];
+      const [A, B] = pair;
+      const g = (r, p) => p.split('.').reduce((o, k) => (o == null ? null : o[k]), r);
+      const defs = [
+        { label: 'TTFT 平均', path: 'client_metrics.ttft_ms.mean', lower: true, ms: true },
+        { label: 'TTFT p99',  path: 'client_metrics.ttft_ms.p99',  lower: true, ms: true },
+        { label: 'TPOT 平均', path: 'client_metrics.tpot_ms.mean', lower: true, ms: true },
+        { label: 'TPOT p99',  path: 'client_metrics.tpot_ms.p99',  lower: true, ms: true },
+        { label: 'E2E 平均',  path: 'client_metrics.e2e_ms.mean',  lower: true, ms: true },
+        { label: 'E2E p99',   path: 'client_metrics.e2e_ms.p99',   lower: true, ms: true },
+        { label: 'Output tok/s', path: 'client_metrics.output_throughput_tps', lower: false },
+        { label: '完成数',    path: 'client_metrics.ok',     lower: false },
+        { label: '错误数',    path: 'client_metrics.errors', lower: true },
+      ];
+      return defs.map(d => {
+        const a = g(A, d.path), b = g(B, d.path);
+        let pct = null, good = null;
+        if (a != null && b != null && Number(a) !== 0) {
+          pct = 100 * (b - a) / a;
+          if (Math.abs(pct) >= 2) good = d.lower ? pct < 0 : pct > 0;
+        }
+        const f = (v) => v == null ? '—' : (d.ms ? `${Number(v).toFixed(1)}` : `${Number(v).toFixed(0)}`);
+        return { label: d.label + (d.ms ? ' (ms)' : ''), a: f(a), b: f(b), pct, good };
+      });
+    },
+
     // ===== SLO row builder =====
     addSloRow() {
       this.form.sloRows.push({

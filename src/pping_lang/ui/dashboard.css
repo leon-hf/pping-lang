@@ -1653,6 +1653,20 @@
   .slo-chip.fail { background: var(--rose-soft); color: var(--rose); }
   .slo-chip.na { background: var(--surface-alt); color: var(--muted); }
 
+  /* 压测结果对比:行内选择按钮(选中后标 A/B) */
+  .cmp-pill {
+    font-size: 10.5px;
+    padding: 2px 9px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--muted);
+    cursor: pointer;
+    font-weight: 600;
+  }
+  .cmp-pill:hover { border-color: var(--teal); color: var(--teal); }
+  .cmp-pill.on { background: var(--teal-soft); border-color: var(--teal); color: var(--teal); }
+
   /* === Toast === */
   .toast {
     position: fixed;
