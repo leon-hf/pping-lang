@@ -1667,6 +1667,64 @@
   .cmp-pill:hover { border-color: var(--teal); color: var(--teal); }
   .cmp-pill.on { background: var(--teal-soft); border-color: var(--teal); color: var(--teal); }
 
+  /* 对比面板:指标卡网格,每卡 A/B 双横条 + Δ 徽标 */
+  .cmp-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
+    gap: 10px;
+  }
+  .cmp-block {
+    padding: 11px 13px;
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    background: var(--surface);
+  }
+  .cmp-block-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+  .cmp-metric { font-size: 12px; font-weight: 600; color: var(--text-strong); }
+  .cmp-delta {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--muted-2);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .cmp-delta.good { color: var(--teal); }
+  .cmp-delta.bad { color: var(--coral); }
+  .cmp-bar-row {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin-top: 4px;
+  }
+  .cmp-ab { width: 13px; flex: none; font-size: 10px; font-weight: 700; }
+  .cmp-ab.a { color: var(--indigo); }
+  .cmp-ab.b { color: var(--teal); }
+  .cmp-track {
+    flex: 1;
+    height: 11px;
+    border-radius: 3px;
+    overflow: hidden;
+    background: var(--surface-alt);
+  }
+  .cmp-track i { display: block; height: 100%; border-radius: 3px; }
+  .cmp-track i.a { background: var(--indigo); opacity: 0.7; }
+  .cmp-track i.b { background: var(--teal); opacity: 0.85; }
+  .cmp-bar-row b {
+    min-width: 76px;
+    flex: none;
+    text-align: right;
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+  }
+
   /* === Toast === */
   .toast {
     position: fixed;
