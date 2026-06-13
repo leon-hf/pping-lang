@@ -1468,6 +1468,44 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
         </div>
       </template>
 
+      <!-- 压测结果对比:任选两条 run(行内"对比"按钮),A=基准,Δ=B 相对 A -->
+      <template x-if="cmpRuns()">
+        <div class="chart-card" style="margin-bottom: 14px;">
+          <div class="head" style="margin-bottom: 10px;">
+            <h3>结果对比 <span style="color: var(--muted-2); font-weight: 400; font-size: 12px;">Δ = B 相对 A(基准);绿 = 更好,红 = 更差,|Δ|&lt;2% 视为持平</span></h3>
+            <button class="btn" @click="cmpSel = []">清除对比</button>
+          </div>
+          <div style="display: flex; gap: 18px; flex-wrap: wrap; margin-bottom: 10px; font-size: 12px;">
+            <span><strong style="color: var(--indigo);">A(基准)</strong> <span x-text="cmpRuns()[0].scenario_name"></span> · <code style="font-size: 11px;" x-text="cmpRuns()[0].run_id"></code> · <span style="color: var(--muted);" x-text="cmpScenario(cmpRuns()[0])"></span></span>
+            <span><strong style="color: var(--teal);">B</strong> <span x-text="cmpRuns()[1].scenario_name"></span> · <code style="font-size: 11px;" x-text="cmpRuns()[1].run_id"></code> · <span style="color: var(--muted);" x-text="cmpScenario(cmpRuns()[1])"></span></span>
+          </div>
+          <div style="overflow-x: auto;">
+            <table class="bench-detail-tab" style="width: 100%; max-width: 640px;">
+              <thead>
+                <tr style="font-size: 11px; color: var(--muted-2); text-transform: uppercase; letter-spacing: 0.04em;">
+                  <th style="text-align: left; padding: 4px 8px;">指标</th>
+                  <th style="text-align: right; padding: 4px 8px;">A(基准)</th>
+                  <th style="text-align: right; padding: 4px 8px;">B</th>
+                  <th style="text-align: right; padding: 4px 8px;">Δ</th>
+                </tr>
+              </thead>
+              <tbody>
+                <template x-for="row in cmpTable()" :key="row.label">
+                  <tr style="font-variant-numeric: tabular-nums;">
+                    <td style="padding: 4px 8px; color: var(--muted);" x-text="row.label"></td>
+                    <td style="padding: 4px 8px; text-align: right;" x-text="row.a"></td>
+                    <td style="padding: 4px 8px; text-align: right;" x-text="row.b"></td>
+                    <td style="padding: 4px 8px; text-align: right; font-weight: 600;"
+                        :style="row.good === true ? 'color: var(--teal);' : (row.good === false ? 'color: var(--coral);' : 'color: var(--muted-2);')"
+                        x-text="row.pct == null ? '—' : ((row.pct > 0 ? '+' : '') + row.pct.toFixed(1) + '%')"></td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </template>
+
       <div class="bench-runs-list" x-show="runs.length > 0">
         <template x-for="r in runs" :key="r.run_id">
           <div class="bench-run-row" :class="{ expanded: selectedId === r.run_id }"
@@ -1483,6 +1521,9 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
                 <span class="slo-chip" :class="r.slo_status || 'na'"
                       x-show="r.slo_status && r.slo_status !== 'n/a'"
                       x-text="r.slo_status === 'pass' ? 'SLO 通过' : 'SLO 失败'"></span>
+                <button class="cmp-pill" :class="{ on: cmpSel.includes(r.run_id) }"
+                        @click.stop="toggleCmp(r.run_id)"
+                        x-text="cmpSel.includes(r.run_id) ? ('对比 ' + (cmpSel.indexOf(r.run_id) === 0 ? 'A' : 'B')) : '对比'"></button>
               </div>
               <div class="bench-run-meta">
                 <code x-text="r.run_id"></code>
