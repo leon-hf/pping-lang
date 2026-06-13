@@ -41,8 +41,17 @@ analyzer = ["prometheus-api-client>=0.5.0"]       # v0.3
 bench = ["httpx>=0.27.0"]                         # bench module HTTP client
 dev = ["pytest>=7.0", "pytest-cov>=4.0", "pytest-asyncio>=0.23.0", "ruff>=0.1.0", "mypy>=1.0", "httpx>=0.27.0"]
 
+[project.scripts]
+# 一条命令接 vllm:编/取 .so + 设注入与 PCS env + exec vllm(纯 pip 装上即用)
+pping-vllm = "pping_lang.cli:pping_vllm_main"
+
 [project.entry-points."vllm.stat_logger_plugins"]
 pping_lang = "pping_lang.plugin:PpingLangStatLogger"
+
+# general_plugins 在 EngineCore/worker 进程也会加载 → 在有 CUDA 的引擎进程驱动 PC
+# sampling(多进程 serve 下,stat_logger 在前端无 CUDA context;见 engine_pcs.py)。
+[project.entry-points."vllm.general_plugins"]
+pping_lang_pcs = "pping_lang.engine_pcs:init_engine_pcs"
 
 [project.urls]
 Homepage = "https://github.com/leon/pping-lang"
@@ -57,6 +66,8 @@ include = [
   "src/pping_lang/ui/*.html",
   "src/pping_lang/ui/*.css",
   "src/pping_lang/ui/*.js",
+  "src/pping_lang/native/*.cpp",
+  "src/pping_lang/native/*.h",
 ]
 
 [tool.pytest.ini_options]

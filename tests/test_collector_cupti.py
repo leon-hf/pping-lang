@@ -8,9 +8,14 @@ from __future__ import annotations
 from pping_lang.collector.cupti import (
     CuptiKernelCollector,
     FakeActivitySource,
+    FakePcSamplingLib,
     FlamegraphAggregator,
     KernelClassifier,
     KernelEvent,
+    PcSamplingController,
+    StallAggregator,
+    StallClassifier,
+    StallSample,
     TimelineBuffer,
     WindowAggregator,
 )
@@ -449,6 +454,193 @@ def test_collector_exposes_top_kernels():
     assert coll.last_snapshot_ts is not None
     assert coll.last_window_ns > 0
     coll.stop()
+    sink.close()
+
+
+# === StallClassifier(阶段 2 PC Sampling)===
+
+def _reason(short: str) -> str:
+    """构造 Ada/sm_89 PerfWorks 全名,如 long_scoreboard → smsp__...long_scoreboard。"""
+    return f"smsp__pcsamp_warps_issue_stalled_{short}"
+
+
+def test_stall_classifier_maps_perfworks_reasons():
+    clf = StallClassifier()
+    assert clf.classify(_reason("long_scoreboard")) == "memory_dependency"
+    assert clf.classify(_reason("short_scoreboard")) == "shared_dependency"
+    assert clf.classify(_reason("mio_throttle")) == "memory_throttle"
+    assert clf.classify(_reason("lg_throttle")) == "memory_throttle"
+    assert clf.classify(_reason("imc_miss")) == "memory_throttle"
+    assert clf.classify(_reason("math_pipe_throttle")) == "math_pipe"
+    assert clf.classify(_reason("wait")) == "exec_dependency"
+    assert clf.classify(_reason("barrier")) == "sync"
+    assert clf.classify(_reason("membar")) == "sync"
+    assert clf.classify(_reason("no_instructions")) == "fetch_control"
+    assert clf.classify(_reason("branch_resolving")) == "fetch_control"
+    assert clf.classify(_reason("dispatch_stall")) == "dispatch"
+
+
+def test_stall_classifier_not_selected_before_selected():
+    """顺序敏感:not_selected 含 selected 子串,必须先命中 scheduler_slack。"""
+    clf = StallClassifier()
+    assert clf.classify(_reason("not_selected")) == "scheduler_slack"
+    assert clf.classify(_reason("selected")) == "issued"  # 已发射,非 stall
+
+
+def test_stall_classifier_not_issued_variants_same_class():
+    """`_not_issued` 变体归到与基 reason 同类。"""
+    clf = StallClassifier()
+    assert clf.classify(_reason("math_pipe_throttle_not_issued")) == "math_pipe"
+    assert clf.classify(_reason("long_scoreboard_not_issued")) == "memory_dependency"
+
+
+def test_stall_classifier_unknown_and_memoize():
+    clf = StallClassifier()
+    assert clf.classify(_reason("brand_new_reason_xyz")) == "other"
+    assert clf.cache_size == 1
+    clf.classify(_reason("brand_new_reason_xyz"))
+    assert clf.cache_size == 1
+
+
+# === StallAggregator ===
+
+def _s(kernel: str, short: str, n: int) -> StallSample:
+    return StallSample(kernel, _reason(short), n)
+
+
+def test_stall_aggregator_categories_sum_to_100_excluding_issued():
+    agg = StallAggregator()
+    agg.add([
+        _s("flash_fwd", "long_scoreboard", 50),   # memory_dependency
+        _s("flash_fwd", "math_pipe_throttle", 30),  # math_pipe
+        _s("flash_fwd", "wait", 20),                # exec_dependency
+        _s("flash_fwd", "selected", 100),           # issued — 不进 stall 分母
+    ])
+    out = agg.snapshot_and_reset()
+    assert abs(out[M.KERNEL_STALL_MEMORY_DEP_PCT] - 50.0) < 1e-6   # 50/100 stall
+    assert abs(out[M.KERNEL_STALL_MATH_PIPE_PCT] - 30.0) < 1e-6
+    assert abs(out[M.KERNEL_STALL_EXEC_DEP_PCT] - 20.0) < 1e-6
+    total = sum(out[STALL_METRIC] for STALL_METRIC in (
+        M.KERNEL_STALL_MEMORY_DEP_PCT, M.KERNEL_STALL_SHARED_DEP_PCT,
+        M.KERNEL_STALL_MEMORY_THROTTLE_PCT, M.KERNEL_STALL_MATH_PIPE_PCT,
+        M.KERNEL_STALL_EXEC_DEP_PCT, M.KERNEL_STALL_SYNC_PCT,
+        M.KERNEL_STALL_FETCH_CONTROL_PCT, M.KERNEL_STALL_DISPATCH_PCT,
+        M.KERNEL_STALL_SCHEDULER_SLACK_PCT, M.KERNEL_STALL_OTHER_PCT,
+    ))
+    assert abs(total - 100.0) < 1e-6
+    # issued 占总样本 100/200 = 50%
+    assert abs(out[M.KERNEL_STALL_ISSUED_PCT] - 50.0) < 1e-6
+    assert out[M.KERNEL_STALL_SAMPLE_TOTAL] == 200.0
+
+
+def test_stall_aggregator_empty_is_safe():
+    out = StallAggregator().snapshot_and_reset()
+    assert out[M.KERNEL_STALL_MEMORY_DEP_PCT] == 0.0
+    assert out[M.KERNEL_STALL_ISSUED_PCT] == 0.0
+    assert out[M.KERNEL_STALL_SAMPLE_TOTAL] == 0.0
+
+
+def test_stall_aggregator_skips_nonpositive():
+    agg = StallAggregator()
+    agg.add([_s("k", "long_scoreboard", 0), _s("k", "wait", -5)])
+    assert not agg.has_data
+
+
+def test_stall_aggregator_kernel_table_dominant_excludes_slack_and_issued():
+    """主导 stall 类排除 issued 与 scheduler_slack(高 not_selected 非瓶颈)。"""
+    agg = StallAggregator()
+    agg.add([
+        _s("attn", "not_selected", 70),       # scheduler_slack(占比最大但不算主导)
+        _s("attn", "long_scoreboard", 25),    # memory_dependency → 应是主导
+        _s("attn", "selected", 200),          # issued
+        _s("gemm", "math_pipe_throttle", 40),
+    ])
+    table = agg.kernel_stall_table()
+    by = {r["kernel"]: r for r in table}
+    assert by["attn"]["dominant_stall"] == "memory_dependency"
+    # attn 总样本最多(70+25+200=295)→ 排第一
+    assert table[0]["kernel"] == "attn"
+    assert by["gemm"]["dominant_stall"] == "math_pipe"
+
+
+# === PcSamplingController(Deep Evidence,fake lib + 注入时钟)===
+
+class _FakeClockSleep:
+    """sleep 推进时钟 —— run_window 的取证窗循环完全可控,无真实等待。"""
+
+    def __init__(self) -> None:
+        self.t = 0.0
+
+    def clock(self) -> float:
+        return self.t
+
+    def sleep(self, s: float) -> None:
+        self.t += s
+
+
+def test_pc_sampling_controller_window_aggregates_and_pushes():
+    sink = _CollectingSink(flush_interval_s=10.0)
+    lib = FakePcSamplingLib(drain_batches=[
+        [],   # baseline drain(窗开始前清零,被丢弃)
+        [_s("attn", "long_scoreboard", 60), _s("attn", "selected", 40)],
+        [_s("attn", "long_scoreboard", 40)],
+        [_s("gemm", "math_pipe_throttle", 50)],
+    ])
+    lib.set_overhead(3.5, 0, 0)
+    fc = _FakeClockSleep()
+    ctl = PcSamplingController(lib, sink=sink)
+    res = ctl.run_window(window_s=1.0, drain_interval_s=0.5, clock=fc.clock, sleep=fc.sleep)
+
+    assert res["available"] is True
+    shares = {d["cls"]: d["pct"] for d in res["stall_shares"]}
+    # stall 样本 = attn long_scoreboard 100 + gemm math 50 = 150;attn selected 40 = issued
+    assert abs(shares["memory_dependency"] - (100 / 150 * 100)) < 1e-6
+    assert abs(shares["math_pipe"] - (50 / 150 * 100)) < 1e-6
+    assert res["sample_total"] == 190.0          # 60+40+40+50
+    assert res["overhead"]["getdata_ms"] == 3.5
+    assert lib.started is True                    # 采样保持运行(不 stop),窗只 drain
+    # stall 指标已 push 进 sink(close 触发 flush 后才进 flushed_metrics)
+    sink.close()
+    names = {m.name for m in sink.flushed_metrics}
+    assert M.KERNEL_STALL_MEMORY_DEP_PCT in names
+    assert M.KERNEL_STALL_SAMPLE_TOTAL in names
+
+
+def test_pc_sampling_controller_fail_closed_when_unavailable():
+    ctl = PcSamplingController(FakePcSamplingLib(available=False))
+    res = ctl.run_window(window_s=0.1)
+    assert res["available"] is False
+    assert res["error"]
+
+
+def test_pc_sampling_controller_fail_closed_on_start_error():
+    ctl = PcSamplingController(FakePcSamplingLib(start_rc=-7))
+    res = ctl.run_window(window_s=0.1)
+    assert res["available"] is False
+    assert "rc=-7" in res["error"]
+
+
+def test_collector_deep_evidence_unconfigured_is_safe():
+    sink = _CollectingSink(flush_interval_s=10.0)
+    coll = CuptiKernelCollector(sink, source=FakeActivitySource())
+    assert coll.pc_sampling_available() is False
+    res = coll.run_deep_evidence(window_s=0.0)
+    assert res["available"] is False
+    assert coll.last_stall_result() is None
+    sink.close()
+
+
+def test_collector_deep_evidence_delegates():
+    sink = _CollectingSink(flush_interval_s=10.0)
+    lib = FakePcSamplingLib(drain_batches=[[], [_s("k", "wait", 30)]])  # baseline + 收尾
+    coll = CuptiKernelCollector(
+        sink, source=FakeActivitySource(), pc_sampling=PcSamplingController(lib, sink=sink),
+    )
+    assert coll.pc_sampling_available() is True
+    res = coll.run_deep_evidence(window_s=0.0)   # 窗=0 → baseline drain + 收尾 drain 一次
+    assert res["available"] is True
+    assert res["sample_total"] == 30.0
+    assert coll.last_stall_result() is res
     sink.close()
 
 

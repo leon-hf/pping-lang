@@ -86,6 +86,22 @@ class M:
     KERNEL_MEAN_DUR_US = "kernel.mean_dur_us"
     KERNEL_IN_GRAPH_PCT = "kernel.in_graph_pct"
 
+    # GPU kernel 内部 stall (CUPTI PC Sampling, 阶段 2 Deep Evidence)
+    # 各类占"stall 样本"(= 总样本 − issued);issued 单独占总样本。
+    # 语义类映射见 collector/cupti.py STALL_CLASS_TO_METRIC + 设计文档 §11。
+    KERNEL_STALL_MEMORY_DEP_PCT = "kernel.stall.memory_dependency_pct"
+    KERNEL_STALL_SHARED_DEP_PCT = "kernel.stall.shared_dependency_pct"
+    KERNEL_STALL_MEMORY_THROTTLE_PCT = "kernel.stall.memory_throttle_pct"
+    KERNEL_STALL_MATH_PIPE_PCT = "kernel.stall.math_pipe_pct"
+    KERNEL_STALL_EXEC_DEP_PCT = "kernel.stall.exec_dependency_pct"
+    KERNEL_STALL_SYNC_PCT = "kernel.stall.sync_pct"
+    KERNEL_STALL_FETCH_CONTROL_PCT = "kernel.stall.fetch_control_pct"
+    KERNEL_STALL_DISPATCH_PCT = "kernel.stall.dispatch_pct"
+    KERNEL_STALL_SCHEDULER_SLACK_PCT = "kernel.stall.scheduler_slack_pct"
+    KERNEL_STALL_OTHER_PCT = "kernel.stall.other_pct"
+    KERNEL_STALL_ISSUED_PCT = "kernel.stall.issued_pct"  # selected, 占总样本(非 stall)
+    KERNEL_STALL_SAMPLE_TOTAL = "kernel.stall.sample_total"
+
     # pping-lang 自我观测
     PPING_LANG_SINK_DROPPED_TOTAL = "pping_lang.sink.dropped_total"
     PPING_LANG_RECORD_OVERHEAD_US = "pping_lang.overhead.record_us"
