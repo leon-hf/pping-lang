@@ -2,10 +2,12 @@
 
 按 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 风格，遵循 SemVer。
 
-## [Unreleased] — v0.1 alpha (2026-06)
+## [Unreleased]
 
-第 1-3 周采集/诊断/Sink 完成后，继续做完 CUPTI kernel 级剖析（阶段 1a/2/3）、压测闭环、
-dashboard 诊断面板与 pip 一键打包。准备发首个 alpha tag。
+## [0.1.0a1] — 2026-06-14
+
+首个 alpha。第 1-3 周采集/诊断/Sink 完成后，继续做完 CUPTI kernel 级剖析（阶段 1a/2/3）、
+压测闭环、dashboard 诊断面板与 pip 一键打包。
 
 ### Added
 
