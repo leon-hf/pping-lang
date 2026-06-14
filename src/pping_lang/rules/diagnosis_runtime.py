@@ -86,6 +86,14 @@ class DiagnosisEngine:
     def evaluate_once(self) -> int:
         return self._evaluate_all()
 
+    @property
+    def config(self) -> DiagnosisConfig:
+        return self._cfg
+
+    def set_config(self, cfg: DiagnosisConfig) -> None:
+        """热替换配置。eval 循环每轮开头读 self._cfg,引用赋值原子,无需锁。"""
+        self._cfg = cfg
+
     # === internals ===
 
     def _run(self) -> None:

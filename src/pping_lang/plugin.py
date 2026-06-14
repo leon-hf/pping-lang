@@ -327,6 +327,7 @@ class PpingLangStatLogger(StatLoggerBase):
                 sink=self._sink,
                 rule_store=self._rule_store,
                 rule_engine=self._rule_engine,
+                diag_engine=self._diag_engine,
                 nvml=self._nvml,
                 cupti=self._cupti,
                 version=_version,

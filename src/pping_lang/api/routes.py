@@ -15,7 +15,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from fastapi import FastAPI, HTTPException, Query, Response
+from fastapi import Body, FastAPI, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 
@@ -29,6 +29,12 @@ from pping_lang.api.queries import (
 from pping_lang.api.schemas import BenchStartIn, RuleIn, RuleTestRequest
 from pping_lang.bench import store as bench_store
 from pping_lang.clock import wall_ns
+from pping_lang.rules.diagnosis_config import (
+    WORKLOAD_FORMS,
+    from_dict as diag_config_from_dict,
+    to_dict as diag_config_to_dict,
+)
+from pping_lang.rules.diagnosis_rules import DIAGNOSIS_RULES
 from pping_lang.bench.client import OpenAIStreamClient
 from pping_lang.bench.runner import run_static
 from pping_lang.bench.scenarios.schema import SLO, StaticScenario
@@ -309,6 +315,7 @@ def build_app(
     sink: Sink,
     rule_store: RuleStore,
     rule_engine: RuleEngine | None = None,
+    diag_engine: Any = None,
     nvml: NvmlSampler | None = None,
     cupti: CuptiKernelCollector | None = None,
     version: str = "0.0.1.dev0",
@@ -983,6 +990,60 @@ def build_app(
         finally:
             conn.close()
         return {"diagnoses": diags}
+
+    # === GET /api/diagnosis_rules — 现役事实规则 + 中心配置(阈值已按配置解析)===
+    # 这是诊断引擎真正在跑的规则(代码+配置驱动,非旧 RuleStore 的自由 CRUD)。
+    def _active_config():
+        # 引擎在跑就读它的(热配置);否则回退磁盘配置,UI 仍可浏览。
+        if diag_engine is not None:
+            return diag_engine.config
+        from pping_lang.rules.diagnosis_config import load_config  # noqa: PLC0415
+        return load_config()
+
+    def _serialize_rules(cfg) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
+        for r in DIAGNOSIS_RULES:
+            checks = []
+            for c in r.checks:
+                resolved = getattr(cfg, c.threshold_ref) if c.threshold_ref else c.threshold
+                checks.append({
+                    "metric": c.metric, "op": c.op,
+                    "threshold": resolved, "threshold_ref": c.threshold_ref,
+                    "window_seconds": c.window_seconds, "aggregation": c.aggregation,
+                })
+            out.append({
+                "id": r.id, "name": r.name, "kind": r.kind, "severity": r.severity,
+                "claim": r.claim, "match": r.match, "checks": checks,
+                "precondition": list(r.precondition), "requires_regime": r.requires_regime,
+                "hypothesis": r.hypothesis, "suggestion": r.suggestion,
+            })
+        return out
+
+    @app.get("/api/diagnosis_rules")
+    def diagnosis_rules() -> dict[str, Any]:
+        cfg = _active_config()
+        return {
+            "active": diag_engine is not None,
+            "rules": _serialize_rules(cfg),
+            "config": diag_config_to_dict(cfg),
+            "workload_forms": list(WORKLOAD_FORMS),
+        }
+
+    # === PUT /api/diagnosis_config — 改中心 SLA/阈值,热生效 ===
+    @app.put("/api/diagnosis_config")
+    def update_diagnosis_config(body: dict = Body(...)) -> dict[str, Any]:
+        try:
+            cfg = diag_config_from_dict(body)
+        except (ValueError, TypeError) as e:
+            raise HTTPException(400, f"invalid diagnosis config: {e}")
+        applied = diag_engine is not None
+        if applied:
+            diag_engine.set_config(cfg)
+        return {
+            "applied": applied,        # False = 引擎没在跑(只校验,未热加载)
+            "config": diag_config_to_dict(cfg),
+            "rules": _serialize_rules(cfg),
+        }
 
     # === GET /api/rules ===
     @app.get("/api/rules")

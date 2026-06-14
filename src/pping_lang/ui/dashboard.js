@@ -575,84 +575,67 @@ function benchTab() {
 }
 
 function rulesTab() {
+  // 业务形态 → (TTFT_p99, TPOT_p99) SLA 默认,与后端 _WORKLOAD_SLA 对齐
+  const WORKLOAD_SLA = {
+    chat: [1000, 50], rag: [3000, 50], agent: [1000, 50],
+    reasoning: [1000, 30], code: [100, 20], custom: [2000, 50],
+  };
+  // 配置项 → [中文标签, 单位]。决定哪些字段在表单里出现 + 顺序
+  const CFG_LABELS = {
+    sla_ttft_p99_ms: ['TTFT p99 SLA', 'ms'],
+    sla_tpot_p99_ms: ['TPOT p99 SLA', 'ms'],
+    long_prompt_tokens: ['长 prompt 阈值', 'tokens'],
+    waiting_reqs: ['等待队列阈值', 'reqs'],
+    mbu_high_pct: ['MBU 贴顶阈值', '%'],
+    mbu_low_pct: ['MBU 偏低阈值', '%'],
+    batch_small_reqs: ['并发偏小阈值', 'reqs'],
+    mfu_low_ratio: ['MFU 偏低阈值', '0–1'],
+    tail_ratio: ['尾延迟比 p99/p50', '×'],
+    kv_pressure_ratio: ['KV 压力阈值', '0–1'],
+    prefix_hit_low: ['前缀命中低阈值', '0–1'],
+    weights_hbm_ratio: ['权重占显存阈值', '0–1'],
+  };
+  const KIND_LABEL = { classifier: '分类器', symptom: '入口症状', fact: '判别' };
   return {
-    rules: [],
-    availableMetrics: [],
-    editing: null,
-    editingExisting: false,
-    testResult: {},
-    toast: '',
-    toastError: false,
+    rules: [], config: {}, cfgDraft: {}, workloadForms: [], active: false,
+    saving: false, toast: '', toastError: false,
+    cfgLabels: CFG_LABELS, kindLabel: KIND_LABEL,
 
-    async init() {
-      await Promise.all([this.loadRules(), this.loadMetrics()]);
+    async init() { await this.load(); },
+    // 触发的诊断卡片用这俩 helper 把 rule_id → 人话(从现役规则取)
+    ruleName(rule_id) { const r = this.rules.find(x => x.id === rule_id); return r ? r.name : rule_id; },
+    ruleCategory(rule_id) { const r = this.rules.find(x => x.id === rule_id); return r ? (KIND_LABEL[r.kind] || r.kind) : ''; },
+
+    async load() {
+      const d = await fetch('/api/diagnosis_rules').then(r => r.json());
+      this.rules = d.rules || [];
+      this.config = d.config || {};
+      this.workloadForms = d.workload_forms || [];
+      this.active = !!d.active;
+      this.cfgDraft = JSON.parse(JSON.stringify(this.config));
     },
-    ruleName(rule_id) {
-      const r = this.rules.find(x => x.id === rule_id);
-      return r ? r.name : rule_id;
+    cfgKeys() { return Object.keys(CFG_LABELS).filter(k => k in this.cfgDraft); },
+    onFormChange() {
+      const sla = WORKLOAD_SLA[this.cfgDraft.workload_form];
+      if (sla) { this.cfgDraft.sla_ttft_p99_ms = sla[0]; this.cfgDraft.sla_tpot_p99_ms = sla[1]; }
     },
-    ruleCategory(rule_id) {
-      const r = this.rules.find(x => x.id === rule_id);
-      return r ? r.category : '';
-    },
-    async loadRules() {
-      const r = await fetch('/api/rules').then(r => r.json());
-      this.rules = r.rules || [];
-    },
-    async loadMetrics() {
-      const r = await fetch('/api/metrics/available').then(r => r.json());
-      this.availableMetrics = r.metrics || [];
-    },
-    blank() {
-      return {
-        id: '', name: '', severity: 'warning', category: 'throughput',
-        condition: {
-          metric: this.availableMetrics[0] || 'gpu.utilization_pct',
-          op: '<', threshold: 50, window_seconds: 30, aggregation: 'avg',
-        },
-        message: '', suggestion: '', enabled: true,
-      };
-    },
-    newRule() { this.editing = this.blank(); this.editingExisting = false; },
-    editRule(r) { this.editing = JSON.parse(JSON.stringify(r)); this.editingExisting = true; },
-    cancelEdit() { this.editing = null; },
-    async save() {
+    dirty() { return JSON.stringify(this.cfgDraft) !== JSON.stringify(this.config); },
+    resetConfig() { this.cfgDraft = JSON.parse(JSON.stringify(this.config)); },
+    async saveConfig() {
+      this.saving = true;
       try {
-        const method = this.editingExisting ? 'PUT' : 'POST';
-        const url = this.editingExisting ? `/api/rules/${this.editing.id}` : '/api/rules';
-        const r = await fetch(url, {
-          method, headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify(this.editing),
+        const r = await fetch('/api/diagnosis_config', {
+          method: 'PUT', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(this.cfgDraft),
         });
-        if (!r.ok) {
-          const err = await r.json().catch(() => ({detail: r.statusText}));
-          this.showToast(`保存失败: ${err.detail || r.status}`, true);
-          return;
-        }
-        this.showToast(this.editingExisting ? '已更新' : '已创建');
-        this.editing = null;
-        await this.loadRules();
-      } catch (e) {
-        this.showToast(`错误: ${e}`, true);
-      }
-    },
-    async deleteRule(r) {
-      const what = r.is_default ? `禁用默认规则 ${r.id}（仍保留可重启用）` : `删除规则 ${r.id}`;
-      if (!confirm(what + '？')) return;
-      const resp = await fetch(`/api/rules/${r.id}`, {method: 'DELETE'});
-      if (!resp.ok) { this.showToast(`删除失败: ${resp.status}`, true); return; }
-      this.showToast(r.is_default ? '已禁用' : '已删除');
-      await this.loadRules();
-    },
-    async testRule(rule_id) {
-      const r = await fetch(`/api/rules/${rule_id}/test`, {method: 'POST'});
-      if (!r.ok) { this.showToast(`测试失败: ${r.status}`, true); return; }
-      this.testResult[rule_id] = await r.json();
-    },
-    formatTestResult(t) {
-      if (!t.data_available) return `当前窗口无数据（${t.window_seconds}s, ${t.aggregation}）`;
-      const verb = t.would_fire ? '会触发' : '不触发';
-      return `${verb} — ${t.aggregation}(${t.metric}) = ${Number(t.value).toFixed(3)} (阈值 ${t.threshold})`;
+        const body = await r.json().catch(() => ({}));
+        if (!r.ok) { this.showToast(`保存失败: ${body.detail || r.status}`, true); return; }
+        this.rules = body.rules || this.rules;
+        this.config = body.config || this.config;
+        this.cfgDraft = JSON.parse(JSON.stringify(this.config));
+        this.showToast(body.applied ? '已保存,热生效' : '已保存(引擎未运行,重启后生效)');
+      } catch (e) { this.showToast(`错误: ${e}`, true); }
+      finally { this.saving = false; }
     },
     showToast(msg, error = false) {
       this.toast = msg; this.toastError = error;
