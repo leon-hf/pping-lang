@@ -1,4 +1,4 @@
-"""DiagnosisConfig 单测 —— SLA + 阈值集中可配,决策树各节点引用它。"""
+"""DiagnosisConfig 单测 —— SLA + 阈值集中可配,各规则引用它。"""
 from __future__ import annotations
 
 import json

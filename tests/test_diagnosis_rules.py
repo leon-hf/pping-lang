@@ -1,4 +1,4 @@
-"""诊断决策树规则定义 + 校验单测。"""
+"""诊断规则定义 + 校验单测。"""
 from __future__ import annotations
 
 import dataclasses
@@ -7,18 +7,18 @@ import pytest
 
 from pping_lang.metrics_catalog import ALLOWED_METRICS
 from pping_lang.rules.diagnosis_config import DiagnosisConfig
-from pping_lang.rules.diagnosis_tree import (
+from pping_lang.rules.diagnosis_rules import (
     DIAGNOSIS_RULES,
     FactCheck,
     FactRule,
-    validate_tree,
+    validate_rules,
 )
 
 _CONFIG_FIELDS = {f.name for f in dataclasses.fields(DiagnosisConfig)}
 
 
-def test_builtin_tree_valid():
-    validate_tree()  # 不抛即过
+def test_builtin_rules_valid():
+    validate_rules()  # 不抛即过
 
 
 def test_count_and_ids_unique():
@@ -94,42 +94,42 @@ def _rule(**kw):
 
 def test_validate_rejects_dup_ids():
     with pytest.raises(ValueError):
-        validate_tree((_rule(id="A"), _rule(id="A")))
+        validate_rules((_rule(id="A"), _rule(id="A")))
 
 
 def test_validate_rejects_unknown_metric():
     bad = _rule(checks=(FactCheck("gpu.bogus_metric", "<", "mfu_low_ratio", None, 30, "avg"),))
     with pytest.raises(ValueError):
-        validate_tree((bad,))
+        validate_rules((bad,))
 
 
 def test_validate_rejects_bad_threshold_ref():
     bad = _rule(checks=(FactCheck("gpu.utilization_pct", "<", "nonexistent_cfg", None, 30, "avg"),))
     with pytest.raises(ValueError):
-        validate_tree((bad,))
+        validate_rules((bad,))
 
 
 def test_validate_rejects_both_threshold_sources():
     bad = _rule(checks=(FactCheck("gpu.utilization_pct", "<", "mfu_low_ratio", 0.5, 30, "avg"),))
     with pytest.raises(ValueError):
-        validate_tree((bad,))
+        validate_rules((bad,))
 
 
 def test_validate_rejects_precondition_to_unknown():
     with pytest.raises(ValueError):
-        validate_tree((_rule(precondition=("ZZZ",)),))
+        validate_rules((_rule(precondition=("ZZZ",)),))
 
 
 def test_validate_rejects_classifier_with_checks():
     with pytest.raises(ValueError):
-        validate_tree((_rule(kind="classifier"),))
+        validate_rules((_rule(kind="classifier"),))
 
 
 def test_validate_rejects_nonclassifier_without_checks():
     with pytest.raises(ValueError):
-        validate_tree((_rule(checks=()),))
+        validate_rules((_rule(checks=()),))
 
 
 def test_validate_rejects_bad_regime():
     with pytest.raises(ValueError):
-        validate_tree((_rule(requires_regime="sideways"),))
+        validate_rules((_rule(requires_regime="sideways"),))

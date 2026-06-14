@@ -1,8 +1,8 @@
-"""DiagnosisConfig —— 诊断决策树的集中配置(SLA + 所有阈值)。
+"""DiagnosisConfig —— 诊断规则的集中配置(SLA + 所有阈值)。
 
-见 `_design-notes/诊断决策树-方法论映射到信号.md` §10。
+见 `_design-notes/诊断规则-方法论映射到信号.md`。
 
-设计铁律:**阈值绝不内嵌进规则**,全部集中在这里;决策树各节点只「引用」配置项。
+设计铁律:**阈值绝不内嵌进规则**,全部集中在这里;各规则只「引用」配置项。
 换 workload / 改 SLA / 阈值随硬件代际演进时,改一处即可(防 §7「阈值会过期」)。
 
 环境变量:
@@ -39,13 +39,13 @@ _WORKLOAD_SLA: dict[str, tuple[float, float]] = {
 
 @dataclass(frozen=True)
 class DiagnosisConfig:
-    """诊断树集中配置。决策树/规则只读这里,不内嵌魔数。"""
+    """诊断规则的集中配置。规则只读这里,不内嵌魔数。"""
 
     workload_form: WorkloadForm = "custom"
     # --- SLA(随 workload 带默认,可覆盖)---
     sla_ttft_p99_ms: float = 2000.0      # S1
     sla_tpot_p99_ms: float = 50.0        # S2
-    # --- 阈值(各节点引用;名称对应决策树节点)---
+    # --- 阈值(各规则引用;名称对应规则)---
     long_prompt_tokens: int = 2048       # D1a 长 prompt
     waiting_reqs: float = 50.0           # D1b 队列偏长
     mbu_high_pct: float = 85.0           # D2a 贴带宽屋顶
