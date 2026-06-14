@@ -35,6 +35,10 @@ class TeeSink:
         return sum(s.dropped_metrics for s in self._children)
 
     @property
+    def downsampled_metrics(self) -> int:
+        return sum(getattr(s, "downsampled_metrics", 0) for s in self._children)
+
+    @property
     def dropped_diags(self) -> int:
         return sum(s.dropped_diags for s in self._children)
 
