@@ -104,6 +104,53 @@ def test_missing_metric_no_fire():
     assert evaluate(_fn({}), CFG) == []   # 全无数据 → 啥都不报(优雅)
 
 
+def test_db_path_realistic_scenario(tmp_path):
+    """端到端:真 DuckDB(LocalSink 灌真实场景点)→ db_metric_fn(真 SQL 聚合)→ evaluate。
+
+    场景 = 过载服务器:长尾 TTFT + 长 prompt + 队列堆积 + KV 满并抢占;
+    MFU/MBU 无数据(v0.21 perf_stats 缺)→ 相关规则优雅不报、不乱报。
+    """
+    import time
+
+    import duckdb
+
+    from pping_lang.metrics_catalog import M
+    from pping_lang.rules.diagnosis_engine import db_metric_fn
+    from pping_lang.sink.local import LocalSink
+    from pping_lang.types import MetricPoint
+
+    db = tmp_path / "diag.duckdb"
+    sink = LocalSink(db_path=db, instance_id="t", flush_interval_s=10.0)
+    base = time.monotonic_ns()
+
+    def push(name, vals):
+        for i, v in enumerate(vals):
+            sink.push_metric(MetricPoint(ts_ns=base + i, name=name, value=float(v)))
+
+    push(M.VLLM_REQ_TTFT_MS, [80] * 40 + [900, 950, 1000, 1100])   # p50~80 p99~1050 → ratio>5
+    push(M.VLLM_REQ_PROMPT_TOKENS, [3000] * 20)                     # avg 3000 > 2048
+    push(M.VLLM_SCHEDULER_WAITING_REQS, [60] * 10)                  # avg 60 > 50
+    push(M.VLLM_SCHEDULER_KV_CACHE_USAGE_RATIO, [0.95] * 10)        # >= 0.9
+    push(M.VLLM_ITER_PREEMPTED_REQS, [1, 2, 1] + [0] * 7)           # sum 4 > 0
+    sink.close()
+
+    conn = duckdb.connect(str(db))
+    now = base + 5 * 10**9   # 5s 后:所有点都在窗口内
+    fn = db_metric_fn(conn, now)
+
+    # 默认 SLA(ttft 2000):S1 不触发(p99~1050<2000),尾部/KV/长输入/队列仍触发(前置 S5)
+    default_ids = {f.rule_id for f in evaluate(fn, default_config("custom"))}
+    assert "S1" not in default_ids
+    assert {"S4", "S5", "D1a", "D1b", "D4a"} <= default_ids
+
+    # 严格 SLA(code: ttft 100):S1 触发
+    strict_ids = {f.rule_id for f in evaluate(fn, default_config("code"))}
+    assert {"S1", "S4", "S5", "D1a", "D1b", "D4a"} <= strict_ids
+    # MFU/MBU 无数据 → 优雅不报
+    assert {"D1c", "D3a", "D2a"} & strict_ids == set()
+    conn.close()
+
+
 def test_finding_carries_signed_inference():
     f = _fn({
         ("vllm.req.ttft_ms", "p99"): 3000.0,
