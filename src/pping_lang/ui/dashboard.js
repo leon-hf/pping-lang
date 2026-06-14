@@ -597,22 +597,77 @@ function rulesTab() {
   };
   const KIND_LABEL = { classifier: '分类器', symptom: '入口症状', fact: '判别' };
   return {
-    rules: [], config: {}, cfgDraft: {}, workloadForms: [], active: false,
+    rules: [], customRules: [], customEditable: false,
+    config: {}, cfgDraft: {}, workloadForms: [], active: false,
+    availableMetrics: [],
+    editing: null, editingExisting: false,   // 自定义规则编辑态
+    showConfig: false,                        // 诊断配置弹框开关
     saving: false, toast: '', toastError: false,
     cfgLabels: CFG_LABELS, kindLabel: KIND_LABEL,
 
-    async init() { await this.load(); },
-    // 触发的诊断卡片用这俩 helper 把 rule_id → 人话(从现役规则取)
-    ruleName(rule_id) { const r = this.rules.find(x => x.id === rule_id); return r ? r.name : rule_id; },
-    ruleCategory(rule_id) { const r = this.rules.find(x => x.id === rule_id); return r ? (KIND_LABEL[r.kind] || r.kind) : ''; },
+    async init() { await Promise.all([this.load(), this.loadMetrics()]); },
+    // 触发的诊断卡片用这俩 helper 把 rule_id → 人话(策展 + 自定义都查)
+    allRules() { return [...this.rules, ...this.customRules]; },
+    ruleName(rule_id) { const r = this.allRules().find(x => x.id === rule_id); return r ? r.name : rule_id; },
+    ruleCategory(rule_id) {
+      const r = this.allRules().find(x => x.id === rule_id);
+      if (!r) return '';
+      return r.custom ? '自定义' : (KIND_LABEL[r.kind] || r.kind || '');
+    },
 
     async load() {
       const d = await fetch('/api/diagnosis_rules').then(r => r.json());
       this.rules = d.rules || [];
+      this.customRules = d.custom_rules || [];
+      this.customEditable = !!d.custom_editable;
       this.config = d.config || {};
       this.workloadForms = d.workload_forms || [];
       this.active = !!d.active;
       this.cfgDraft = JSON.parse(JSON.stringify(this.config));
+    },
+    async loadMetrics() {
+      try {
+        const r = await fetch('/api/metrics/available').then(r => r.json());
+        this.availableMetrics = r.metrics || [];
+      } catch (e) { this.availableMetrics = []; }
+    },
+
+    // === 诊断配置弹框 ===
+    openConfig() { this.cfgDraft = JSON.parse(JSON.stringify(this.config)); this.showConfig = true; },
+    closeConfig() { this.showConfig = false; },
+
+    // === 自定义规则 CRUD(走 /api/diagnosis_rules/custom,和策展规则同一引擎评)===
+    blankRule() {
+      return {
+        name: '', metric: this.availableMetrics[0] || 'gpu.utilization_pct',
+        op: '<', threshold: 50, window_seconds: 30, aggregation: 'avg',
+        severity: 'warning', hypothesis: '', suggestion: '',
+      };
+    },
+    newRule() { this.editing = this.blankRule(); this.editingExisting = false; },
+    editRule(r) { this.editing = JSON.parse(JSON.stringify(r)); this.editingExisting = true; },
+    cancelEdit() { this.editing = null; },
+    async saveRule() {
+      try {
+        const url = this.editingExisting
+          ? `/api/diagnosis_rules/custom/${this.editing.id}` : '/api/diagnosis_rules/custom';
+        const r = await fetch(url, {
+          method: this.editingExisting ? 'PUT' : 'POST',
+          headers: {'Content-Type': 'application/json'}, body: JSON.stringify(this.editing),
+        });
+        const body = await r.json().catch(() => ({}));
+        if (!r.ok) { this.showToast(`保存失败: ${body.detail || r.status}`, true); return; }
+        this.showToast(this.editingExisting ? '已更新' : '已创建(立即参与诊断)');
+        this.editing = null;
+        await this.load();
+      } catch (e) { this.showToast(`错误: ${e}`, true); }
+    },
+    async deleteRule(r) {
+      if (!confirm(`删除自定义规则「${r.name}」？`)) return;
+      const resp = await fetch(`/api/diagnosis_rules/custom/${r.id}`, {method: 'DELETE'});
+      if (!resp.ok) { this.showToast(`删除失败: ${resp.status}`, true); return; }
+      this.showToast('已删除');
+      await this.load();
     },
     cfgKeys() { return Object.keys(CFG_LABELS).filter(k => k in this.cfgDraft); },
     onFormChange() {

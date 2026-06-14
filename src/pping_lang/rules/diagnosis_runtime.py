@@ -44,10 +44,13 @@ class DiagnosisEngine:
         eval_interval_s: float = 1.0,
         suppression_window_s: float = 30.0,
         print_to_terminal: bool | None = None,
+        custom_store: Any = None,
     ) -> None:
         self._db_path = db_path
         self._sink = sink
         self._cfg = config
+        # 自定义规则(用户在 UI 建的)与策展规则同一评估器评。None = 没接 store。
+        self._custom_store = custom_store
         self._params = params
         self._dtype_b = dtype_bytes
         self._peak_c = peak_compute_tflops
@@ -152,7 +155,11 @@ class DiagnosisEngine:
                 return op.mfu
             return v
 
-        findings = evaluate(metric_fn, self._cfg, DIAGNOSIS_RULES, op.regime)
+        # 策展规则 + 用户自定义规则,一起评(同一评估器、同一展示路径)
+        rules = DIAGNOSIS_RULES
+        if self._custom_store is not None:
+            rules = DIAGNOSIS_RULES + self._custom_store.fact_rules()
+        findings = evaluate(metric_fn, self._cfg, rules, op.regime)
         fires = 0
         for f in findings:
             last = self._last_fire_ns.get(f.rule_id, 0)

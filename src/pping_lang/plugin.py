@@ -148,6 +148,7 @@ class PpingLangStatLogger(StatLoggerBase):
         self._collector: VllmStatsCollector | None = None
         self._rule_engine: RuleEngine | None = None
         self._diag_engine = None  # DiagnosisEngine(fact-rule 决策引擎,见 rules/diagnosis_runtime)
+        self._custom_store = None  # CustomRuleStore(用户自定义规则,与策展规则同引擎评)
         self._api: ApiServer | None = None
         self._rule_store: RuleStore | None = None
         # 重 I/O 延迟到 log_engine_initialized（pre-impl-rfc §4.2）
@@ -291,17 +292,24 @@ class PpingLangStatLogger(StatLoggerBase):
             from pping_lang.api.routes import (  # noqa: PLC0415
                 _DTYPE_BYTES, _estimate_params, _extract_arch,
             )
+            from pping_lang.rules.custom_store import CustomRuleStore  # noqa: PLC0415
             from pping_lang.rules.diagnosis_config import load_config  # noqa: PLC0415
             from pping_lang.rules.diagnosis_runtime import DiagnosisEngine  # noqa: PLC0415
             _arch = _extract_arch(self.vllm_config)
             _params = _estimate_params(_arch) if _arch else None
             _dtb = _DTYPE_BYTES.get(_arch["torch_dtype"], 2) if _arch else 2
+            # 自定义规则落盘在 DB 同目录,和策展规则同一引擎评估
+            _custom_path = os.environ.get(
+                "PPING_LANG_CUSTOM_RULES_PATH", str(db_path.parent / "custom_rules.json")
+            )
+            self._custom_store = CustomRuleStore(_custom_path)
             self._diag_engine = DiagnosisEngine(
                 db_path=str(db_path), sink=self._sink, config=load_config(),
                 params=_params, dtype_bytes=_dtb,
                 peak_compute_tflops=(gpu_peak.bf16_tflops if gpu_peak else None),
                 peak_mem_bw_tbs=(gpu_peak.mem_bw_gbs / 1000.0 if gpu_peak else None),
                 engine_index=self.engine_index, eval_interval_s=eval_interval,
+                custom_store=self._custom_store,
             )
             self._diag_engine.start()
             atexit.register(self._diag_engine.stop)
@@ -328,6 +336,7 @@ class PpingLangStatLogger(StatLoggerBase):
                 rule_store=self._rule_store,
                 rule_engine=self._rule_engine,
                 diag_engine=self._diag_engine,
+                custom_store=self._custom_store,
                 nvml=self._nvml,
                 cupti=self._cupti,
                 version=_version,

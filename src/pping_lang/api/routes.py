@@ -316,6 +316,7 @@ def build_app(
     rule_store: RuleStore,
     rule_engine: RuleEngine | None = None,
     diag_engine: Any = None,
+    custom_store: Any = None,
     nvml: NvmlSampler | None = None,
     cupti: CuptiKernelCollector | None = None,
     version: str = "0.0.1.dev0",
@@ -1024,10 +1025,43 @@ def build_app(
         cfg = _active_config()
         return {
             "active": diag_engine is not None,
-            "rules": _serialize_rules(cfg),
+            "rules": _serialize_rules(cfg),               # 策展事实规则(只读)
+            "custom_rules": custom_store.list_dicts() if custom_store else [],  # 用户自定义(可改)
+            "custom_editable": custom_store is not None,
             "config": diag_config_to_dict(cfg),
             "workload_forms": list(WORKLOAD_FORMS),
         }
+
+    # === 自定义规则 CRUD —— 与策展规则同一评估器(DiagnosisEngine 每轮一起评)===
+    def _require_store():
+        if custom_store is None:
+            raise HTTPException(503, "自定义规则不可用(诊断引擎未运行)")
+        return custom_store
+
+    @app.post("/api/diagnosis_rules/custom")
+    def create_custom_rule(body: dict = Body(...)) -> dict[str, Any]:
+        store = _require_store()
+        try:
+            return store.add(body)
+        except (ValueError, TypeError) as e:
+            raise HTTPException(400, f"非法规则: {e}")
+
+    @app.put("/api/diagnosis_rules/custom/{rule_id}")
+    def update_custom_rule(rule_id: str, body: dict = Body(...)) -> dict[str, Any]:
+        store = _require_store()
+        try:
+            return store.update(rule_id, body)
+        except KeyError:
+            raise HTTPException(404, f"未找到自定义规则 {rule_id!r}")
+        except (ValueError, TypeError) as e:
+            raise HTTPException(400, f"非法规则: {e}")
+
+    @app.delete("/api/diagnosis_rules/custom/{rule_id}")
+    def delete_custom_rule(rule_id: str) -> dict[str, Any]:
+        store = _require_store()
+        if not store.delete(rule_id):
+            raise HTTPException(404, f"未找到自定义规则 {rule_id!r}")
+        return {"deleted": rule_id}
 
     # === PUT /api/diagnosis_config — 改中心 SLA/阈值,热生效 ===
     @app.put("/api/diagnosis_config")
