@@ -27,6 +27,10 @@ class RuleIn(BaseModel):
     condition: ConditionIn
     message: str
     suggestion: str
+    # 认识论分类(与 category 正交);见 rules/schema.py。默认 derived。
+    claim: Literal[
+        "measurement", "derived", "hypothesis", "suggestion", "unavailable"
+    ] = "derived"
     enabled: bool = True
 
 
