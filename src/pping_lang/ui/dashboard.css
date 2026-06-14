@@ -1133,20 +1133,18 @@
   }
 
   /* === Edit form === */
-  .edit-panel {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 28px;
-    margin-top: 22px;
-    box-shadow: var(--shadow-md);
+  /* New/edit rule — renders in a modal (reuses .modal / .modal-backdrop) */
+  .rule-modal-form {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    flex: 1;
   }
-  .edit-panel h3 {
-    margin: 0 0 22px 0;
-    font-size: 18px;
-    color: var(--text-strong);
-    font-weight: 700;
-    letter-spacing: -0.025em;
+  .rule-modal .modal-body { flex: 1; min-height: 0; }
+  .rule-modal .form-actions {
+    margin-top: 0;
+    padding: 16px 24px;
+    border-top: 1px solid var(--border);
   }
   .form-grid {
     display: grid;

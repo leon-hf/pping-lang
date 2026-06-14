@@ -166,7 +166,7 @@ def _kernel_findings(
     if class_shares and class_shares[0]["pct"] >= 60:
         c = class_shares[0]
         findings.append({
-            "level": "info", "title": f"{_label.get(c['cls'], c['cls'])}-bound",
+            "level": "info", "claim": "derived", "title": f"{_label.get(c['cls'], c['cls'])}-bound",
             "detail": f"GPU 计算时间 {c['pct']:.0f}% 集中在 {_label.get(c['cls'], c['cls'])}，"
                       f"典型 compute-bound 形态。提速方向:增大 batch 摊薄、检查 tiling、或量化。",
         })
@@ -174,14 +174,14 @@ def _kernel_findings(
     if top_kernels and top_kernels[0]["pct"] >= 40:
         k = top_kernels[0]
         findings.append({
-            "level": "info", "title": "单 kernel 主导",
+            "level": "info", "claim": "derived", "title": "单 kernel 主导",
             "detail": f"单个 kernel 占 GPU 时间 {k['pct']:.0f}%（{k['name'][:46]}），"
                       f"优化或替换它收益最大。",
         })
     # 3. 同步等待高 → launch-bound
     if sync_share is not None and sync_share >= 15:
         findings.append({
-            "level": "warning", "title": "Launch-bound（同步等待高）",
+            "level": "warning", "claim": "hypothesis", "title": "Launch-bound（同步等待高）",
             "detail": f"同步等待占墙钟 {sync_share:.0f}%，GPU 在等 CPU 派发 kernel。"
                       f"增大 batch / 提高 CUDA graph 覆盖可缓解。",
         })
@@ -189,20 +189,20 @@ def _kernel_findings(
     gemm_variants = [k for k in top_kernels if k.get("cls") == "gemm"]
     if len(gemm_variants) >= 8:
         findings.append({
-            "level": "info", "title": "GEMM kernel 碎片化",
+            "level": "info", "claim": "hypothesis", "title": "GEMM kernel 碎片化",
             "detail": f"出现 {len(gemm_variants)} 种不同 GEMM 变体(kernel zoo)，"
                       f"tiling 可能次优 —— 同一矩阵乘被拆成多种形状。",
         })
     # 5. 内存拷贝偏多
     if memcpy_share is not None and memcpy_share >= 10:
         findings.append({
-            "level": "warning", "title": "内存拷贝开销",
+            "level": "warning", "claim": "derived", "title": "内存拷贝开销",
             "detail": f"memcpy 占墙钟 {memcpy_share:.0f}%，数据搬运偏多(H2D/D2H)。",
         })
     # 6. CUDA Graph 覆盖低 + launch 频繁 → launch 开销
     if in_graph is not None and in_graph < 40 and launch_rate and launch_rate > 5000:
         findings.append({
-            "level": "info", "title": "CUDA Graph 覆盖低",
+            "level": "info", "claim": "hypothesis", "title": "CUDA Graph 覆盖低",
             "detail": f"仅 {in_graph:.0f}% kernel 在 graph 内、每秒 {launch_rate:.0f} 次 launch，"
                       f"launch 开销可能偏高。",
         })
@@ -211,7 +211,7 @@ def _kernel_findings(
         ov_pct = 100.0 * (overhead_cb_ms / 1000.0) / window_s
         if ov_pct >= 3:
             findings.append({
-                "level": "warning", "title": "采集开销偏高",
+                "level": "warning", "claim": "measurement", "title": "采集开销偏高",
                 "detail": f"本采集器开销约占 {ov_pct:.1f}%（进程内 Python，高 kernel 率下变贵)。"
                           f"建议降采样;阶段 1b 注入式可消除。",
             })
@@ -252,14 +252,14 @@ def _stall_findings(result: dict[str, Any] | None) -> list[dict[str, Any]]:
         c = real[0]
         lbl = _STALL_LABEL.get(c["cls"], c["cls"])
         findings.append({
-            "level": "info", "title": f"{lbl}主导 stall",
+            "level": "info", "claim": "derived", "title": f"{lbl}主导 stall",
             "detail": f"stall 样本 {c['pct']:.0f}% 集中在{lbl}。" + _STALL_ADVICE.get(c["cls"], ""),
         })
     # 2. scheduler_slack 高 → 非 latency-starved(好事,提示瓶颈在别处)
     slack = next((s for s in shares if s["cls"] == "scheduler_slack"), None)
     if slack and slack["pct"] >= 40:
         findings.append({
-            "level": "info", "title": "调度余量充足(非 latency-starved)",
+            "level": "info", "claim": "hypothesis", "title": "调度余量充足(非 latency-starved)",
             "detail": f"{slack['pct']:.0f}% 的 stall 是 not-selected(warp 就绪但调度器选了别的)——"
                       f" eligible warp 充足,当前不是延迟瓶颈,真正瓶颈看主导 stall 类。",
         })
@@ -269,7 +269,7 @@ def _stall_findings(result: dict[str, Any] | None) -> list[dict[str, Any]]:
         k = table[0]
         dom = _STALL_LABEL.get(k["dominant_stall"], k["dominant_stall"])
         findings.append({
-            "level": "info", "title": "主导 kernel 的 stall",
+            "level": "info", "claim": "derived", "title": "主导 kernel 的 stall",
             "detail": f"采样最多的 kernel（{k['kernel'][:46]}）主要卡在 {dom}"
                       f"（{k['dominant_pct']:.0f}%）。",
         })
@@ -277,7 +277,7 @@ def _stall_findings(result: dict[str, Any] | None) -> list[dict[str, Any]]:
     ov: dict[str, Any] = result.get("overhead") or {}
     if (ov.get("hwfull") or 0) > 0 or (ov.get("dropped") or 0) > 0:
         findings.append({
-            "level": "warning", "title": "取证采样有丢样",
+            "level": "warning", "claim": "measurement", "title": "取证采样有丢样",
             "detail": f"HW 缓冲满 {ov.get('hwfull', 0)} 次、丢样 {ov.get('dropped', 0)} ——"
                       f" 采样周期可调长;本次分布仍可参考但非全量。",
         })
@@ -1429,6 +1429,7 @@ def _rule_to_dict(r: Rule, is_default: bool = False) -> dict[str, Any]:
         "name": r.name,
         "severity": r.severity,
         "category": r.category,
+        "claim": r.claim,
         "enabled": r.enabled,
         "is_default": is_default,
         "condition": {
@@ -1458,5 +1459,6 @@ def _rule_in_to_rule(rin: RuleIn) -> Rule:
         ),
         message=rin.message,
         suggestion=rin.suggestion,
+        claim=rin.claim,
         enabled=rin.enabled,
     )

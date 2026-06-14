@@ -13,8 +13,27 @@ import shutil
 import sys
 
 
+def _extract_opt(args: list[str], name: str) -> str | None:
+    """从 vllm 参数里取 `--name VALUE` 或 `--name=VALUE` 的值(末次出现优先)。"""
+    val: str | None = None
+    for i, a in enumerate(args):
+        if a == name and i + 1 < len(args):
+            val = args[i + 1]
+        elif a.startswith(name + "="):
+            val = a.split("=", 1)[1]
+    return val
+
+
 def pping_vllm_main() -> None:
     args = sys.argv[1:]
+
+    # dashboard host 默认跟随 vllm 的 --host:`serve` 本就是对外服务,容器/远程里 vllm
+    # 监听 0.0.0.0 时 dashboard 也该如此,否则 docker 端口转发够不到 127.0.0.1 的监听
+    # (插件默认 127.0.0.1 是安全保守值;仅在用户显式给了 vllm --host 时跟随,且 setdefault
+    # 让显式的 PPING_LANG_API_HOST 仍可覆盖)。
+    vllm_host = _extract_opt(args, "--host")
+    if vllm_host:
+        os.environ.setdefault("PPING_LANG_API_HOST", vllm_host)
 
     # 1) 确保 .so(现编或取缓存),设注入 + PCS 环境(均 setdefault,用户可覆盖)
     try:
