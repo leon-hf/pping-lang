@@ -34,6 +34,8 @@ def plugin(tmp_path, monkeypatch):
     yield p, tmp_path / "e2e.duckdb"
     if p._rule_engine is not None:
         p._rule_engine.stop()
+    if p._diag_engine is not None:
+        p._diag_engine.stop()
     if p._sink is not None and not p._sink._closed:
         p._sink.close()
 

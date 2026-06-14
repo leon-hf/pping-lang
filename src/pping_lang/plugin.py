@@ -146,6 +146,7 @@ class PpingLangStatLogger(StatLoggerBase):
         self._cupti: CuptiKernelCollector | None = None
         self._collector: VllmStatsCollector | None = None
         self._rule_engine: RuleEngine | None = None
+        self._diag_engine = None  # DiagnosisEngine(fact-rule 决策引擎,见 rules/diagnosis_runtime)
         self._api: ApiServer | None = None
         self._rule_store: RuleStore | None = None
         # 重 I/O 延迟到 log_engine_initialized（pre-impl-rfc §4.2）
@@ -268,20 +269,41 @@ class PpingLangStatLogger(StatLoggerBase):
             override_path=Path(rules_path) if rules_path else None
         )
 
-        # 6) Rule engine (optional — disabled by env)
-        if os.environ.get("PPING_LANG_DISABLE_RULES") != "1":
-            eval_interval = float(
-                os.environ.get("PPING_LANG_RULE_EVAL_INTERVAL_S", "1.0")
-            )
-            self._rule_engine = RuleEngine(
-                db_path=str(db_path),
-                rules=self._rule_store,  # pass store for hot reload (Day 9)
-                sink=self._sink,
-                engine_index=self.engine_index,
-                eval_interval_s=eval_interval,
-            )
+        # 6) 规则引擎
+        eval_interval = float(
+            os.environ.get("PPING_LANG_RULE_EVAL_INTERVAL_S", "1.0")
+        )
+        # 6a) 旧扁平 RuleEngine —— 对象保留(供 /api/rules CRUD + /test 与 e2e 用),
+        #     但线程默认不跑(已被 DiagnosisEngine 取代);PPING_LANG_LEGACY_RULES=1 可重新启用。
+        self._rule_engine = RuleEngine(
+            db_path=str(db_path),
+            rules=self._rule_store,
+            sink=self._sink,
+            engine_index=self.engine_index,
+            eval_interval_s=eval_interval,
+        )
+        if os.environ.get("PPING_LANG_LEGACY_RULES") == "1":
             self._rule_engine.start()
             atexit.register(self._rule_engine.stop)
+        # 6b) DiagnosisEngine —— 事实规则决策引擎,现役诊断器(默认开)。
+        if os.environ.get("PPING_LANG_DISABLE_RULES") != "1":
+            from pping_lang.api.routes import (  # noqa: PLC0415
+                _DTYPE_BYTES, _estimate_params, _extract_arch,
+            )
+            from pping_lang.rules.diagnosis_config import load_config  # noqa: PLC0415
+            from pping_lang.rules.diagnosis_runtime import DiagnosisEngine  # noqa: PLC0415
+            _arch = _extract_arch(self.vllm_config)
+            _params = _estimate_params(_arch) if _arch else None
+            _dtb = _DTYPE_BYTES.get(_arch["torch_dtype"], 2) if _arch else 2
+            self._diag_engine = DiagnosisEngine(
+                db_path=str(db_path), sink=self._sink, config=load_config(),
+                params=_params, dtype_bytes=_dtb,
+                peak_compute_tflops=(gpu_peak.bf16_tflops if gpu_peak else None),
+                peak_mem_bw_tbs=(gpu_peak.mem_bw_gbs / 1000.0 if gpu_peak else None),
+                engine_index=self.engine_index, eval_interval_s=eval_interval,
+            )
+            self._diag_engine.start()
+            atexit.register(self._diag_engine.stop)
 
         # 7) HTTP API + dashboard (optional)
         if os.environ.get("PPING_LANG_DISABLE_API") != "1":
