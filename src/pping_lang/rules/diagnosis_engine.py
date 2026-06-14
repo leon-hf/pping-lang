@@ -29,6 +29,7 @@ class DiagFinding:
     rule_id: str
     name: str                       # 客观事实(规则名)
     claim: str
+    severity: str = "info"
     values: dict[str, float] = field(default_factory=dict)  # 触发时各 check 实测值
     hypothesis: str = ""            # 根因推断(署名,非判决)
     suggestion: str = ""            # 处方
@@ -102,7 +103,7 @@ def evaluate(
         if r.requires_regime is not None and r.requires_regime != regime:
             continue
         findings.append(DiagFinding(
-            rule_id=r.id, name=r.name, claim=r.claim,
+            rule_id=r.id, name=r.name, claim=r.claim, severity=r.severity,
             values=values[r.id], hypothesis=r.hypothesis, suggestion=r.suggestion,
         ))
     return findings

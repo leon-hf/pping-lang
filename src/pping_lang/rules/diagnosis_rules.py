@@ -17,7 +17,7 @@ from dataclasses import dataclass, fields
 
 from pping_lang.metrics_catalog import ALLOWED_METRICS
 from pping_lang.rules.diagnosis_config import DiagnosisConfig
-from pping_lang.rules.schema import Claim, Op
+from pping_lang.rules.schema import Claim, Op, Severity
 
 # FactCheck 允许的聚合:含派生比值 p99_over_p50(尾部发散,引擎算)
 FactAgg = ("avg", "p50", "p95", "p99", "max", "min", "sum", "count", "p99_over_p50")
@@ -51,6 +51,7 @@ class FactRule:
     precondition: tuple[str, ...] = ()     # 前置规则 id(OR:任一触发即满足守卫)
     requires_regime: str | None = None     # 还需处于某 regime
     claim: Claim = "derived"
+    severity: Severity = "info"            # 展示用;症状 warning、抢占 critical、其余 info
     hypothesis: str = ""                   # 根因推断(署名,非判决)
     suggestion: str = ""                   # 处方
 
@@ -67,17 +68,17 @@ _REGIME = FactRule(
 
 # ── 入口症状 ───────────────────────────────────────────────────────────
 _S1 = FactRule(
-    id="S1", name="TTFT p99 超 SLA", kind="symptom",
+    id="S1", name="TTFT p99 超 SLA", kind="symptom", severity="warning",
     checks=(FactCheck("vllm.req.ttft_ms", ">", "sla_ttft_p99_ms", None, 60, "p99"),),
     hypothesis="首 Token 慢(相对该业务 SLA)。",
 )
 _S2 = FactRule(
-    id="S2", name="TPOT p99 超 SLA", kind="symptom",
+    id="S2", name="TPOT p99 超 SLA", kind="symptom", severity="warning",
     checks=(FactCheck("vllm.req.tpot_ms", ">", "sla_tpot_p99_ms", None, 60, "p99"),),
     hypothesis="出字慢(相对该业务 SLA)。",
 )
 _S4 = FactRule(
-    id="S4", name="KV 用量高或发生抢占", kind="symptom", match="any",
+    id="S4", name="KV 用量高或发生抢占", kind="symptom", severity="warning", match="any",
     checks=(
         FactCheck("vllm.scheduler.kv_cache_usage_ratio", ">=", "kv_pressure_ratio", None, 10, "avg"),
         FactCheck("vllm.iter.preempted_reqs", ">", None, 0.0, 10, "sum"),
@@ -85,7 +86,7 @@ _S4 = FactRule(
     hypothesis="显存吃紧 / 已在抢占。",
 )
 _S5 = FactRule(
-    id="S5", name="TTFT p99/p50 偏大", kind="symptom",
+    id="S5", name="TTFT p99/p50 偏大", kind="symptom", severity="warning",
     checks=(FactCheck("vllm.req.ttft_ms", ">", "tail_ratio", None, 60, "p99_over_p50"),),
     hypothesis="首 Token 时延尾部发散(多数快、少数奇慢)。",
 )
@@ -138,7 +139,7 @@ _D3c = FactRule(
     suggestion="检查 prompt 模板公共前缀 / 开 enable_prefix_caching / RadixAttention。",
 )
 _D4a = FactRule(
-    id="D4a", name="KV 用量高且发生抢占", precondition=("S4",),
+    id="D4a", name="KV 用量高且发生抢占", severity="critical", precondition=("S4",),
     checks=(
         FactCheck("vllm.scheduler.kv_cache_usage_ratio", ">=", "kv_pressure_ratio", None, 10, "avg"),
         FactCheck("vllm.iter.preempted_reqs", ">", None, 0.0, 10, "sum"),
