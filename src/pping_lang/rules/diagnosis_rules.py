@@ -1,16 +1,15 @@
-"""诊断决策树:规则 = 纯事实节点(带前置),根因/处方是署名推断。
-
-见 `_design-notes/诊断决策树-方法论映射到信号.md` §9/§10。
+"""诊断规则:每条规则 = 客观事实判断 + 触发守卫(precondition)+ 署名根因/处方。
 
 铁律(本文件强制):
 1. **规则名/条件只描述客观事实**(测到了什么),绝不写根因结论。
 2. **根因(`hypothesis`)+ 处方(`suggestion`)是推断**,单独字段、署名,不当判决。
 3. **阈值引 `DiagnosisConfig` 字段(`threshold_ref`),不内嵌魔数**;固定值(如 preempt>0)用 `threshold`。
-4. **前置(`precondition`)= 父症状 id(OR 语义:任一父激活则本节点参与判别)** —— 这就是"树"。
+4. **`precondition` = 前置规则 id(OR:任一触发即满足守卫)** —— 让规则"知道自己在什么前提下才成立",
+   仅此而已,不是什么结构。
 
-注:`regime-classify`(脊柱,算术强度 vs 脊点)是分类器,引擎特殊计算,无 `checks`。
-`D4b 权重占显存` / `D4c 并发撑爆 KV` 是显存容量的静态/派生检查(非窗口指标),机制不同,
-本表暂不收,见文件尾 DEFERRED 说明。
+注:`regime-classify`(算术强度 vs 脊点 → 访存/计算受限)是分类器规则,引擎特殊计算、无 `checks`;
+其它规则用 `requires_regime` 引用它的结果。
+`D4b 权重占显存` / `D4c 并发撑爆 KV` / `D2c 通信受限` 机制不同(静态/派生/多卡),暂不收,见尾部 DEFERRED。
 """
 from __future__ import annotations
 
@@ -42,21 +41,21 @@ class FactCheck:
 
 @dataclass(frozen=True)
 class FactRule:
-    """决策树一个节点。名字=事实;根因/处方=署名推断。"""
+    """一条诊断规则。名字=事实;根因/处方=署名推断。"""
 
     id: str
     name: str                              # 纯事实,如 "等待队列偏长"
     kind: str = "fact"                     # classifier | symptom | fact
     checks: tuple[FactCheck, ...] = ()     # 多个 = 复合
     match: str = "all"                     # all | any(S4 用 any)
-    precondition: tuple[str, ...] = ()     # 父症状 id(OR 激活)
+    precondition: tuple[str, ...] = ()     # 前置规则 id(OR:任一触发即满足守卫)
     requires_regime: str | None = None     # 还需处于某 regime
     claim: Claim = "derived"
     hypothesis: str = ""                   # 根因推断(署名,非判决)
     suggestion: str = ""                   # 处方
 
 
-# ── 脊柱 ───────────────────────────────────────────────────────────────
+# ── 分类器规则(regime,其它规则用 requires_regime 引用)──────────────────
 _REGIME = FactRule(
     id="regime-classify",
     name="算术强度 vs 脊点(Roofline 定位)",
@@ -91,7 +90,7 @@ _S5 = FactRule(
     hypothesis="首 Token 时延尾部发散(多数快、少数奇慢)。",
 )
 
-# ── 判别节点 ───────────────────────────────────────────────────────────
+# ── 判别规则(前置 = 父症状)────────────────────────────────────────────
 _D1a = FactRule(
     id="D1a", name="平均 prompt 偏长", precondition=("S1", "S5"),
     checks=(FactCheck("vllm.req.prompt_tokens", ">", "long_prompt_tokens", None, 60, "avg"),),
@@ -159,7 +158,7 @@ DIAGNOSIS_RULES: tuple[FactRule, ...] = (
 #   D2c TPOT·通信受限    —— comm kernel 占比,仅多卡有数(kernel.time_share.comm_pct)。
 
 
-def validate_tree(rules: tuple[FactRule, ...] = DIAGNOSIS_RULES) -> None:
+def validate_rules(rules: tuple[FactRule, ...] = DIAGNOSIS_RULES) -> None:
     """加载期强校验:挡住手写错误。"""
     ids = [r.id for r in rules]
     if len(ids) != len(set(ids)):
