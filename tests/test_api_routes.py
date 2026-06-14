@@ -323,6 +323,47 @@ def test_kernel_findings_logic():
     assert "碎片化" in titles
     assert "采集开销" in titles  # 80ms/2s = 4% ≥ 3%
     assert all(f["level"] in ("info", "warning", "critical") for f in findings)
+    # 每条结论带认识论分类(claim),不夹带"无身份的结论"
+    assert all(
+        f["claim"] in ("measurement", "derived", "hypothesis", "suggestion", "unavailable")
+        for f in findings
+    )
+    by_title = {f["title"]: f["claim"] for f in findings}
+    assert by_title.get("Launch-bound（同步等待高）") == "hypothesis"   # 因果归因 = 解读
+    assert any(t.endswith("-bound") and c == "derived" for t, c in by_title.items())  # X-bound = 派生事实
+    assert by_title.get("采集开销偏高") == "measurement"               # 自身实测
+
+
+def test_rule_claim_taxonomy():
+    """规则带认识论分类 claim(与领域 category 正交);默认 derived,校验拒绝非法值。"""
+    import dataclasses
+
+    import pytest
+
+    from pping_lang.api.routes import _rule_to_dict
+    from pping_lang.rules.defaults import DEFAULT_RULES
+    from pping_lang.rules.schema import (
+        ALLOWED_CLAIMS,
+        Condition,
+        Rule,
+        validate_rule,
+    )
+
+    r = Rule(
+        id="r", name="r", severity="info", category="x",
+        condition=Condition(metric=M.GPU_UTIL_PCT, op="<", threshold=1.0, window_seconds=10),
+        message="m", suggestion="s",
+    )
+    assert r.claim == "derived"                       # 默认派生事实
+    assert _rule_to_dict(r)["claim"] == "derived"     # 序列化透出
+
+    for d in DEFAULT_RULES:                           # 所有内置规则 claim 合法
+        assert d.claim in ALLOWED_CLAIMS
+        validate_rule(d)
+
+    bad = dataclasses.replace(r, claim="totally-bogus")  # 非法 claim 被拒
+    with pytest.raises(ValueError):
+        validate_rule(bad)
 
 
 def test_kernel_findings_quiet_when_healthy():

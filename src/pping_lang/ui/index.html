@@ -1243,10 +1243,16 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
         </template>
       </div>
 
-      <!-- Edit / new form panel -->
-      <div x-show="editing" x-cloak class="edit-panel">
-        <h3 x-text="editingExisting ? `编辑规则: ${editing.id}` : '新建规则'"></h3>
-        <form @submit.prevent="save()">
+      <!-- Edit / new rule modal -->
+      <div x-show="editing" x-cloak class="modal-backdrop"
+           @click.self="cancelEdit()" @keydown.escape.window="editing && cancelEdit()">
+        <div class="modal rule-modal" role="dialog" aria-modal="true">
+          <div class="modal-head">
+            <h2 x-text="editingExisting ? `编辑规则: ${editing.id}` : '新建规则'"></h2>
+            <button class="modal-close" @click="cancelEdit()" aria-label="关闭">×</button>
+          </div>
+          <form @submit.prevent="save()" class="rule-modal-form">
+            <div class="modal-body">
           <div class="form-grid">
             <label>ID
               <input type="text" x-model="editing.id" :disabled="editingExisting" required>
@@ -1311,11 +1317,13 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
               <span style="color: var(--text); font-size: 13.5px; font-weight: 500;">启用</span>
             </label>
           </div>
-          <div class="form-actions">
-            <button type="button" class="btn secondary" @click="cancelEdit()">取消</button>
-            <button type="submit" class="btn primary">保存</button>
-          </div>
-        </form>
+            </div>
+            <div class="form-actions">
+              <button type="button" class="btn secondary" @click="cancelEdit()">取消</button>
+              <button type="submit" class="btn primary">保存</button>
+            </div>
+          </form>
+        </div>
       </div>
 
       <div x-show="toast" x-cloak class="toast" :class="{ error: toastError }" x-text="toast"></div>
