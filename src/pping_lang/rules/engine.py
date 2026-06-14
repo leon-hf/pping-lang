@@ -33,10 +33,11 @@ logger = logging.getLogger(__name__)
 DEFAULT_EVAL_INTERVAL_S = 1.0
 DEFAULT_SUPPRESSION_WINDOW_S = 30.0
 
-_AGG_TO_SQL: dict[Aggregation, str] = {
+_AGG_TO_SQL: dict[str, str] = {
     "avg": "AVG(value)",
     "max": "MAX(value)",
     "min": "MIN(value)",
+    "sum": "SUM(value)",
     "count": "CAST(COUNT(value) AS DOUBLE)",
     "p50": "QUANTILE_CONT(value, 0.5)",
     "p95": "QUANTILE_CONT(value, 0.95)",
@@ -65,6 +66,8 @@ def _agg_in_memory(values: list[float], agg: Aggregation) -> float | None:
         return max(values)
     if agg == "min":
         return min(values)
+    if agg == "sum":
+        return float(sum(values))
     if agg == "count":
         return float(len(values))
     if agg in ("p50", "p95", "p99"):
