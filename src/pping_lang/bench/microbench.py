@@ -13,6 +13,7 @@ import time
 from collections.abc import Callable
 from types import SimpleNamespace
 
+from pping_lang.clock import wall_ns
 from pping_lang.collector.vllm_stats import VllmStatsCollector
 from pping_lang.hardware import GPUPeak
 from pping_lang.sink.base import Sink
@@ -129,7 +130,7 @@ def bench_record_overhead(n: int = 5_000) -> dict:
     def one_record():
         collector.collect(s, it)
         sink.push_metric(MetricPoint(
-            ts_ns=time.monotonic_ns(), name="pping_lang.overhead.record_us", value=1.0,
+            ts_ns=wall_ns(), name="pping_lang.overhead.record_us", value=1.0,
         ))
 
     try:

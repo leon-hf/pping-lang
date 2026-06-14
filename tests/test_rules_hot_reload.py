@@ -34,8 +34,8 @@ def env(tmp_path):
     db = tmp_path / "hr.duckdb"
     sink = LocalSink(db_path=db, instance_id="hr", flush_interval_s=10.0)
     # 推几条 GPU util = 30 让默认 low-gpu-util (< 50) 会触发
-    # 用真实 monotonic_ns 才能落在 rule 的 30s 窗口内
-    base_ts = time.monotonic_ns()
+    # 落库 ts 用 wall-clock(time_ns),与查询窗口同源,才能落在 rule 的 30s 窗内
+    base_ts = time.time_ns()
     for i in range(5):
         sink.push_metric(MetricPoint(
             ts_ns=base_ts - i * 10**8, name=M.GPU_UTIL_PCT, value=30.0,

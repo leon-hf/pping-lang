@@ -23,6 +23,7 @@ import time
 from threading import Event, Thread
 from typing import Any
 
+from pping_lang.clock import wall_ns
 from pping_lang.rules.schema import Aggregation, Condition, Op, Rule, validate_rule
 from pping_lang.rules.store import RuleStore
 from pping_lang.sink.base import Sink
@@ -238,7 +239,7 @@ class RuleEngine:
         except Exception:
             logger.exception("[pping-lang] could not open DuckDB for rule eval")
             return 0
-        now_ns = time.monotonic_ns()
+        now_ns = wall_ns()  # 查询 metrics 窗口的 cutoff,须与落库 ts(wall)同源
         rules = self._current_rules()
         fires = 0
         try:
@@ -266,7 +267,7 @@ class RuleEngine:
         elapsed_ms = (time.monotonic_ns() - t_start) / 1e6
         try:
             self._sink.push_metric(_MP(
-                ts_ns=time.monotonic_ns(),
+                ts_ns=wall_ns(),
                 name=_M.PPING_LANG_RULE_EVAL_MS,
                 value=elapsed_ms,
                 engine_idx=self._engine_index,

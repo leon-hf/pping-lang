@@ -28,6 +28,7 @@ from pping_lang.api.queries import (
 )
 from pping_lang.api.schemas import BenchStartIn, RuleIn, RuleTestRequest
 from pping_lang.bench import store as bench_store
+from pping_lang.clock import wall_ns
 from pping_lang.bench.client import OpenAIStreamClient
 from pping_lang.bench.runner import run_static
 from pping_lang.bench.scenarios.schema import SLO, StaticScenario
@@ -511,7 +512,7 @@ def build_app(
                 for v, ts in ring[-limit:]
             ]
             return {"name": name, "seconds": seconds, "points": points}
-        since_ns = time.monotonic_ns() - int(seconds * 1e9)
+        since_ns = wall_ns() - int(seconds * 1e9)
         conn = open_conn(db_path)
         try:
             try:
@@ -528,7 +529,7 @@ def build_app(
     def metrics_snapshot(
         seconds: int = Query(30, ge=1, le=3600),
     ) -> dict[str, Any]:
-        cutoff_ns = time.monotonic_ns() - int(seconds * 1e9)
+        cutoff_ns = wall_ns() - int(seconds * 1e9)
         latest: dict[str, dict[str, Any]] = {}
         for name in ALLOWED_METRICS:
             row = sink.latest(name)
@@ -617,7 +618,7 @@ def build_app(
     def kernels(
         window: int = Query(60, ge=5, le=3600, description="latest 取值窗口 (s)"),
     ) -> dict[str, Any]:
-        cutoff_ns = time.monotonic_ns() - int(window * 1e9)
+        cutoff_ns = wall_ns() - int(window * 1e9)
 
         def fresh_val(name: str) -> float | None:
             row = sink.latest(name)
@@ -653,7 +654,7 @@ def build_app(
         snapshot_age_s: float | None = None
         rollup_window_s: float | None = None
         if cupti is not None and cupti.last_snapshot_ts is not None:
-            snapshot_age_s = max(0.0, (time.monotonic_ns() - cupti.last_snapshot_ts) / 1e9)
+            snapshot_age_s = max(0.0, (wall_ns() - cupti.last_snapshot_ts) / 1e9)
             if cupti.last_window_ns > 0:
                 rollup_window_s = cupti.last_window_ns / 1e9
         # enabled：任一 kernel 指标在窗口内有值,或有原始明细
@@ -729,7 +730,7 @@ def build_app(
             for key, m in cmap.items()
         }
         return {
-            "seconds": seconds, "now_ns": time.monotonic_ns(),
+            "seconds": seconds, "now_ns": wall_ns(),
             "available": any(series[k] for k in series), "series": series,
         }
 
@@ -801,7 +802,7 @@ def build_app(
         seconds: int = Query(300, ge=30, le=86400),
         buckets: int = Query(30, ge=5, le=240),
     ) -> dict[str, Any]:
-        now_ns = time.monotonic_ns()
+        now_ns = wall_ns()
         since_ns = now_ns - int(seconds * 1e9)
         # ≤900s: serve from memory (ring may not cover the whole window under
         # extreme push rates, but it'll always have the *most recent* data,
@@ -956,7 +957,7 @@ def build_app(
         seconds: int = Query(300, ge=1, le=86400),
         limit: int = Query(200, ge=1, le=2000),
     ) -> dict[str, Any]:
-        since_ns = time.monotonic_ns() - int(seconds * 1e9)
+        since_ns = wall_ns() - int(seconds * 1e9)
         conn = open_conn(db_path)
         try:
             try:
@@ -1051,7 +1052,7 @@ def build_app(
         try:
             try:
                 fired, value = evaluate_condition_against_db(
-                    conn, rule.condition, time.monotonic_ns(),
+                    conn, rule.condition, wall_ns(),
                 )
             except Exception as e:
                 logger.exception("test eval failed for %s", rule_id)

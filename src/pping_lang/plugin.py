@@ -40,6 +40,7 @@ from typing import TYPE_CHECKING
 
 from pping_lang.api.routes import build_app
 from pping_lang.api.server import ApiServer
+from pping_lang.clock import wall_ns
 from pping_lang.collector.cupti import CuptiKernelCollector
 from pping_lang.collector.nvml import NvmlSampler, detect_first_gpu_name
 from pping_lang.collector.vllm_stats import VllmStatsCollector
@@ -359,12 +360,12 @@ class PpingLangStatLogger(StatLoggerBase):
     ) -> None:
         if self._sink is None:
             return
-        t0 = time.monotonic_ns()
+        t0 = time.monotonic_ns()  # 测耗时差值,用 monotonic
         if self._collector is not None:
             self._collector.collect(scheduler_stats, iteration_stats)
         elapsed_us = (time.monotonic_ns() - t0) / 1000.0
         self._sink.push_metric(MetricPoint(
-            ts_ns=time.monotonic_ns(),
+            ts_ns=wall_ns(),  # 落库 ts,跨进程/重启可比
             name=M.PPING_LANG_RECORD_OVERHEAD_US,
             value=elapsed_us,
             engine_idx=self.engine_index,

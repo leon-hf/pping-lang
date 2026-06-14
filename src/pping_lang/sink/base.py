@@ -37,12 +37,12 @@ to vLLM (design §3.1: any bug must not bring down vLLM).
 from __future__ import annotations
 
 import logging
-import time
 from abc import ABC, abstractmethod
 from collections import defaultdict, deque
 from threading import Event, Thread
 from typing import Final
 
+from pping_lang.clock import wall_ns
 from pping_lang.types import Diagnosis, MetricPoint
 
 logger = logging.getLogger(__name__)
@@ -133,7 +133,7 @@ class Sink(ABC):
         dq = self._recent.get(name)
         if not dq:
             return []
-        cutoff_ns = time.monotonic_ns() - int(seconds * 1e9)
+        cutoff_ns = wall_ns() - int(seconds * 1e9)
         # list(dq) snapshots under GIL; iterating the snapshot is safe even if
         # writer appends concurrently. Items older than cutoff are filtered out.
         return [(v, t) for v, t in list(dq) if t >= cutoff_ns]
