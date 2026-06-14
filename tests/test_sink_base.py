@@ -73,6 +73,47 @@ def test_overflow_drops_oldest_and_increments_counter():
     assert values == [2.0, 3.0, 4.0]  # oldest 0,1 evicted by deque maxlen
 
 
+def test_persist_decimation_thins_inflow_keeps_live_full_rate():
+    """重压下(队列满)持久化队列改自适应降采样,而非尾丢;实时环仍全速。"""
+    sink = _CollectingSink(queue_size=2048, flush_interval_s=1000.0)
+    # 停掉后台 flush 线程,让队列无法被抽干 —— 隔离出降采样逻辑
+    sink._stop.set()
+    sink._wake.set()
+    sink._thread.join(timeout=2)
+    try:
+        # 直接灌到高水位(绕过 push 的降采样计数),建立背压前置条件
+        for i in range(sink._persist_hi):
+            sink._metric_q.append(_mp(ts=i))
+        assert sink.queue_depth == sink._persist_hi
+        assert sink.downsampled_metrics == 0  # 还没经过 push 的降采样路径
+
+        # 高水位之上猛灌一波 → 必然降采样,且队列不超上限
+        for i in range(2000):
+            sink.push_metric(_mp(value=float(i), ts=10_000 + i))
+
+        assert sink.downsampled_metrics > 0          # 入流被有意稀释
+        assert sink.queue_depth <= 2048              # 队列有界
+        # 实时读路径全速:latest 反映最后一次 push(降采样只作用于持久化队列)
+        assert sink.latest("gpu.utilization_pct") == (1999.0, 11_999)
+    finally:
+        sink.close()
+
+
+def test_small_queue_keeps_plain_tail_drop_no_decimation():
+    """小队列(< 降采样阈值)维持原尾丢语义,不触发降采样。"""
+    sink = _CollectingSink(queue_size=8, flush_interval_s=1000.0)
+    sink._stop.set()
+    sink._wake.set()
+    sink._thread.join(timeout=2)
+    try:
+        for i in range(40):
+            sink.push_metric(_mp(value=float(i), ts=i))
+        assert sink.downsampled_metrics == 0   # 小队列不降采样
+        assert sink.dropped_metrics > 0        # 纯尾丢
+    finally:
+        sink.close()
+
+
 def test_diag_overflow_counter_independent():
     sink = _CollectingSink(diag_queue_size=2, flush_interval_s=10.0)
     try:

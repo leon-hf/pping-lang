@@ -376,6 +376,7 @@ def build_app(
             "engine_index": engine_index,
             "sink": {
                 "dropped_metrics": sink.dropped_metrics,
+                "downsampled_metrics": getattr(sink, "downsampled_metrics", 0),
                 "dropped_diags": sink.dropped_diags,
                 "flush_errors": sink.flush_errors,
                 "queue_depth": sink.queue_depth,
