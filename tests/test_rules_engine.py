@@ -42,7 +42,7 @@ def db_with_metrics(tmp_path):
 
 
 def _push_window(sink, metric_name: str, values: list[float]):
-    base_ts = time.monotonic_ns()
+    base_ts = time.time_ns()
     for i, v in enumerate(values):
         sink.push_metric(MetricPoint(ts_ns=base_ts + i, name=metric_name, value=v))
 

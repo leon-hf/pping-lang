@@ -11,9 +11,9 @@
 """
 from __future__ import annotations
 
-import time
 from typing import TYPE_CHECKING, Any
 
+from pping_lang.clock import wall_ns
 from pping_lang.hardware import GPUPeak
 from pping_lang.metrics_catalog import M
 from pping_lang.sink.base import Sink
@@ -50,7 +50,7 @@ class VllmStatsCollector:
         scheduler_stats: SchedulerStats | None,
         iteration_stats: IterationStats | None,
     ) -> None:
-        ts = time.monotonic_ns()
+        ts = wall_ns()
         if scheduler_stats is not None:
             self._collect_scheduler(scheduler_stats, ts)
         if iteration_stats is not None:

@@ -49,7 +49,7 @@ def app_with_data(tmp_path):
     """
     db = tmp_path / "api.duckdb"
     sink = LocalSink(db_path=db, instance_id="test-inst", flush_interval_s=10.0)
-    base = time.monotonic_ns()
+    base = time.time_ns()
     # Push 50 GPU util points over the last 10s
     for i in range(50):
         sink.push_metric(MetricPoint(
@@ -235,7 +235,7 @@ def test_kernels_endpoint_with_data(tmp_path):
     """/api/kernels 打包 kernel 分解;class_shares 按占比降序。"""
     db = tmp_path / "k.duckdb"
     sink = LocalSink(db_path=db, instance_id="x", flush_interval_s=10.0)
-    base = time.monotonic_ns()
+    base = time.time_ns()
     for name, val in [
         (M.KERNEL_SHARE_ATTENTION_PCT, 42.0),
         (M.KERNEL_SHARE_GEMM_PCT, 31.0),
@@ -274,7 +274,7 @@ def test_kernels_endpoint_top_kernels_from_collector(tmp_path):
     sink = LocalSink(db_path=db, instance_id="x", flush_interval_s=10.0)
 
     class _FakeCupti:
-        last_snapshot_ts = time.monotonic_ns()
+        last_snapshot_ts = time.time_ns()
         last_window_ns = int(1.0 * 1e9)
 
         def top_kernels(self):
@@ -441,7 +441,7 @@ def test_kernels_trends_endpoint(tmp_path):
     """/api/kernels/trends 从内存环返回 kernel 指标时序(给实时趋势图)。"""
     db = tmp_path / "tr2.duckdb"
     sink = LocalSink(db_path=db, instance_id="x", flush_interval_s=10.0)
-    base = time.monotonic_ns()
+    base = time.time_ns()
     for i in range(5):
         ts = base - int((5 - i) * 2 * 1e9)
         sink.push_metric(MetricPoint(ts_ns=ts, name=M.KERNEL_GPU_BUSY_PCT, value=60.0 + i))

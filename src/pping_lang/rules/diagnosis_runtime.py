@@ -13,10 +13,10 @@ from __future__ import annotations
 import logging
 import os
 import sys
-import time
 from threading import Event, Thread
 from typing import Any
 
+from pping_lang.clock import wall_ns
 from pping_lang.metrics_catalog import M
 from pping_lang.rules.diagnosis_config import DiagnosisConfig
 from pping_lang.rules.diagnosis_engine import db_metric_fn, evaluate
@@ -129,7 +129,7 @@ class DiagnosisEngine:
         except Exception:
             logger.exception("[pping-lang] diagnosis: cannot open DuckDB")
             return 0
-        now_ns = time.monotonic_ns()
+        now_ns = wall_ns()  # 查询 cutoff + Diagnosis 落库 ts,须用 wall(跨进程/重启可比)
 
         op = compute_operating_point(
             self._fetch_token_points(conn, now_ns),

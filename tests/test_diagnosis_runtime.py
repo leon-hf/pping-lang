@@ -31,7 +31,7 @@ class _CaptureSink:
 def test_runtime_fires_d1c_via_analytical_regime_and_mfu(tmp_path):
     db = tmp_path / "diag.duckdb"
     sink = LocalSink(db_path=db, instance_id="t", flush_interval_s=10.0)
-    base = time.monotonic_ns()
+    base = time.time_ns()
     # prefill 批:每 step 500 tokens,50ms 间隔 → AI=500 > ridge(95/0.448≈212) → compute_bound;
     # 吞吐 ≈ 2*0.5e9*500/0.05/1e12 = 10 TFLOPS → MFU=10/95≈0.105 < 0.2
     for i in range(12):
