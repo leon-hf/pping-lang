@@ -110,24 +110,22 @@ def test_index_references_split_assets(client):
     assert "/dashboard.css" in body and "/dashboard.js" in body
 
 
-def test_rules_tab_has_crud_endpoints_referenced(client):
-    """规则 tab 的 JS 必须引用 CRUD + test 端点。"""
+def test_rules_tab_references_diagnosis_endpoints(client):
+    """规则 tab 改为读现役事实规则 + 改中心配置(不再是旧的自由 CRUD)。"""
     body = client.get("/").text + client.get("/dashboard.js").text  # UI 拆成 html+js
-    # All four CRUD verbs + test
-    assert "/api/rules/" in body  # PUT/DELETE/test patterns use this prefix
-    assert "method: 'PUT'" in body or "method:\"PUT\"" in body or "PUT" in body
-    assert "DELETE" in body
-    assert "/test" in body
+    assert "/api/diagnosis_rules" in body      # 读现役规则 + 配置
+    assert "/api/diagnosis_config" in body     # PUT 改中心 SLA/阈值
+    assert "saveConfig" in body
+    # 旧的逐条增删改不再出现在规则 tab
+    assert "newRule" not in body and "deleteRule" not in body
 
 
-def test_rules_tab_form_includes_all_required_fields(client):
-    """规则 form 必须能编辑所有规则字段。"""
+def test_rules_tab_config_editor_and_readonly_rules(client):
+    """规则 tab:中心配置可编辑 + 规则只读展示(事实名 / 署名推断 / 处方 / checks 分列)。"""
     body = client.get("/").text
-    for field in ["editing.id", "editing.name", "editing.severity",
-                  "editing.category", "editing.condition.metric",
-                  "editing.condition.op", "editing.condition.threshold",
-                  "editing.condition.window_seconds",
-                  "editing.condition.aggregation",
-                  "editing.message", "editing.suggestion",
-                  "editing.enabled"]:
-        assert field in body, f"rules form missing field {field}"
+    # 中心配置编辑器
+    assert "cfgDraft.workload_form" in body
+    assert "cfgKeys()" in body and "cfgLabels" in body
+    # 只读规则渲染
+    for token in ["r.name", "r.hypothesis", "r.suggestion", "r.checks", "kindLabel"]:
+        assert token in body, f"rules tab missing {token}"

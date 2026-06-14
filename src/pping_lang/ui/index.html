@@ -1181,149 +1181,86 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
         </template>
       </div>
 
+      <!-- 诊断配置:中心 SLA + 阈值(规则只引用,改这里热生效)-->
       <div class="rules-toolbar">
         <div class="section-head" style="margin: 0;">
-          <h2>规则<span class="count" x-text="`(${rules.length})`"></span></h2>
+          <h2>诊断配置</h2>
+          <span class="hint" x-text="active ? '改动即时热生效' : '引擎未运行,保存仅校验,重启后生效'"></span>
         </div>
-        <button class="btn primary" @click="newRule()">+ 新建规则</button>
+        <div style="display:flex; gap:8px;">
+          <button class="btn secondary" @click="resetConfig()" :disabled="!dirty()">还原</button>
+          <button class="btn primary" @click="saveConfig()" :disabled="!dirty() || saving" x-text="saving ? '保存中…' : '保存配置'"></button>
+        </div>
+      </div>
+      <div class="rules-list" style="margin-bottom: 32px;">
+        <div class="rule-row" style="display:block;">
+          <div class="form-grid">
+            <label>业务形态(SLA 预设)
+              <select x-model="cfgDraft.workload_form" @change="onFormChange()">
+                <template x-for="f in workloadForms" :key="f"><option :value="f" x-text="f"></option></template>
+              </select>
+            </label>
+            <template x-for="k in cfgKeys()" :key="k">
+              <label>
+                <span x-text="cfgLabels[k][0]"></span> <span class="hint-inline" x-text="'('+cfgLabels[k][1]+')'"></span>
+                <input type="number" step="any" x-model.number="cfgDraft[k]">
+              </label>
+            </template>
+          </div>
+        </div>
       </div>
 
+      <!-- 现役事实规则(引擎实跑;只读 —— 阈值改上方配置)-->
+      <div class="section-head" style="margin: 0;">
+        <h2>诊断规则<span class="count" x-text="`(${rules.length})`"></span></h2>
+        <span class="hint">名字=客观事实;根因/处方是署名推断。阈值引用上方中心配置。</span>
+      </div>
       <div class="rules-list">
         <template x-for="r in rules" :key="r.id">
-          <div class="rule-row" :class="{ disabled: !r.enabled }">
+          <div class="rule-row">
             <div class="rule-row-main">
               <div class="rule-row-head">
                 <h3 class="rule-row-name" x-text="r.name"></h3>
                 <span class="sev-pill" :class="r.severity" x-text="r.severity"></span>
-                <template x-if="r.is_default"><span class="badge default">default</span></template>
-                <template x-if="!r.enabled"><span class="badge disabled">disabled</span></template>
+                <span class="badge default" x-text="kindLabel[r.kind] || r.kind"></span>
+                <template x-if="r.requires_regime"><span class="badge" x-text="'仅 '+r.requires_regime"></span></template>
               </div>
               <div class="rule-row-meta">
                 <code x-text="r.id"></code>
-                <span class="meta-sep"></span>
-                <span class="cat" x-text="r.category"></span>
+                <template x-if="r.precondition.length">
+                  <span><span class="meta-sep"></span>前置:<span x-text="r.precondition.join(' / ')"></span></span>
+                </template>
+                <template x-if="r.checks.length > 1">
+                  <span><span class="meta-sep"></span><span x-text="r.match === 'any' ? '任一满足' : '全部满足'"></span></span>
+                </template>
               </div>
-              <div class="rule-row-cond">
-                <span class="cond-pill">
-                  <span x-text="r.condition.metric"></span>
-                  <span class="op" x-text="r.condition.op"></span>
-                  <span x-text="r.condition.threshold"></span>
-                </span>
-                <span class="cond-agg" x-text="`${r.condition.aggregation} over ${r.condition.window_seconds}s`"></span>
+              <div class="rule-row-cond" style="flex-wrap:wrap; gap:8px;">
+                <template x-for="(c, i) in r.checks" :key="i">
+                  <span class="cond-pill">
+                    <span x-text="c.aggregation + '(' + c.metric + ')'"></span>
+                    <span class="op" x-text="c.op"></span>
+                    <span x-text="c.threshold"></span>
+                    <template x-if="c.threshold_ref"><span class="cond-agg" x-text="'← '+c.threshold_ref"></span></template>
+                    <span class="cond-agg" x-text="c.window_seconds + 's'"></span>
+                  </span>
+                </template>
+                <template x-if="r.kind === 'classifier'"><span class="cond-agg">引擎按 Roofline 算术强度 vs 脊点判定(无阈值)</span></template>
               </div>
-              <template x-if="testResult[r.id]">
-                <div class="test-result"
-                     :class="testResult[r.id].data_available ? (testResult[r.id].would_fire ? '' : 'ok') : 'no-data'"
-                     style="margin-top: 12px;">
-                  <span x-text="formatTestResult(testResult[r.id])"></span>
+              <template x-if="r.hypothesis">
+                <div class="diag-sug" style="margin-top:10px;">
+                  <div class="diag-sug-label">推断(署名,非判决)</div>
+                  <div class="diag-sug-text" x-text="r.hypothesis"></div>
+                </div>
+              </template>
+              <template x-if="r.suggestion">
+                <div class="diag-sug" style="margin-top:8px;">
+                  <div class="diag-sug-label">建议</div>
+                  <div class="diag-sug-text" x-text="r.suggestion"></div>
                 </div>
               </template>
             </div>
-            <div class="rule-row-actions">
-              <button title="测试当前数据" @click="testRule(r.id)">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <polygon points="5 3 19 12 5 21 5 3"/>
-                </svg>
-              </button>
-              <button title="编辑" @click="editRule(r)">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>
-                </svg>
-              </button>
-              <button title="删除" class="danger" @click="deleteRule(r)">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <polyline points="3 6 5 6 21 6"/>
-                  <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
-                  <path d="M10 11v6M14 11v6"/>
-                  <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-                </svg>
-              </button>
-            </div>
           </div>
         </template>
-      </div>
-
-      <!-- Edit / new rule modal -->
-      <div x-show="editing" x-cloak class="modal-backdrop"
-           @click.self="cancelEdit()" @keydown.escape.window="editing && cancelEdit()">
-        <div class="modal rule-modal" role="dialog" aria-modal="true">
-          <div class="modal-head">
-            <h2 x-text="editingExisting ? `编辑规则: ${editing.id}` : '新建规则'"></h2>
-            <button class="modal-close" @click="cancelEdit()" aria-label="关闭">×</button>
-          </div>
-          <form @submit.prevent="save()" class="rule-modal-form">
-            <div class="modal-body">
-          <div class="form-grid">
-            <label>ID
-              <input type="text" x-model="editing.id" :disabled="editingExisting" required>
-            </label>
-            <label>名称
-              <input type="text" x-model="editing.name" required>
-            </label>
-            <label>类别
-              <input type="text" x-model="editing.category" required
-                     placeholder="throughput / latency / efficiency / ...">
-            </label>
-            <label>Severity
-              <select x-model="editing.severity">
-                <option value="info">info</option>
-                <option value="warning">warning</option>
-                <option value="critical">critical</option>
-              </select>
-            </label>
-            <label class="full">Metric
-              <select x-model="editing.condition.metric">
-                <template x-for="m in availableMetrics" :key="m">
-                  <option :value="m" x-text="m"></option>
-                </template>
-              </select>
-            </label>
-            <label>操作符
-              <select x-model="editing.condition.op">
-                <option value="<">&lt;</option>
-                <option value="<=">&le;</option>
-                <option value=">">&gt;</option>
-                <option value=">=">&ge;</option>
-                <option value="==">==</option>
-                <option value="!=">!=</option>
-              </select>
-            </label>
-            <label>阈值
-              <input type="number" step="any" x-model.number="editing.condition.threshold" required>
-            </label>
-            <label>窗口秒数
-              <input type="number" x-model.number="editing.condition.window_seconds" min="1" required>
-            </label>
-            <label>聚合方式
-              <select x-model="editing.condition.aggregation">
-                <option value="avg">avg</option>
-                <option value="p50">p50</option>
-                <option value="p95">p95</option>
-                <option value="p99">p99</option>
-                <option value="max">max</option>
-                <option value="min">min</option>
-                <option value="count">count</option>
-              </select>
-            </label>
-            <label class="full">消息模板
-              <textarea x-model="editing.message" rows="2" required></textarea>
-              <span class="hint">支持占位符 {value} {threshold} {window}（如 GPU 利用率 {value:.0f}% 低于 {threshold}）</span>
-            </label>
-            <label class="full">建议
-              <textarea x-model="editing.suggestion" rows="2" required></textarea>
-            </label>
-            <label style="flex-direction: row; align-items: center; gap: 8px;">
-              <input type="checkbox" x-model="editing.enabled">
-              <span style="color: var(--text); font-size: 13.5px; font-weight: 500;">启用</span>
-            </label>
-          </div>
-            </div>
-            <div class="form-actions">
-              <button type="button" class="btn secondary" @click="cancelEdit()">取消</button>
-              <button type="submit" class="btn primary">保存</button>
-            </div>
-          </form>
-        </div>
       </div>
 
       <div x-show="toast" x-cloak class="toast" :class="{ error: toastError }" x-text="toast"></div>
