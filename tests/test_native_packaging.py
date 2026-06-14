@@ -75,6 +75,36 @@ def test_cli_sets_env_and_execs(monkeypatch, tmp_path):
         os.environ.update(_snap)
 
 
+def test_extract_opt():
+    """--host VALUE / --host=VALUE / 缺失 / 末次优先。"""
+    assert cli._extract_opt(["serve", "m", "--host", "0.0.0.0", "--port", "8000"], "--host") == "0.0.0.0"
+    assert cli._extract_opt(["serve", "m", "--host=1.2.3.4"], "--host") == "1.2.3.4"
+    assert cli._extract_opt(["serve", "m"], "--host") is None
+    assert cli._extract_opt(["--host", "a", "--host", "b"], "--host") == "b"
+
+
+def test_cli_dashboard_host_follows_vllm_host(monkeypatch, tmp_path):
+    """`pping-vllm serve --host 0.0.0.0` → dashboard 也绑 0.0.0.0(容器里 docker 转发可达);
+    无 --host 时不动(用插件默认 127.0.0.1);显式 PPING_LANG_API_HOST 可覆盖(setdefault)。"""
+    captured: dict = {}
+    fake_vllm = tmp_path / "vllm"
+    fake_vllm.write_text("#!/bin/sh\n")
+    monkeypatch.setattr("pping_lang.native.builder.ensure_so",
+                        lambda *a, **k: ("/fake/so", "/fake/lib"))
+    monkeypatch.setattr(cli.shutil, "which", lambda _name: str(fake_vllm))
+    monkeypatch.setattr(cli.os, "execv", lambda path, argv: captured.update(argv=argv))
+    monkeypatch.setattr(cli.sys, "argv",
+                        ["pping-vllm", "serve", "m", "--host", "0.0.0.0", "--port", "8000"])
+    _snap = dict(os.environ)
+    os.environ.pop("PPING_LANG_API_HOST", None)
+    try:
+        cli.pping_vllm_main()
+        assert os.environ["PPING_LANG_API_HOST"] == "0.0.0.0"
+    finally:
+        os.environ.clear()
+        os.environ.update(_snap)
+
+
 def test_cli_degrades_when_build_fails(monkeypatch, tmp_path):
     """ensure_so 抛错 → 不崩,仍 exec vllm,且不设注入 env(降级)。"""
     captured: dict = {}
