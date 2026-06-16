@@ -23,7 +23,6 @@ from pping_lang.api.queries import (
     bucketed_quantiles,
     list_instances,
     open_conn,
-    recent_diagnoses,
     recent_metric_points,
 )
 from pping_lang.api.schemas import BenchStartIn, RuleIn, RuleTestRequest
@@ -966,15 +965,12 @@ def build_app(
         seconds: int = Query(300, ge=1, le=86400),
         limit: int = Query(200, ge=1, le=2000),
     ) -> dict[str, Any]:
+        # 内存诊断环:命中即可见,无 DuckDB 读、无刷盘滞后
         since_ns = wall_ns() - int(seconds * 1e9)
-        conn = open_conn(db_path)
         try:
-            try:
-                diags = recent_diagnoses(conn, since_ns, limit)
-            except Exception:
-                diags = []
-        finally:
-            conn.close()
+            diags = sink.recent_diagnoses(since_ns, limit)
+        except Exception:
+            diags = []
         return {"window_seconds": seconds, "diagnoses": diags}
 
     # === GET /api/diagnoses/history ===
@@ -982,14 +978,10 @@ def build_app(
     def diagnoses_history(
         limit: int = Query(500, ge=1, le=5000),
     ) -> dict[str, Any]:
-        conn = open_conn(db_path)
         try:
-            try:
-                diags = recent_diagnoses(conn, since_ns=0, limit=limit)
-            except Exception:
-                diags = []
-        finally:
-            conn.close()
+            diags = sink.recent_diagnoses(since_ns=0, limit=limit)
+        except Exception:
+            diags = []
         return {"diagnoses": diags}
 
     # === GET /api/diagnosis_rules — 现役事实规则 + 中心配置(阈值已按配置解析)===

@@ -66,32 +66,26 @@ def test_store_update_delete(tmp_path):
 
 
 def test_custom_rule_fires_through_same_engine(tmp_path):
-    """自定义规则和策展规则走同一 DiagnosisEngine:命中即报。"""
+    """自定义规则和策展规则走同一 DiagnosisEngine(读 sink 内存环):命中即报。"""
     db = tmp_path / "d.duckdb"
     sink = LocalSink(db_path=db, instance_id="x", flush_interval_s=10.0)
     base = time.time_ns()
     for i in range(20):   # GPU util 持续 5% < 自定义阈值 50
         sink.push_metric(MetricPoint(ts_ns=base + i, name=M.GPU_UTIL_PCT, value=5.0))
-    sink.close()
 
     store = CustomRuleStore(str(tmp_path / "c.json"))
     store.add(_rule(name="GPU 利用率偏低", metric="gpu.utilization_pct", op="<",
                     threshold=50.0, window_seconds=60))
 
-    class _Cap:
-        def __init__(self): self.diags = []
-        def push_metric(self, m): pass
-        def push_diagnosis(self, d): self.diags.append(d)
-        def close(self): pass
-
-    cap = _Cap()
-    eng = DiagnosisEngine(str(db), cap, default_config("custom"),
+    eng = DiagnosisEngine(sink, default_config("custom"),
                           custom_store=store, print_to_terminal=False)
     eng.evaluate_once()
-    ids = {d.rule_id for d in cap.diags}
+    diags = sink.recent_diagnoses(0, 100)
+    ids = {d["rule_id"] for d in diags}
     assert any(i.startswith("custom-") for i in ids)   # 自定义规则触发了
-    d = next(x for x in cap.diags if x.rule_id.startswith("custom-"))
-    assert d.message == "GPU 利用率偏低"                 # 事实名直接当 message
+    d = next(x for x in diags if x["rule_id"].startswith("custom-"))
+    assert d["message"] == "GPU 利用率偏低"               # 事实名直接当 message
+    sink.close()
 
 
 @pytest.fixture

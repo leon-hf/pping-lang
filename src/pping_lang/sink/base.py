@@ -40,7 +40,7 @@ import logging
 from abc import ABC, abstractmethod
 from collections import defaultdict, deque
 from threading import Event, Thread
-from typing import Final
+from typing import Any, Final
 
 from pping_lang.clock import wall_ns
 from pping_lang.types import Diagnosis, MetricPoint
@@ -65,6 +65,9 @@ DEFAULT_PERSIST_MAX_STRIDE: Final = 8
 # Decimation only kicks in for large production queues; smaller buffers keep
 # plain tail-drop (decimating a tiny queue gains nothing and surprises tests).
 DEFAULT_DECIMATE_MIN_QUEUE: Final = 1024
+# Live diagnosis read ring — diagnoses are rare (per-rule 30s suppression), so a
+# few hundred covers any dashboard window. Read by /api/diagnoses, not DuckDB.
+DEFAULT_DIAG_RING_SIZE: Final = 1000
 # Per-metric ring buffer for the live read path. 2000 points covers:
 #   - NVML at 10 Hz → 200 s of history
 #   - vLLM scheduler at 100 Hz → 20 s of history
@@ -83,9 +86,14 @@ class Sink(ABC):
         flush_interval_s: float = DEFAULT_FLUSH_INTERVAL_S,
         backpressure_threshold: float = DEFAULT_BACKPRESSURE_THRESHOLD,
         live_ring_size: int = DEFAULT_LIVE_RING_SIZE,
+        diag_ring_size: int = DEFAULT_DIAG_RING_SIZE,
     ) -> None:
         self._metric_q: deque[MetricPoint] = deque(maxlen=queue_size)
         self._diag_q: deque[Diagnosis] = deque(maxlen=diag_queue_size)
+        # Live diagnosis read ring (for /api/diagnoses) — appended synchronously
+        # on push_diagnosis, NEVER cleared on flush. Lets the dashboard see a
+        # diagnosis the instant it fires (no DuckDB roundtrip, no flush lag).
+        self._recent_diags: deque[Diagnosis] = deque(maxlen=diag_ring_size)
         self._flush_interval = flush_interval_s
         # Backpressure: wake the flush thread early when queue passes this mark
         self._flush_wakeup_threshold = max(1, int(queue_size * backpressure_threshold))
@@ -179,9 +187,34 @@ class Sink(ABC):
         return [(v, t) for v, t in list(dq) if t >= cutoff_ns]
 
     def push_diagnosis(self, d: Diagnosis) -> None:
+        # Live read ring first (synchronous, GIL-atomic) → /api/diagnoses sees it
+        # immediately. Then the flush queue for optional DuckDB durability.
+        self._recent_diags.append(d)
         if len(self._diag_q) == self._diag_q.maxlen:
             self._dropped_diags += 1
         self._diag_q.append(d)
+
+    def recent_diagnoses(self, since_ns: int, limit: int = 200) -> list[dict[str, Any]]:
+        """Recent diagnoses from the in-memory ring, newest first (no DuckDB).
+
+        Same dict shape as the DuckDB-backed query so /api/diagnoses is unchanged.
+        """
+        inst = getattr(self, "_instance_id", "")
+        out: list[dict[str, Any]] = []
+        for d in reversed(list(self._recent_diags)):   # newest first
+            if d.ts_ns < since_ns:
+                continue
+            out.append({
+                "ts_ns": d.ts_ns, "rule_id": d.rule_id, "severity": d.severity,
+                "triggered_value": d.triggered_value, "threshold": d.threshold,
+                "window_seconds": d.window_seconds, "message": d.message,
+                "suggestion": d.suggestion, "engine_idx": d.engine_idx,
+                "gpu_idx": getattr(d, "gpu_idx", -1), "instance_id": inst,
+                "context": d.context,
+            })
+            if len(out) >= limit:
+                break
+        return out
 
     # === Self-observability ===
 

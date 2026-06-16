@@ -50,6 +50,16 @@ class TeeSink:
     def queue_depth(self) -> int:
         return sum(s.queue_depth for s in self._children)
 
+    # Live read API — proxy to the first child (the local sink owns the rings).
+    def latest(self, name):
+        return self._children[0].latest(name)
+
+    def recent(self, name, seconds):
+        return self._children[0].recent(name, seconds)
+
+    def recent_diagnoses(self, since_ns, limit=200):
+        return self._children[0].recent_diagnoses(since_ns, limit)
+
     @property
     def children(self) -> list[Sink]:
         return list(self._children)
