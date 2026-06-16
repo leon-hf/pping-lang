@@ -1,12 +1,15 @@
 """DiagnosisEngine 运行时 —— 周期跑诊断规则,把触发的诊断推到 sink。
 
+**纯内存评估**(不碰 DuckDB):每个 eval 周期都读 sink 的内存环(`sink.recent`),
+不再每秒查 DuckDB(去掉了进程内分析库的读争用 + 刷盘滞后)。
+
 每个 eval 周期:
-  ① 从 DuckDB 取近窗 token 计数 → compute_operating_point → regime + 解析 MFU;
-  ② metric_fn = DuckDB 真聚合,但 `vllm.perf.mfu_ratio` 缺时用解析 MFU 覆盖(喂 D1c/D3a);
+  ① 从内存环取近窗 token 计数 → compute_operating_point → regime + 解析 MFU;
+  ② metric_fn = 内存环聚合(_agg_in_memory),`vllm.perf.mfu_ratio` 缺时用解析 MFU 覆盖(喂 D1c/D3a);
   ③ evaluate(metric_fn, config, 规则, regime) → findings;
   ④ findings → Diagnosis(事实进 message,署名根因/处方进 suggestion),带抑制窗口。
 
-与旧 RuleEngine 并存无碍(都往同一 sink 推 Diagnosis,/api/diagnoses 照常服务)。
+诊断推到 sink 后进 sink 的内存诊断环 → /api/diagnoses 即时可见(无刷盘滞后)。
 """
 from __future__ import annotations
 
@@ -19,8 +22,9 @@ from typing import Any
 from pping_lang.clock import wall_ns
 from pping_lang.metrics_catalog import M
 from pping_lang.rules.diagnosis_config import DiagnosisConfig
-from pping_lang.rules.diagnosis_engine import db_metric_fn, evaluate
+from pping_lang.rules.diagnosis_engine import evaluate
 from pping_lang.rules.diagnosis_rules import DIAGNOSIS_RULES
+from pping_lang.rules.engine import _agg_in_memory
 from pping_lang.rules.operating_point import compute_operating_point
 from pping_lang.sink.base import Sink
 from pping_lang.types import Diagnosis
@@ -32,7 +36,6 @@ _GLYPH = {"info": "i", "warning": "!", "critical": "X"}
 class DiagnosisEngine:
     def __init__(
         self,
-        db_path: str,
         sink: Sink,
         config: DiagnosisConfig,
         *,
@@ -46,7 +49,6 @@ class DiagnosisEngine:
         print_to_terminal: bool | None = None,
         custom_store: Any = None,
     ) -> None:
-        self._db_path = db_path
         self._sink = sink
         self._cfg = config
         # 自定义规则(用户在 UI 建的)与策展规则同一评估器评。None = 没接 store。
@@ -60,7 +62,6 @@ class DiagnosisEngine:
         self._suppression_ns = int(suppression_window_s * 1e9)
         self._stop = Event()
         self._thread: Thread | None = None
-        self._conn: Any = None
         self._last_fire_ns: dict[str, int] = {}
         if print_to_terminal is None:
             print_to_terminal = os.environ.get("PPING_LANG_DIAGNOSIS_PRINT", "1") != "0"
@@ -79,12 +80,6 @@ class DiagnosisEngine:
         self._stop.set()
         self._thread.join(timeout=self._eval_interval * 2)
         self._thread = None
-        if self._conn is not None:
-            try:
-                self._conn.close()
-            except Exception:
-                pass
-            self._conn = None
 
     def evaluate_once(self) -> int:
         return self._evaluate_all()
@@ -106,54 +101,33 @@ class DiagnosisEngine:
             except Exception:
                 logger.exception("[pping-lang] diagnosis eval pass failed")
 
-    def _ensure_conn(self) -> Any:
-        if self._conn is None:
-            import duckdb
-
-            from pping_lang.sink.local import SCHEMA_STATEMENTS
-            self._conn = duckdb.connect(self._db_path)
-            for stmt in SCHEMA_STATEMENTS:
-                try:
-                    self._conn.execute(stmt)
-                except Exception:
-                    pass
-        return self._conn
-
-    def _fetch_token_points(self, conn: Any, now_ns: int, window_s: int = 60) -> list[tuple[float, int]]:
-        cutoff = now_ns - int(window_s * 1e9)
-        try:
-            rows = conn.execute(
-                "SELECT value, ts_ns FROM metrics WHERE metric_name IN (?, ?) AND ts_ns >= ?",
-                [M.VLLM_ITER_GEN_TOKENS, M.VLLM_ITER_PROMPT_TOKENS, cutoff],
-            ).fetchall()
-        except Exception:
-            return []
+    def _fetch_token_points(self, window_s: int = 60) -> list[tuple[float, int]]:
+        """近窗 prefill+decode token 计数(从内存环),按 ts 合并 → 操作点输入。"""
         by_ts: dict[int, float] = {}
-        for value, ts in rows:
-            by_ts[int(ts)] = by_ts.get(int(ts), 0.0) + float(value)
+        for name in (M.VLLM_ITER_GEN_TOKENS, M.VLLM_ITER_PROMPT_TOKENS):
+            for value, ts in self._sink.recent(name, window_s):
+                by_ts[int(ts)] = by_ts.get(int(ts), 0.0) + float(value)
         return [(v, ts) for ts, v in by_ts.items()]
 
     def _evaluate_all(self) -> int:
         self.eval_count += 1
-        try:
-            conn = self._ensure_conn()
-        except Exception:
-            logger.exception("[pping-lang] diagnosis: cannot open DuckDB")
-            return 0
-        now_ns = wall_ns()  # 查询 cutoff + Diagnosis 落库 ts,须用 wall(跨进程/重启可比)
+        now_ns = wall_ns()  # Diagnosis 落库 ts,用 wall(跨进程/重启可比)
 
         op = compute_operating_point(
-            self._fetch_token_points(conn, now_ns),
+            self._fetch_token_points(),
             self._params, self._dtype_b, self._peak_c, self._peak_bw,
         )
-        base_fn = db_metric_fn(conn, now_ns)
 
         def metric_fn(metric: str, window_s: int, agg: str):
-            v = base_fn(metric, window_s, agg)
             # perf_stats 死时(vLLM 0.21)用解析 MFU 覆盖,喂 D1c/D3a
-            if metric == M.VLLM_PERF_MFU_RATIO and v is None:
-                return op.mfu
-            return v
+            if metric == M.VLLM_PERF_MFU_RATIO:
+                pts = self._sink.recent(metric, window_s)
+                v = _agg_in_memory([val for val, _ in pts], agg) if pts else None
+                return v if v is not None else op.mfu
+            pts = self._sink.recent(metric, window_s)
+            if not pts:
+                return None
+            return _agg_in_memory([val for val, _ in pts], agg)
 
         # 策展规则 + 用户自定义规则,一起评(同一评估器、同一展示路径)
         rules = DIAGNOSIS_RULES

@@ -276,7 +276,7 @@ def test_diagnosis_config_hot_reload_into_running_engine(tmp_path):
     from pping_lang.rules.diagnosis_runtime import DiagnosisEngine
     db = tmp_path / "dr.duckdb"
     sink = LocalSink(db_path=db, instance_id="x", flush_interval_s=10.0)
-    eng = DiagnosisEngine(str(db), sink, default_config("custom"), print_to_terminal=False)
+    eng = DiagnosisEngine(sink, default_config("custom"), print_to_terminal=False)
     app = build_app(db_path=str(db), instance_id="x", engine_index=0,
                     sink=sink, rule_store=RuleStore(), diag_engine=eng)
     client = TestClient(app)

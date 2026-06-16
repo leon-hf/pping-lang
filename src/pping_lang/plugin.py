@@ -304,7 +304,7 @@ class PpingLangStatLogger(StatLoggerBase):
             )
             self._custom_store = CustomRuleStore(_custom_path)
             self._diag_engine = DiagnosisEngine(
-                db_path=str(db_path), sink=self._sink, config=load_config(),
+                sink=self._sink, config=load_config(),
                 params=_params, dtype_bytes=_dtb,
                 peak_compute_tflops=(gpu_peak.bf16_tflops if gpu_peak else None),
                 peak_mem_bw_tbs=(gpu_peak.mem_bw_gbs / 1000.0 if gpu_peak else None),
