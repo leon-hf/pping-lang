@@ -1240,7 +1240,9 @@ class CtypesPcSamplingLib:
     def overhead(self) -> tuple[float, int, int]:
         if self._lib is None:
             return (0.0, 0, 0)
-        gd = ctypes.c_double(); dr = ctypes.c_ulonglong(); hf = ctypes.c_ulonglong()
+        gd = ctypes.c_double()
+        dr = ctypes.c_ulonglong()
+        hf = ctypes.c_ulonglong()
         self._lib.pping_pcs_overhead(ctypes.byref(gd), ctypes.byref(dr), ctypes.byref(hf))
         return (gd.value, int(dr.value), int(hf.value))
 

@@ -89,6 +89,14 @@ ignore = [
   "UP038",  # isinstance tuple — both syntaxes equivalent
 ]
 
+# FastAPI 的 Query/Path/Body/Depends 等按设计就要在参数默认值里调用(依赖注入标记),
+# 不是 B008 针对的「可变默认值」陷阱 → 列入 immutable-calls 允许。
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = [
+  "fastapi.Body", "fastapi.Query", "fastapi.Path", "fastapi.Depends",
+  "fastapi.Header", "fastapi.Cookie", "fastapi.Form", "fastapi.File", "fastapi.Security",
+]
+
 [tool.mypy]
 python_version = "3.10"
 strict = false
