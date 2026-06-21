@@ -4,7 +4,7 @@
 - `metric_fn(metric, window_s, agg) -> float | None` 提供某指标的窗口聚合值(没数据返 None);
 - 返回触发的 `DiagFinding`(事实 + 署名的根因/处方)。
 
-好处:同一套逻辑既能合成数据单测,又能喂真实指标(DuckDB / 远端 API)跑验证,
+好处:同一套逻辑既能合成数据单测,又能喂真实指标(内存环 / JSONL 扫描)跑验证,
 引擎本身不依赖 GPU/vLLM。两阶段求值实现"前置守卫":
   ① 先算每条规则的 `holds`(checks 是否成立);
   ② 再判 active = holds 且(无前置或任一前置 holds)且(无 requires_regime 或 regime 匹配)。
@@ -107,24 +107,3 @@ def evaluate(
             values=values[r.id], hypothesis=r.hypothesis, suggestion=r.suggestion,
         ))
     return findings
-
-
-def db_metric_fn(conn, now_ns: int) -> MetricFn:
-    """从 DuckDB metrics 表构造 metric_fn(供 plugin 内实跑用)。"""
-    from pping_lang.rules.engine import _AGG_TO_SQL
-
-    def fn(metric: str, window_s: int, agg: str) -> float | None:
-        agg_sql = _AGG_TO_SQL.get(agg)
-        if agg_sql is None:
-            return None
-        cutoff = now_ns - int(window_s * 1e9)
-        try:
-            row = conn.execute(
-                f"SELECT {agg_sql} FROM metrics WHERE metric_name = ? AND ts_ns >= ?",
-                [metric, cutoff],
-            ).fetchone()
-        except Exception:
-            return None
-        return None if row is None or row[0] is None else float(row[0])
-
-    return fn

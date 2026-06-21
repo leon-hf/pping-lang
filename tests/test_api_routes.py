@@ -30,7 +30,6 @@ def empty_app(tmp_path):
         engine_index=3,
         sink=sink2,
         rule_store=RuleStore(),
-        rule_engine=None,
         nvml=None,
     )
     yield TestClient(app), db, sink2

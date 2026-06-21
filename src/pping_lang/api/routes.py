@@ -4,7 +4,10 @@
 
 Day 6: GET 端点（health, metrics, diagnoses, rules, instances）+ /  dashboard
 Day 8: POST/PUT/DELETE/test 端点 — 规则 CRUD via RuleStore
-Day 9: 规则热加载（store 改动让 engine 即时看到）— 见 RuleEngine
+Day 9: 规则热加载（store 改动让 DiagnosisEngine 下一轮即看到）
+
+读路径:实时短窗走 Sink 内存环;长窗/历史走 JsonlStore(扫 metrics.jsonl);
+bench_runs(可变行)仍用 DuckDB。
 """
 from __future__ import annotations
 
@@ -19,28 +22,28 @@ from fastapi import Body, FastAPI, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 
-from pping_lang.api.queries import (
-    bucketed_quantiles,
-    list_instances,
-    open_conn,
-    recent_metric_points,
-)
+from pping_lang.api.queries import open_conn  # bench_runs only (mutable rows → DuckDB)
 from pping_lang.api.schemas import BenchStartIn, RuleIn, RuleTestRequest
 from pping_lang.bench import store as bench_store
-from pping_lang.clock import wall_ns
-from pping_lang.rules.diagnosis_config import (
-    WORKLOAD_FORMS,
-    from_dict as diag_config_from_dict,
-    to_dict as diag_config_to_dict,
-)
-from pping_lang.rules.diagnosis_rules import DIAGNOSIS_RULES
 from pping_lang.bench.client import OpenAIStreamClient
 from pping_lang.bench.runner import run_static
 from pping_lang.bench.scenarios.schema import SLO, StaticScenario
+from pping_lang.clock import wall_ns
 from pping_lang.hardware import GPUPeak
 from pping_lang.metrics_catalog import ALLOWED_METRICS, M
-from pping_lang.rules.engine import evaluate_condition_against_db
+from pping_lang.rules.diagnosis_config import (
+    WORKLOAD_FORMS,
+)
+from pping_lang.rules.diagnosis_config import (
+    from_dict as diag_config_from_dict,
+)
+from pping_lang.rules.diagnosis_config import (
+    to_dict as diag_config_to_dict,
+)
+from pping_lang.rules.diagnosis_rules import DIAGNOSIS_RULES
+from pping_lang.rules.engine import _OP_TO_FN
 from pping_lang.rules.schema import Condition, Rule
+from pping_lang.sink.metric_log import JsonlStore
 
 _UI_DIR = Path(__file__).parent.parent / "ui"
 _UI_INDEX = _UI_DIR / "index.html"
@@ -301,7 +304,6 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     from pping_lang.collector.cupti import CuptiKernelCollector
     from pping_lang.collector.nvml import NvmlSampler
-    from pping_lang.rules.engine import RuleEngine
     from pping_lang.rules.store import RuleStore
     from pping_lang.sink.base import Sink
 
@@ -313,7 +315,6 @@ def build_app(
     engine_index: int,
     sink: Sink,
     rule_store: RuleStore,
-    rule_engine: RuleEngine | None = None,
     diag_engine: Any = None,
     custom_store: Any = None,
     nvml: NvmlSampler | None = None,
@@ -345,6 +346,9 @@ def build_app(
     # vendor 资源本地化:Alpine/Chart 不再走 CDN,离线/air-gapped GPU 机也能渲染
     ui_vendor_alpine = _read_ui("vendor/alpine.min.js")
     ui_vendor_chart = _read_ui("vendor/chart.umd.min.js")
+
+    # 冷/长窗读端:扫 LocalSink 落的 JSONL(与 sink 共享同目录文件)。实时短窗走内存环。
+    metric_store = JsonlStore(Path(db_path).parent, instance_id)
 
     # === GET / — dashboard ===
     @app.get("/", response_class=HTMLResponse)
@@ -393,9 +397,9 @@ def build_app(
                 "num_gpus": nvml.num_gpus if nvml else 0,
             },
             "rules": {
-                "num": rule_engine.num_rules if rule_engine else len(rule_store.list()),
-                "eval_count": rule_engine.eval_count if rule_engine else 0,
-                "fire_count": rule_engine.fire_count if rule_engine else 0,
+                "num": len(rule_store.list()),
+                "eval_count": getattr(diag_engine, "eval_count", 0) if diag_engine else 0,
+                "fire_count": getattr(diag_engine, "fire_count", 0) if diag_engine else 0,
             },
         }
 
@@ -463,6 +467,9 @@ def build_app(
             "vllm_version": vllm_ver,
             "model": model,
             "served_model_name": served_model_name,
+            # vLLM OpenAI 端点(从启动 cmdline 解析真实 --host/--port,0.0.0.0→127.0.0.1)。
+            # 压测在服务端跑,前端用这个预填 endpoint,不靠 :8000 的猜测(端口被改过就会猜错)。
+            "vllm_endpoint": _vllm_base_url(),
             "gpu_name": name,
             "gpu_count": count,
             "gpu_peak": peak,
@@ -511,8 +518,8 @@ def build_app(
         if name not in ALLOWED_METRICS:
             raise HTTPException(422, f"unknown metric {name!r}")
         # Short-window reads (the dashboard's poll path) go straight to the
-        # in-memory ring buffer — no DuckDB roundtrip, no checkpoint wait.
-        # Long-window reads still go to DuckDB since the ring isn't sized for it.
+        # in-memory ring buffer — no roundtrip, no flush wait. Long-window reads
+        # scan the JSONL persistence (cold path) since the ring isn't sized for it.
         if seconds <= 60:
             ring = sink.recent(name, seconds)
             points = [
@@ -521,14 +528,10 @@ def build_app(
             ]
             return {"name": name, "seconds": seconds, "points": points}
         since_ns = wall_ns() - int(seconds * 1e9)
-        conn = open_conn(db_path)
         try:
-            try:
-                points = recent_metric_points(conn, name, since_ns, limit)
-            except Exception:
-                points = []
-        finally:
-            conn.close()
+            points = metric_store.recent_metric_points(name, since_ns, limit)
+        except Exception:
+            points = []
         return {"name": name, "seconds": seconds, "points": points}
 
     # === GET /api/metrics/snapshot ===
@@ -825,17 +828,14 @@ def build_app(
                 tpot_source = "itl"
             e2e = _bucketed_from_memory(M.VLLM_REQ_E2E_LATENCY_MS, since_ns, now_ns, buckets)
         else:
-            conn = open_conn(db_path)
-            try:
-                ttft = bucketed_quantiles(conn, M.VLLM_REQ_TTFT_MS, since_ns, now_ns, buckets)
-                tpot = bucketed_quantiles(conn, M.VLLM_REQ_TPOT_MS, since_ns, now_ns, buckets)
-                tpot_source = "tpot"
-                if not tpot:
-                    tpot = bucketed_quantiles(conn, M.VLLM_REQ_ITL_MS, since_ns, now_ns, buckets)
-                    tpot_source = "itl"
-                e2e = bucketed_quantiles(conn, M.VLLM_REQ_E2E_LATENCY_MS, since_ns, now_ns, buckets)
-            finally:
-                conn.close()
+            # >900s: genuine historical replay — scan the JSONL persistence (cold).
+            ttft = metric_store.bucketed_quantiles(M.VLLM_REQ_TTFT_MS, since_ns, now_ns, buckets)
+            tpot = metric_store.bucketed_quantiles(M.VLLM_REQ_TPOT_MS, since_ns, now_ns, buckets)
+            tpot_source = "tpot"
+            if not tpot:
+                tpot = metric_store.bucketed_quantiles(M.VLLM_REQ_ITL_MS, since_ns, now_ns, buckets)
+                tpot_source = "itl"
+            e2e = metric_store.bucketed_quantiles(M.VLLM_REQ_E2E_LATENCY_MS, since_ns, now_ns, buckets)
         return {
             "seconds": seconds,
             "buckets": buckets,
@@ -1136,17 +1136,18 @@ def build_app(
             rule = rule_store.get(rule_id)
             if rule is None:
                 raise HTTPException(404, f"rule {rule_id!r} not found")
-        conn = open_conn(db_path)
         try:
-            try:
-                fired, value = evaluate_condition_against_db(
-                    conn, rule.condition, wall_ns(),
-                )
-            except Exception as e:
-                logger.exception("test eval failed for %s", rule_id)
-                raise HTTPException(500, f"eval failed: {e}")
-        finally:
-            conn.close()
+            cond = rule.condition
+            cutoff = wall_ns() - int(cond.window_seconds * 1e9)
+            value = metric_store.aggregate_metric(cond.metric, cutoff, cond.aggregation)
+            fired = (
+                _OP_TO_FN[cond.op](value, cond.threshold)
+                if value is not None and cond.op in _OP_TO_FN
+                else None
+            )
+        except Exception as e:
+            logger.exception("test eval failed for %s", rule_id)
+            raise HTTPException(500, f"eval failed: {e}")
         return {
             "rule_id": rule.id,
             "would_fire": fired,
@@ -1161,14 +1162,10 @@ def build_app(
     # === GET /api/instances ===
     @app.get("/api/instances")
     def instances() -> dict[str, list[str]]:
-        conn = open_conn(db_path)
         try:
-            try:
-                ids = list_instances(conn)
-            except Exception:
-                ids = []
-        finally:
-            conn.close()
+            ids = metric_store.list_instances()
+        except Exception:
+            ids = []
         return {"instances": ids}
 
     # ─────────────────────────────────────────────────────────────────────

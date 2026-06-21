@@ -7,7 +7,8 @@ Day 3 status：完整数据流通了。
 - GPU peak 表查找成功则计算 MFU / mem_bw_util_ratio
 
 环境变量：
-- PPING_LANG_DB_PATH              默认 ~/.pping-lang/local.duckdb
+- PPING_LANG_DB_PATH              落盘目录基准(取其父目录):指标/诊断写 JSONL,
+                                  bench_runs 仍用同目录 .duckdb。默认 ~/.pping-lang/local.duckdb
 - PPING_LANG_INSTANCE_ID          默认 local-{engine_index}
 - PPING_LANG_NVML_INTERVAL_S      默认 0.1（NVML 采样间隔，秒）
 - PPING_LANG_DISABLE_NVML         设为 1 关闭 NVML 采样
@@ -18,7 +19,9 @@ Day 3 status：完整数据流通了。
 - PPING_LANG_ENABLE_CUPTI         设为 1 开启 CUPTI Activity kernel 级采集（默认关；仅 Linux x86_64/aarch64;PCS 未开时才用）
 - PPING_LANG_CUPTI_ROLLUP_S       默认 1.0（CUPTI kernel 指标 roll-up 间隔，秒）
 - PPING_LANG_CUPTI_TOP_N          默认 100（每窗保留的 per-kernel 明细行数上限）
-- PPING_LANG_FLUSH_INTERVAL_S     默认 5.0（Sink → DuckDB 批量写间隔）
+- PPING_LANG_FLUSH_INTERVAL_S     默认 5.0（Sink → JSONL 批量追加间隔）
+- PPING_LANG_RETENTION_SECONDS    默认 7200（JSONL 保存时间窗口;时间为主、磁盘兜底,
+                                  洪流下窗口缩水但磁盘有界,见 sink/metric_log.AppendLog）
 - PPING_LANG_RULE_EVAL_INTERVAL_S 默认 1.0
 - PPING_LANG_DISABLE_RULES        设为 1 关闭规则引擎
 - PPING_LANG_RULES_PATH           可选 JSON 文件覆盖默认规则
@@ -46,10 +49,10 @@ from pping_lang.collector.nvml import NvmlSampler, detect_first_gpu_name
 from pping_lang.collector.vllm_stats import VllmStatsCollector
 from pping_lang.hardware import GPUPeak, lookup_peak
 from pping_lang.metrics_catalog import M
-from pping_lang.rules.engine import RuleEngine
 from pping_lang.rules.store import RuleStore
 from pping_lang.sink.base import Sink
 from pping_lang.sink.local import LocalSink
+from pping_lang.sink.metric_log import DEFAULT_RETENTION_S
 from pping_lang.sink.tee import TeeSink
 from pping_lang.types import MetricPoint
 
@@ -85,9 +88,10 @@ DEFAULT_DB_PATH = Path.home() / ".pping-lang" / "local.duckdb"
 
 # Env-var prefixes exposed in /api/system. Anything else is filtered out to
 # avoid leaking shell history / unrelated process env / accidental secrets.
+# 注意:不收 PPING_LANG_* —— 那是插件自己的配置旋钮(DB 路径/端口/采样间隔/feature flag),
+# 不是 vLLM workload 的上下文,对看面板的人是噪声(启动信息只展示 vLLM/模型/GPU/CUDA 环境)。
 _ENV_PREFIXES_INCLUDED = (
     "VLLM_",
-    "PPING_LANG_",
     "HF_",
     "CUDA_",
     "TORCH_",
@@ -146,7 +150,6 @@ class PpingLangStatLogger(StatLoggerBase):
         self._nvml: NvmlSampler | None = None
         self._cupti: CuptiKernelCollector | None = None
         self._collector: VllmStatsCollector | None = None
-        self._rule_engine: RuleEngine | None = None
         self._diag_engine = None  # DiagnosisEngine(fact-rule 决策引擎,见 rules/diagnosis_runtime)
         self._custom_store = None  # CustomRuleStore(用户自定义规则,与策展规则同引擎评)
         self._api: ApiServer | None = None
@@ -172,9 +175,13 @@ class PpingLangStatLogger(StatLoggerBase):
         queue_size = int(
             os.environ.get("PPING_LANG_SINK_QUEUE_SIZE", "65536")
         )
+        retention_s = float(
+            os.environ.get("PPING_LANG_RETENTION_SECONDS", str(DEFAULT_RETENTION_S))
+        )
         local_sink = LocalSink(
             db_path=db_path,
             instance_id=instance_id,
+            retention_s=retention_s,
             flush_interval_s=flush_interval,
             queue_size=queue_size,
         )
@@ -275,22 +282,14 @@ class PpingLangStatLogger(StatLoggerBase):
         eval_interval = float(
             os.environ.get("PPING_LANG_RULE_EVAL_INTERVAL_S", "1.0")
         )
-        # 6a) 旧扁平 RuleEngine —— 对象保留(供 /api/rules CRUD + /test 与 e2e 用),
-        #     但线程默认不跑(已被 DiagnosisEngine 取代);PPING_LANG_LEGACY_RULES=1 可重新启用。
-        self._rule_engine = RuleEngine(
-            db_path=str(db_path),
-            rules=self._rule_store,
-            sink=self._sink,
-            engine_index=self.engine_index,
-            eval_interval_s=eval_interval,
-        )
-        if os.environ.get("PPING_LANG_LEGACY_RULES") == "1":
-            self._rule_engine.start()
-            atexit.register(self._rule_engine.stop)
-        # 6b) DiagnosisEngine —— 事实规则决策引擎,现役诊断器(默认开)。
+        # 旧扁平 RuleEngine(周期查 DuckDB)已随「插件去 DuckDB」退役;现役诊断器是下面
+        # 的 DiagnosisEngine(纯内存环评估)。/api/rules CRUD 直接走 RuleStore。
+        # DiagnosisEngine —— 事实规则决策引擎,现役诊断器(默认开)。
         if os.environ.get("PPING_LANG_DISABLE_RULES") != "1":
             from pping_lang.api.routes import (  # noqa: PLC0415
-                _DTYPE_BYTES, _estimate_params, _extract_arch,
+                _DTYPE_BYTES,
+                _estimate_params,
+                _extract_arch,
             )
             from pping_lang.rules.custom_store import CustomRuleStore  # noqa: PLC0415
             from pping_lang.rules.diagnosis_config import load_config  # noqa: PLC0415
@@ -334,7 +333,6 @@ class PpingLangStatLogger(StatLoggerBase):
                 engine_index=self.engine_index,
                 sink=self._sink,
                 rule_store=self._rule_store,
-                rule_engine=self._rule_engine,
                 diag_engine=self._diag_engine,
                 custom_store=self._custom_store,
                 nvml=self._nvml,
@@ -357,7 +355,7 @@ class PpingLangStatLogger(StatLoggerBase):
             self._nvml.enabled if self._nvml else False,
             self._cupti.enabled if self._cupti else False,
             gpu_peak,
-            self._rule_engine.num_rules if self._rule_engine else 0,
+            len(self._rule_store.list()) if self._rule_store else 0,
             self._api.url if self._api else "disabled",
         )
 
