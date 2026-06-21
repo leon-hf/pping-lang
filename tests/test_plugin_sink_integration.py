@@ -1,11 +1,11 @@
-"""Plugin × Sink 端到端 — env-var 配置 + DuckDB 内容验证。"""
+"""Plugin × Sink 端到端 — env-var 配置 + JSONL 落盘内容验证。"""
 from __future__ import annotations
 
-import duckdb
 import pytest
 
 from pping_lang.metrics_catalog import M
 from pping_lang.plugin import PpingLangStatLogger
+from pping_lang.sink.metric_log import JsonlStore
 
 
 @pytest.fixture(autouse=True)
@@ -27,16 +27,12 @@ def test_record_pushes_overhead_metric(tmp_path, monkeypatch):
         plugin.record(None, None)
     plugin._sink.close()
 
-    conn = duckdb.connect(str(db))
-    rows = conn.execute(
-        "SELECT metric_name, engine_idx, instance_id FROM metrics WHERE metric_name = ?",
-        [M.PPING_LANG_RECORD_OVERHEAD_US],
-    ).fetchall()
-    conn.close()
+    store = JsonlStore(tmp_path, "plugin-test")
+    rows = store.recent_metric_points(M.PPING_LANG_RECORD_OVERHEAD_US, since_ns=0, limit=100)
     assert len(rows) == 5
-    assert all(r[0] == M.PPING_LANG_RECORD_OVERHEAD_US for r in rows)
-    assert all(r[1] == 3 for r in rows)
-    assert all(r[2] == "plugin-test" for r in rows)
+    assert all(r["engine_idx"] == 3 for r in rows)
+    # instance_id 不逐行存(嵌入模式每进程一个),由 store 统一报告
+    assert store.list_instances() == ["plugin-test"]
 
 
 def test_record_noop_before_log_engine_initialized():
@@ -57,10 +53,8 @@ def test_default_instance_id_uses_engine_index(tmp_path, monkeypatch):
     plugin.record(None, None)
     plugin._sink.close()
 
-    conn = duckdb.connect(str(db))
-    instance = conn.execute("SELECT DISTINCT instance_id FROM metrics").fetchone()[0]
-    conn.close()
-    assert instance == "local-5"
+    # 默认 instance_id 由 engine_index 推出(local-<idx>);sink 用它构造,API 经 store 报告
+    assert plugin._sink._instance_id == "local-5"
 
 
 def test_overhead_value_is_nonnegative(tmp_path, monkeypatch):
@@ -73,13 +67,9 @@ def test_overhead_value_is_nonnegative(tmp_path, monkeypatch):
     plugin.record(None, None)
     plugin._sink.close()
 
-    conn = duckdb.connect(str(db))
-    value = conn.execute(
-        "SELECT value FROM metrics WHERE metric_name = ?",
-        [M.PPING_LANG_RECORD_OVERHEAD_US],
-    ).fetchone()[0]
-    conn.close()
-    assert value >= 0.0
+    store = JsonlStore(tmp_path, "t")
+    rows = store.recent_metric_points(M.PPING_LANG_RECORD_OVERHEAD_US, since_ns=0, limit=10)
+    assert rows and rows[0]["value"] >= 0.0
 
 
 def test_cupti_disabled_by_default(tmp_path, monkeypatch):

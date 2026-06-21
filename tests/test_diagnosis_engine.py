@@ -104,23 +104,20 @@ def test_missing_metric_no_fire():
     assert evaluate(_fn({}), CFG) == []   # 全无数据 → 啥都不报(优雅)
 
 
-def test_db_path_realistic_scenario(tmp_path):
-    """端到端:真 DuckDB(LocalSink 灌真实场景点)→ db_metric_fn(真 SQL 聚合)→ evaluate。
+def test_jsonl_store_realistic_scenario(tmp_path):
+    """端到端:真 JSONL(LocalSink 灌真实场景点)→ JsonlStore 扫描聚合 → evaluate。
 
     场景 = 过载服务器:长尾 TTFT + 长 prompt + 队列堆积 + KV 满并抢占;
     MFU/MBU 无数据(v0.21 perf_stats 缺)→ 相关规则优雅不报、不乱报。
     """
     import time
 
-    import duckdb
-
     from pping_lang.metrics_catalog import M
-    from pping_lang.rules.diagnosis_engine import db_metric_fn
     from pping_lang.sink.local import LocalSink
+    from pping_lang.sink.metric_log import JsonlStore
     from pping_lang.types import MetricPoint
 
-    db = tmp_path / "diag.duckdb"
-    sink = LocalSink(db_path=db, instance_id="t", flush_interval_s=10.0)
+    sink = LocalSink(db_path=tmp_path / "diag.duckdb", instance_id="t", flush_interval_s=10.0)
     base = time.monotonic_ns()
 
     def push(name, vals):
@@ -134,9 +131,11 @@ def test_db_path_realistic_scenario(tmp_path):
     push(M.VLLM_ITER_PREEMPTED_REQS, [1, 2, 1] + [0] * 7)           # sum 4 > 0
     sink.close()
 
-    conn = duckdb.connect(str(db))
+    store = JsonlStore(tmp_path, "t")
     now = base + 5 * 10**9   # 5s 后:所有点都在窗口内
-    fn = db_metric_fn(conn, now)
+
+    def fn(metric: str, window_s: int, agg: str):
+        return store.aggregate_metric(metric, now - int(window_s * 1e9), agg)
 
     # 默认 SLA(ttft 2000):S1 不触发(p99~1050<2000),尾部/KV/长输入/队列仍触发(前置 S5)
     default_ids = {f.rule_id for f in evaluate(fn, default_config("custom"))}
@@ -148,7 +147,6 @@ def test_db_path_realistic_scenario(tmp_path):
     assert {"S1", "S4", "S5", "D1a", "D1b", "D4a"} <= strict_ids
     # MFU/MBU 无数据 → 优雅不报
     assert {"D1c", "D3a", "D2a"} & strict_ids == set()
-    conn.close()
 
 
 def test_finding_carries_signed_inference():
