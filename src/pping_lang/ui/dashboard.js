@@ -64,12 +64,14 @@ const I18N = {
     'lat.itlSource': '数据源:ITL fallback(当前 vllm 没发 TPOT 字段,用 iter 间隔近似)',
     'roof.title': 'Roofline 实时诊断',
     'roof.desc': '点 = 相近 step 聚合(越大 = 步数越多)· 看离上界还有多远,判断 compute-bound 还是 memory-bound',
-    'roof.estimate': '⚠ 估算数据 · 当前 vllm 不发 perf_stats,按 token 计数 + 模型参数推算',
-    'roof.estimateB': 'B 参数)。',
+    'roof.estimate': '⚠ 估算数据 · 当前 vllm 不发 perf_stats,按 token 计数 + 模型参数推算({b}B 参数)。',
     'roof.estimateNote': '点形状对,绝对值有误差;升 vllm ≥0.20 自动切回实测。',
     'roof.sample': '当前样本', 'roof.verdict': '当前结论',
     'roof.computeUtil': '算力利用', 'roof.bwUtil': '带宽利用',
     'roof.speedup': '提速方向', 'roof.noSamples': '没有样本可解读 — 跑一次 bench 触发数据。',
+    'roof.foot': '中位 AI={ai} · 拐点={knee} · 样本={n}',
+    'roof.footTip': '样本数={n}  AI 中位={ai}  knee={knee}',
+    'roof.inMemBound': '位于 memory-bound 区', 'roof.inCmpBound': '位于 compute-bound 区',
     'startup.btn': '启动信息', 'startup.title': 'vLLM 启动信息',
     'startup.cmdline': '启动命令', 'startup.noCmdline': '未捕获到 cmdline(plugin 早于 sys.argv 设定?)',
     'startup.env': '环境变量', 'startup.noEnv': '无相关环境变量(仅含 VLLM_/PPING_LANG_/HF_/CUDA_/TORCH_ 等前缀)',
@@ -140,12 +142,14 @@ const I18N = {
     'lat.itlSource': 'Source: ITL fallback (this vllm doesn’t emit TPOT; iter interval used as approximation)',
     'roof.title': 'Roofline live diagnosis',
     'roof.desc': 'Dots = nearby steps aggregated (bigger = more steps) · distance below the roof tells compute- vs memory-bound',
-    'roof.estimate': '⚠ Estimated · this vllm doesn’t emit perf_stats; derived from token counts + model params',
-    'roof.estimateB': 'B params).',
+    'roof.estimate': '⚠ Estimated · this vllm doesn’t emit perf_stats; derived from token counts + model params ({b}B params).',
     'roof.estimateNote': 'Shape is right, absolute values approximate; upgrade to vllm ≥0.20 to switch back to measured.',
     'roof.sample': 'Current samples', 'roof.verdict': 'Verdict',
     'roof.computeUtil': 'Compute used', 'roof.bwUtil': 'Bandwidth used',
     'roof.speedup': 'Speed-up directions', 'roof.noSamples': 'No samples to interpret — run a bench to generate data.',
+    'roof.foot': 'median AI={ai} · ridge={knee} · samples={n}',
+    'roof.footTip': 'samples={n}  median AI={ai}  knee={knee}',
+    'roof.inMemBound': 'in the memory-bound region', 'roof.inCmpBound': 'in the compute-bound region',
     'startup.btn': 'Startup info', 'startup.title': 'vLLM startup info',
     'startup.cmdline': 'Launch command', 'startup.noCmdline': 'cmdline not captured (plugin ran before sys.argv?)',
     'startup.env': 'Environment variables', 'startup.noEnv': 'No relevant env vars (only VLLM_/PPING_LANG_/HF_/CUDA_/TORCH_ prefixes)',
@@ -160,9 +164,12 @@ function _uiLang() {
   return localStorage.getItem('pping_lang_ui')
     || ((navigator.language || '').toLowerCase().startsWith('zh') ? 'zh' : 'en');
 }
-window.t = function (key) {
+window.t = function (key, params) {
   const lang = _uiLang();
-  return (I18N[lang] && I18N[lang][key]) || I18N.en[key] || key;
+  let s = (I18N[lang] && I18N[lang][key]) || I18N.en[key] || key;
+  // 占位符插值:t('k', {ai: 3.0}) 把 '… {ai} …' 里的 {ai} 换成 3.0(中英语序不同时用)
+  if (params) for (const k in params) s = s.split('{' + k + '}').join(params[k]);
+  return s;
 };
 document.addEventListener('alpine:init', () => {
   Alpine.store('i18n', {
