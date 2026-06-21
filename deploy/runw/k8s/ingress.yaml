@@ -1,0 +1,30 @@
+# pping-lang Ingress(Traefik,k3s 默认)。host-based 路由 → 稳定 URL,不碰主机端口。
+# __DASH_HOST__ = pping.<runw-ip>.nip.io;__OAI_HOST__ = api-pping.<runw-ip>.nip.io
+# nip.io:<任意>.<IP>.nip.io 公网解析回该 IP → 经 Tailscale IP 即出稳定 URL。
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: pping-lang
+  namespace: default
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+spec:
+  rules:
+    - host: __DASH_HOST__
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: pping-lang
+                port: { number: __DASH_PORT__ }
+    - host: __OAI_HOST__
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: pping-lang
+                port: { number: __OAI_PORT__ }
