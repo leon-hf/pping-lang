@@ -185,6 +185,53 @@ def test_diagnoses_history(app_with_data):
     assert len(body["diagnoses"]) >= 1
 
 
+def test_diagnoses_deduped_by_rule(tmp_path):
+    """A rule re-fires every eval cycle, so the ring holds D3a×N. /api/diagnoses
+    should surface each rule once (its latest firing), not once per cycle."""
+    db = tmp_path / "dedup.duckdb"
+    sink = LocalSink(db_path=db, instance_id="test-inst", flush_interval_s=10.0)
+    base = time.time_ns()
+    # low-gpu-util fires 3x (newer = higher triggered_value); insertion order = ts order
+    for i in range(3):
+        sink.push_diagnosis(Diagnosis(
+            ts_ns=base + int(i * 1e9), rule_id="low-gpu-util", severity="warning",
+            triggered_value=30.0 + i, threshold=50.0, window_seconds=30,
+            message=f"util {30 + i}", suggestion="x", engine_idx=0,
+        ))
+    # a second, distinct rule fires once — must be kept
+    sink.push_diagnosis(Diagnosis(
+        ts_ns=base + int(0.5 * 1e9), rule_id="batch-degraded", severity="info",
+        triggered_value=1.0, threshold=1.0, window_seconds=30,
+        message="batch 1", suggestion="y", engine_idx=0,
+    ))
+    app = build_app(
+        db_path=str(db), instance_id="test-inst", engine_index=0,
+        sink=sink, rule_store=RuleStore(),
+    )
+    client = TestClient(app)
+    try:
+        diags = client.get("/api/diagnoses").json()["diagnoses"]
+        rule_ids = [d["rule_id"] for d in diags]
+        assert len(diags) == 2                      # one card per rule, not per cycle
+        assert rule_ids.count("low-gpu-util") == 1
+        assert rule_ids.count("batch-degraded") == 1
+        kept = next(d for d in diags if d["rule_id"] == "low-gpu-util")
+        assert kept["triggered_value"] == 32.0      # the latest firing survived
+        hist = client.get("/api/diagnoses/history").json()["diagnoses"]
+        assert [d["rule_id"] for d in hist].count("low-gpu-util") == 1
+    finally:
+        sink.close()
+
+
+def test_system_reports_pping_version(app_with_data):
+    """/api/system carries the pping-lang package version (consistent with
+    /api/health), so the hero endpoint is self-contained."""
+    client, _, _ = app_with_data
+    body = client.get("/api/system").json()
+    assert "version" in body
+    assert body["version"] == client.get("/api/health").json()["version"]
+
+
 def test_rules_list_returns_defaults(empty_app):
     client, _, _ = empty_app
     r = client.get("/api/rules")
