@@ -464,6 +464,7 @@ def build_app(
                     peak = None
 
         return {
+            "version": version,          # pping-lang 包版本(与 /api/health 一致)
             "vllm_version": vllm_ver,
             "model": model,
             "served_model_name": served_model_name,
@@ -959,6 +960,20 @@ def build_app(
             "scaling": _scaling["result"],
         }
 
+    # 同一规则每个评估周期(默认 1s)都会复触发,内存环里就堆成 D3a×N。
+    # UI 要的是「当前命中了哪些事实」——每条规则一张卡、取最近一次状态。
+    # recent_diagnoses 是 newest-first,故按 rule_id 取首次出现 = 最新一次。
+    def _dedup_latest_by_rule(diags: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        seen: set[Any] = set()
+        out: list[dict[str, Any]] = []
+        for d in diags:
+            rid = d.get("rule_id")
+            if rid in seen:
+                continue
+            seen.add(rid)
+            out.append(d)
+        return out
+
     # === GET /api/diagnoses ===
     @app.get("/api/diagnoses")
     def diagnoses(
@@ -971,7 +986,7 @@ def build_app(
             diags = sink.recent_diagnoses(since_ns, limit)
         except Exception:
             diags = []
-        return {"window_seconds": seconds, "diagnoses": diags}
+        return {"window_seconds": seconds, "diagnoses": _dedup_latest_by_rule(diags)}
 
     # === GET /api/diagnoses/history ===
     @app.get("/api/diagnoses/history")
@@ -982,7 +997,7 @@ def build_app(
             diags = sink.recent_diagnoses(since_ns=0, limit=limit)
         except Exception:
             diags = []
-        return {"diagnoses": diags}
+        return {"diagnoses": _dedup_latest_by_rule(diags)}
 
     # === GET /api/diagnosis_rules — 现役事实规则 + 中心配置(阈值已按配置解析)===
     # 这是诊断引擎真正在跑的规则(代码+配置驱动,非旧 RuleStore 的自由 CRUD)。
