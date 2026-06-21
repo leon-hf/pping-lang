@@ -13,7 +13,6 @@ import json
 import logging
 import threading
 from pathlib import Path
-from typing import Any
 
 from pping_lang.metrics_catalog import ALLOWED_METRICS
 from pping_lang.rules.diagnosis_rules import (
