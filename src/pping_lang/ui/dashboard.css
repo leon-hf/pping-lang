@@ -160,6 +160,28 @@
   }
   .header-link.star:hover svg { fill: #e3b341; stroke: #d4a72c; }
 
+  /* 语言切换(中 | EN) */
+  .lang-toggle {
+    display: inline-flex;
+    border: 1px solid var(--border-strong);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .lang-toggle button {
+    background: var(--surface);
+    border: none;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--muted);
+    padding: 5px 9px;
+    transition: background 0.12s, color 0.12s;
+  }
+  .lang-toggle button + button { border-left: 1px solid var(--border-strong); }
+  .lang-toggle button:hover { color: var(--text); }
+  .lang-toggle button.active { background: var(--coral); color: #fff; }
+
   /* === Tabs === */
   nav.tabs {
     padding: 0 36px;
