@@ -11,10 +11,10 @@ from __future__ import annotations
 
 import logging
 import os
-import time
 from threading import Event, Thread
 from typing import Any
 
+from pping_lang.clock import wall_ns
 from pping_lang.metrics_catalog import M
 from pping_lang.sink.base import Sink
 from pping_lang.types import MetricPoint
@@ -114,7 +114,7 @@ class NvmlSampler:
 
     def _run(self) -> None:
         while not self._stop.wait(self._interval):
-            ts = time.monotonic_ns()
+            ts = wall_ns()
             for gpu_idx, handle in self._gpu_handles:
                 try:
                     self._sample_one(ts, gpu_idx, handle)

@@ -1,0 +1,12 @@
+# pping-lang Service(ClusterIP)。Ingress 路由到它。__TOKEN__ 由 remote_k8s.sh 替换。
+apiVersion: v1
+kind: Service
+metadata:
+  name: pping-lang
+  namespace: default
+  labels: { app: pping-lang }
+spec:
+  selector: { app: pping-lang }
+  ports:
+    - { name: dash,   port: __DASH_PORT__, targetPort: dash }
+    - { name: openai, port: __OAI_PORT__,  targetPort: openai }

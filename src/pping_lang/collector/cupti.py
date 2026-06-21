@@ -30,6 +30,7 @@ from pathlib import Path
 from threading import Event, Lock
 from typing import Any, Protocol, runtime_checkable
 
+from pping_lang.clock import wall_ns
 from pping_lang.metrics_catalog import M
 from pping_lang.sink.base import Sink
 from pping_lang.types import MetricPoint
@@ -679,7 +680,7 @@ class CuptiKernelCollector:
         source: KernelActivitySource | None = None,
         classifier: KernelClassifier | None = None,
         rollup_interval_s: float = DEFAULT_ROLLUP_INTERVAL_S,
-        clock: Callable[[], int] = time.monotonic_ns,
+        clock: Callable[[], int] = wall_ns,
         top_n: int = 100,
         capture_stacks: bool = False,
         pc_sampling: PcSamplingController | None = None,
@@ -821,8 +822,9 @@ class CuptiKernelCollector:
         if self._last_rollup_ns is None:
             self._last_rollup_ns = now
             return
-        wall_ns = now - self._last_rollup_ns
-        if wall_ns <= 0:
+        # 本窗墙钟跨度(时长,非绝对时刻)—— 别和 clock.wall_ns() 那个时间戳函数混淆
+        window_span_ns = now - self._last_rollup_ns
+        if window_span_ns <= 0:
             # 零跨度窗(如 rollup 后立即 stop)无意义,跳过 —— 别用空窗 0 覆盖真值
             self._last_rollup_ns = now
             return
@@ -835,8 +837,8 @@ class CuptiKernelCollector:
         if self._flame.has_data:
             self._last_flame = self._flame.snapshot_and_reset()
         self._last_kernels_ts = now      # 只在"有数据"时推进 → 前端可判断是否过期
-        self._last_window_ns = wall_ns
-        stats = self._agg.snapshot_and_reset(wall_ns)
+        self._last_window_ns = window_span_ns
+        stats = self._agg.snapshot_and_reset(window_span_ns)
         push = self._sink.push_metric
         ei = self._engine_index
         for name, value in stats.items():
@@ -1545,7 +1547,7 @@ class PcSamplingController:
     def _push_metrics(self, stats: dict[str, float]) -> None:
         if self._sink is None:
             return
-        now = time.monotonic_ns()
+        now = wall_ns()
         for name, value in stats.items():
             self._sink.push_metric(MetricPoint(now, name, value, self._engine_index))
 

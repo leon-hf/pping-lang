@@ -4,7 +4,10 @@
 
 Day 6: GET 端点（health, metrics, diagnoses, rules, instances）+ /  dashboard
 Day 8: POST/PUT/DELETE/test 端点 — 规则 CRUD via RuleStore
-Day 9: 规则热加载（store 改动让 engine 即时看到）— 见 RuleEngine
+Day 9: 规则热加载（store 改动让 DiagnosisEngine 下一轮即看到）
+
+读路径:实时短窗走 Sink 内存环;长窗/历史走 JsonlStore(扫 metrics.jsonl);
+bench_runs(可变行)仍用 DuckDB。
 """
 from __future__ import annotations
 
@@ -15,26 +18,32 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from fastapi import FastAPI, HTTPException, Query, Response
+from fastapi import Body, FastAPI, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 
-from pping_lang.api.queries import (
-    bucketed_quantiles,
-    list_instances,
-    open_conn,
-    recent_diagnoses,
-    recent_metric_points,
-)
+from pping_lang.api.queries import open_conn  # bench_runs only (mutable rows → DuckDB)
 from pping_lang.api.schemas import BenchStartIn, RuleIn, RuleTestRequest
 from pping_lang.bench import store as bench_store
 from pping_lang.bench.client import OpenAIStreamClient
 from pping_lang.bench.runner import run_static
 from pping_lang.bench.scenarios.schema import SLO, StaticScenario
+from pping_lang.clock import wall_ns
 from pping_lang.hardware import GPUPeak
 from pping_lang.metrics_catalog import ALLOWED_METRICS, M
-from pping_lang.rules.engine import evaluate_condition_against_db
+from pping_lang.rules.diagnosis_config import (
+    WORKLOAD_FORMS,
+)
+from pping_lang.rules.diagnosis_config import (
+    from_dict as diag_config_from_dict,
+)
+from pping_lang.rules.diagnosis_config import (
+    to_dict as diag_config_to_dict,
+)
+from pping_lang.rules.diagnosis_rules import DIAGNOSIS_RULES
+from pping_lang.rules.engine import _OP_TO_FN
 from pping_lang.rules.schema import Condition, Rule
+from pping_lang.sink.metric_log import JsonlStore
 
 _UI_DIR = Path(__file__).parent.parent / "ui"
 _UI_INDEX = _UI_DIR / "index.html"
@@ -295,7 +304,6 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     from pping_lang.collector.cupti import CuptiKernelCollector
     from pping_lang.collector.nvml import NvmlSampler
-    from pping_lang.rules.engine import RuleEngine
     from pping_lang.rules.store import RuleStore
     from pping_lang.sink.base import Sink
 
@@ -307,7 +315,8 @@ def build_app(
     engine_index: int,
     sink: Sink,
     rule_store: RuleStore,
-    rule_engine: RuleEngine | None = None,
+    diag_engine: Any = None,
+    custom_store: Any = None,
     nvml: NvmlSampler | None = None,
     cupti: CuptiKernelCollector | None = None,
     version: str = "0.0.1.dev0",
@@ -337,6 +346,9 @@ def build_app(
     # vendor 资源本地化:Alpine/Chart 不再走 CDN,离线/air-gapped GPU 机也能渲染
     ui_vendor_alpine = _read_ui("vendor/alpine.min.js")
     ui_vendor_chart = _read_ui("vendor/chart.umd.min.js")
+
+    # 冷/长窗读端:扫 LocalSink 落的 JSONL(与 sink 共享同目录文件)。实时短窗走内存环。
+    metric_store = JsonlStore(Path(db_path).parent, instance_id)
 
     # === GET / — dashboard ===
     @app.get("/", response_class=HTMLResponse)
@@ -375,6 +387,7 @@ def build_app(
             "engine_index": engine_index,
             "sink": {
                 "dropped_metrics": sink.dropped_metrics,
+                "downsampled_metrics": getattr(sink, "downsampled_metrics", 0),
                 "dropped_diags": sink.dropped_diags,
                 "flush_errors": sink.flush_errors,
                 "queue_depth": sink.queue_depth,
@@ -384,9 +397,9 @@ def build_app(
                 "num_gpus": nvml.num_gpus if nvml else 0,
             },
             "rules": {
-                "num": rule_engine.num_rules if rule_engine else len(rule_store.list()),
-                "eval_count": rule_engine.eval_count if rule_engine else 0,
-                "fire_count": rule_engine.fire_count if rule_engine else 0,
+                "num": len(rule_store.list()),
+                "eval_count": getattr(diag_engine, "eval_count", 0) if diag_engine else 0,
+                "fire_count": getattr(diag_engine, "fire_count", 0) if diag_engine else 0,
             },
         }
 
@@ -454,6 +467,9 @@ def build_app(
             "vllm_version": vllm_ver,
             "model": model,
             "served_model_name": served_model_name,
+            # vLLM OpenAI 端点(从启动 cmdline 解析真实 --host/--port,0.0.0.0→127.0.0.1)。
+            # 压测在服务端跑,前端用这个预填 endpoint,不靠 :8000 的猜测(端口被改过就会猜错)。
+            "vllm_endpoint": _vllm_base_url(),
             "gpu_name": name,
             "gpu_count": count,
             "gpu_peak": peak,
@@ -502,8 +518,8 @@ def build_app(
         if name not in ALLOWED_METRICS:
             raise HTTPException(422, f"unknown metric {name!r}")
         # Short-window reads (the dashboard's poll path) go straight to the
-        # in-memory ring buffer — no DuckDB roundtrip, no checkpoint wait.
-        # Long-window reads still go to DuckDB since the ring isn't sized for it.
+        # in-memory ring buffer — no roundtrip, no flush wait. Long-window reads
+        # scan the JSONL persistence (cold path) since the ring isn't sized for it.
         if seconds <= 60:
             ring = sink.recent(name, seconds)
             points = [
@@ -511,15 +527,11 @@ def build_app(
                 for v, ts in ring[-limit:]
             ]
             return {"name": name, "seconds": seconds, "points": points}
-        since_ns = time.monotonic_ns() - int(seconds * 1e9)
-        conn = open_conn(db_path)
+        since_ns = wall_ns() - int(seconds * 1e9)
         try:
-            try:
-                points = recent_metric_points(conn, name, since_ns, limit)
-            except Exception:
-                points = []
-        finally:
-            conn.close()
+            points = metric_store.recent_metric_points(name, since_ns, limit)
+        except Exception:
+            points = []
         return {"name": name, "seconds": seconds, "points": points}
 
     # === GET /api/metrics/snapshot ===
@@ -528,7 +540,7 @@ def build_app(
     def metrics_snapshot(
         seconds: int = Query(30, ge=1, le=3600),
     ) -> dict[str, Any]:
-        cutoff_ns = time.monotonic_ns() - int(seconds * 1e9)
+        cutoff_ns = wall_ns() - int(seconds * 1e9)
         latest: dict[str, dict[str, Any]] = {}
         for name in ALLOWED_METRICS:
             row = sink.latest(name)
@@ -617,7 +629,7 @@ def build_app(
     def kernels(
         window: int = Query(60, ge=5, le=3600, description="latest 取值窗口 (s)"),
     ) -> dict[str, Any]:
-        cutoff_ns = time.monotonic_ns() - int(window * 1e9)
+        cutoff_ns = wall_ns() - int(window * 1e9)
 
         def fresh_val(name: str) -> float | None:
             row = sink.latest(name)
@@ -653,7 +665,7 @@ def build_app(
         snapshot_age_s: float | None = None
         rollup_window_s: float | None = None
         if cupti is not None and cupti.last_snapshot_ts is not None:
-            snapshot_age_s = max(0.0, (time.monotonic_ns() - cupti.last_snapshot_ts) / 1e9)
+            snapshot_age_s = max(0.0, (wall_ns() - cupti.last_snapshot_ts) / 1e9)
             if cupti.last_window_ns > 0:
                 rollup_window_s = cupti.last_window_ns / 1e9
         # enabled：任一 kernel 指标在窗口内有值,或有原始明细
@@ -729,7 +741,7 @@ def build_app(
             for key, m in cmap.items()
         }
         return {
-            "seconds": seconds, "now_ns": time.monotonic_ns(),
+            "seconds": seconds, "now_ns": wall_ns(),
             "available": any(series[k] for k in series), "series": series,
         }
 
@@ -801,7 +813,7 @@ def build_app(
         seconds: int = Query(300, ge=30, le=86400),
         buckets: int = Query(30, ge=5, le=240),
     ) -> dict[str, Any]:
-        now_ns = time.monotonic_ns()
+        now_ns = wall_ns()
         since_ns = now_ns - int(seconds * 1e9)
         # ≤900s: serve from memory (ring may not cover the whole window under
         # extreme push rates, but it'll always have the *most recent* data,
@@ -816,17 +828,14 @@ def build_app(
                 tpot_source = "itl"
             e2e = _bucketed_from_memory(M.VLLM_REQ_E2E_LATENCY_MS, since_ns, now_ns, buckets)
         else:
-            conn = open_conn(db_path)
-            try:
-                ttft = bucketed_quantiles(conn, M.VLLM_REQ_TTFT_MS, since_ns, now_ns, buckets)
-                tpot = bucketed_quantiles(conn, M.VLLM_REQ_TPOT_MS, since_ns, now_ns, buckets)
-                tpot_source = "tpot"
-                if not tpot:
-                    tpot = bucketed_quantiles(conn, M.VLLM_REQ_ITL_MS, since_ns, now_ns, buckets)
-                    tpot_source = "itl"
-                e2e = bucketed_quantiles(conn, M.VLLM_REQ_E2E_LATENCY_MS, since_ns, now_ns, buckets)
-            finally:
-                conn.close()
+            # >900s: genuine historical replay — scan the JSONL persistence (cold).
+            ttft = metric_store.bucketed_quantiles(M.VLLM_REQ_TTFT_MS, since_ns, now_ns, buckets)
+            tpot = metric_store.bucketed_quantiles(M.VLLM_REQ_TPOT_MS, since_ns, now_ns, buckets)
+            tpot_source = "tpot"
+            if not tpot:
+                tpot = metric_store.bucketed_quantiles(M.VLLM_REQ_ITL_MS, since_ns, now_ns, buckets)
+                tpot_source = "itl"
+            e2e = metric_store.bucketed_quantiles(M.VLLM_REQ_E2E_LATENCY_MS, since_ns, now_ns, buckets)
         return {
             "seconds": seconds,
             "buckets": buckets,
@@ -956,15 +965,12 @@ def build_app(
         seconds: int = Query(300, ge=1, le=86400),
         limit: int = Query(200, ge=1, le=2000),
     ) -> dict[str, Any]:
-        since_ns = time.monotonic_ns() - int(seconds * 1e9)
-        conn = open_conn(db_path)
+        # 内存诊断环:命中即可见,无 DuckDB 读、无刷盘滞后
+        since_ns = wall_ns() - int(seconds * 1e9)
         try:
-            try:
-                diags = recent_diagnoses(conn, since_ns, limit)
-            except Exception:
-                diags = []
-        finally:
-            conn.close()
+            diags = sink.recent_diagnoses(since_ns, limit)
+        except Exception:
+            diags = []
         return {"window_seconds": seconds, "diagnoses": diags}
 
     # === GET /api/diagnoses/history ===
@@ -972,15 +978,98 @@ def build_app(
     def diagnoses_history(
         limit: int = Query(500, ge=1, le=5000),
     ) -> dict[str, Any]:
-        conn = open_conn(db_path)
         try:
-            try:
-                diags = recent_diagnoses(conn, since_ns=0, limit=limit)
-            except Exception:
-                diags = []
-        finally:
-            conn.close()
+            diags = sink.recent_diagnoses(since_ns=0, limit=limit)
+        except Exception:
+            diags = []
         return {"diagnoses": diags}
+
+    # === GET /api/diagnosis_rules — 现役事实规则 + 中心配置(阈值已按配置解析)===
+    # 这是诊断引擎真正在跑的规则(代码+配置驱动,非旧 RuleStore 的自由 CRUD)。
+    def _active_config():
+        # 引擎在跑就读它的(热配置);否则回退磁盘配置,UI 仍可浏览。
+        if diag_engine is not None:
+            return diag_engine.config
+        from pping_lang.rules.diagnosis_config import load_config  # noqa: PLC0415
+        return load_config()
+
+    def _serialize_rules(cfg) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
+        for r in DIAGNOSIS_RULES:
+            checks = []
+            for c in r.checks:
+                resolved = getattr(cfg, c.threshold_ref) if c.threshold_ref else c.threshold
+                checks.append({
+                    "metric": c.metric, "op": c.op,
+                    "threshold": resolved, "threshold_ref": c.threshold_ref,
+                    "window_seconds": c.window_seconds, "aggregation": c.aggregation,
+                })
+            out.append({
+                "id": r.id, "name": r.name, "kind": r.kind, "severity": r.severity,
+                "claim": r.claim, "match": r.match, "checks": checks,
+                "precondition": list(r.precondition), "requires_regime": r.requires_regime,
+                "hypothesis": r.hypothesis, "suggestion": r.suggestion,
+            })
+        return out
+
+    @app.get("/api/diagnosis_rules")
+    def diagnosis_rules() -> dict[str, Any]:
+        cfg = _active_config()
+        return {
+            "active": diag_engine is not None,
+            "rules": _serialize_rules(cfg),               # 策展事实规则(只读)
+            "custom_rules": custom_store.list_dicts() if custom_store else [],  # 用户自定义(可改)
+            "custom_editable": custom_store is not None,
+            "config": diag_config_to_dict(cfg),
+            "workload_forms": list(WORKLOAD_FORMS),
+        }
+
+    # === 自定义规则 CRUD —— 与策展规则同一评估器(DiagnosisEngine 每轮一起评)===
+    def _require_store():
+        if custom_store is None:
+            raise HTTPException(503, "自定义规则不可用(诊断引擎未运行)")
+        return custom_store
+
+    @app.post("/api/diagnosis_rules/custom")
+    def create_custom_rule(body: dict = Body(...)) -> dict[str, Any]:
+        store = _require_store()
+        try:
+            return store.add(body)
+        except (ValueError, TypeError) as e:
+            raise HTTPException(400, f"非法规则: {e}")
+
+    @app.put("/api/diagnosis_rules/custom/{rule_id}")
+    def update_custom_rule(rule_id: str, body: dict = Body(...)) -> dict[str, Any]:
+        store = _require_store()
+        try:
+            return store.update(rule_id, body)
+        except KeyError:
+            raise HTTPException(404, f"未找到自定义规则 {rule_id!r}")
+        except (ValueError, TypeError) as e:
+            raise HTTPException(400, f"非法规则: {e}")
+
+    @app.delete("/api/diagnosis_rules/custom/{rule_id}")
+    def delete_custom_rule(rule_id: str) -> dict[str, Any]:
+        store = _require_store()
+        if not store.delete(rule_id):
+            raise HTTPException(404, f"未找到自定义规则 {rule_id!r}")
+        return {"deleted": rule_id}
+
+    # === PUT /api/diagnosis_config — 改中心 SLA/阈值,热生效 ===
+    @app.put("/api/diagnosis_config")
+    def update_diagnosis_config(body: dict = Body(...)) -> dict[str, Any]:
+        try:
+            cfg = diag_config_from_dict(body)
+        except (ValueError, TypeError) as e:
+            raise HTTPException(400, f"invalid diagnosis config: {e}")
+        applied = diag_engine is not None
+        if applied:
+            diag_engine.set_config(cfg)
+        return {
+            "applied": applied,        # False = 引擎没在跑(只校验,未热加载)
+            "config": diag_config_to_dict(cfg),
+            "rules": _serialize_rules(cfg),
+        }
 
     # === GET /api/rules ===
     @app.get("/api/rules")
@@ -1047,17 +1136,18 @@ def build_app(
             rule = rule_store.get(rule_id)
             if rule is None:
                 raise HTTPException(404, f"rule {rule_id!r} not found")
-        conn = open_conn(db_path)
         try:
-            try:
-                fired, value = evaluate_condition_against_db(
-                    conn, rule.condition, time.monotonic_ns(),
-                )
-            except Exception as e:
-                logger.exception("test eval failed for %s", rule_id)
-                raise HTTPException(500, f"eval failed: {e}")
-        finally:
-            conn.close()
+            cond = rule.condition
+            cutoff = wall_ns() - int(cond.window_seconds * 1e9)
+            value = metric_store.aggregate_metric(cond.metric, cutoff, cond.aggregation)
+            fired = (
+                _OP_TO_FN[cond.op](value, cond.threshold)
+                if value is not None and cond.op in _OP_TO_FN
+                else None
+            )
+        except Exception as e:
+            logger.exception("test eval failed for %s", rule_id)
+            raise HTTPException(500, f"eval failed: {e}")
         return {
             "rule_id": rule.id,
             "would_fire": fired,
@@ -1072,14 +1162,10 @@ def build_app(
     # === GET /api/instances ===
     @app.get("/api/instances")
     def instances() -> dict[str, list[str]]:
-        conn = open_conn(db_path)
         try:
-            try:
-                ids = list_instances(conn)
-            except Exception:
-                ids = []
-        finally:
-            conn.close()
+            ids = metric_store.list_instances()
+        except Exception:
+            ids = []
         return {"instances": ids}
 
     # ─────────────────────────────────────────────────────────────────────

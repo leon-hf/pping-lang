@@ -1,29 +1,29 @@
-# 在 runw 上执行(由 deploy.sh 在前面注入 IMAGE/REPO/MODELS/PORT/MODEL/DEPLOY_TAG 变量)。
-# 代码已由 deploy.sh 用 tar over ssh 直接同步到 $REPO(不走 GitHub)。不要单独跑这个文件。
+# remote_deploy.sh — runw 上的 **docker 路径**(由 deploy.sh 注入变量,并在前面拼 build_image.sh
+# 先把镜像烤好)。跑**烤好的镜像**(pping-lang 已 pip 装进镜像,非 /work mount)→ `pping-vllm serve`
+# → 插件随 vllm serve 自动加载(DiagnosisEngine + dashboard;.so 能编则 PC sampling,否则降级)。
+# 不要单独跑。
 set -e
-mkdir -p "$MODELS"
 
-# 1) 代码已同步,确认在
-[ -f "$REPO/deploy/runw/build_so.sh" ] || { echo "FATAL: $REPO 没同步到位"; exit 1; }
-echo "[runw] 使用已同步工作树 @ $REPO"
+# 单 GPU:先停掉 k8s 路那份(若在跑),免抢卡。
+sudo k3s kubectl delete deploy pping-lang -n default --ignore-not-found --wait=false >/dev/null 2>&1 || true
 
-# 2) (重)建容器:挂 repo→/work、本地模型目录→/models(模型缓存持久,免每次重下)
-docker rm -f pdash >/dev/null 2>&1 || true
-docker run -d --name pdash --restart unless-stopped --gpus all \
-  -v "$REPO":/work -v "$MODELS":/models -p "$PORT":"$PORT" \
-  -e MODELSCOPE_CACHE=/models -e HF_HOME=/models \
-  --entrypoint /bin/bash "$IMAGE" -c "sleep infinity" >/dev/null
-sleep 3
-echo "[runw] container up: $(docker ps --filter name=pdash --format '{{.Status}}')"
+# (重)建容器:挂模型缓存→/models(镜像已自带 pping-lang,不挂 /work);发布 dashboard + OpenAI。
+# 镜像 entrypoint 是 vllm serve,必须 --entrypoint /bin/bash 覆盖,否则 sleep infinity 被当参数。
+sudo docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
+sudo docker run -d --name "$CONTAINER" --restart unless-stopped --gpus all \
+  --cap-add SYS_ADMIN \
+  -v "$MODELS":/models \
+  -p "$DASH_PORT":"$DASH_PORT" -p "$OAI_PORT":"$OAI_PORT" \
+  -e VLLM_USE_MODELSCOPE=True -e MODELSCOPE_CACHE=/models -e HF_HOME=/models \
+  -e PPING_LANG_API_PORT="$DASH_PORT" -e PPING_DEPLOY_TAG="$DEPLOY_TAG" \
+  --entrypoint /bin/bash "$IMAGE_TAG" -c "sleep infinity" >/dev/null
+sleep 2
+echo "[runw] container up: $(sudo docker ps --filter name=$CONTAINER --format '{{.Status}}')"
 
-# 3) 编 .so(自动探测 cu12/cu13)+ 装 duckdb(镜像缺)
-docker exec pdash bash /work/deploy/runw/build_so.sh
-docker exec pdash pip install -q duckdb -i https://pypi.tuna.tsinghua.edu.cn/simple >/dev/null 2>&1 \
-  || docker exec pdash pip install -q duckdb >/dev/null 2>&1 || echo "[runw] WARN: duckdb 装失败"
-
-# 4) 起 dashboard(注入 + cu库路径 + pre-warm,后台)
-docker exec -d \
-  -e CUDA_INJECTION64_PATH=/tmp/libppingcupti.so \
-  -e PPING_DEPLOY_TAG="$DEPLOY_TAG" -e PPING_PORT="$PORT" -e PPING_MODEL="$MODEL" \
-  pdash bash -lc 'source /tmp/pping_env.sh; PYTHONPATH=/work/src python3 /work/deploy/runw/dashboard.py > /tmp/dash.log 2>&1'
-echo "[runw] dashboard launching (首次会下模型到 /models,之后命中缓存)"
+# 起 pping-vllm serve(后台)。--host 0.0.0.0 让 OpenAI 与 dashboard 都对外(host 跟随 --host)。
+sudo docker exec -d \
+  -e VLLM_USE_MODELSCOPE=True -e MODELSCOPE_CACHE=/models -e HF_HOME=/models \
+  -e PPING_LANG_API_PORT="$DASH_PORT" -e PPING_DEPLOY_TAG="$DEPLOY_TAG" \
+  "$CONTAINER" bash -lc "pping-vllm serve '$MODEL' --host 0.0.0.0 --port $OAI_PORT \
+     --gpu-memory-utilization 0.5 --max-model-len 2048 > /tmp/pvllm.log 2>&1"
+echo "[runw] pping-vllm serve launching(首次下模型到 /models;之后命中缓存)"

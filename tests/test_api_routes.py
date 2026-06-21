@@ -30,7 +30,6 @@ def empty_app(tmp_path):
         engine_index=3,
         sink=sink2,
         rule_store=RuleStore(),
-        rule_engine=None,
         nvml=None,
     )
     yield TestClient(app), db, sink2
@@ -49,7 +48,7 @@ def app_with_data(tmp_path):
     """
     db = tmp_path / "api.duckdb"
     sink = LocalSink(db_path=db, instance_id="test-inst", flush_interval_s=10.0)
-    base = time.monotonic_ns()
+    base = time.time_ns()
     # Push 50 GPU util points over the last 10s
     for i in range(50):
         sink.push_metric(MetricPoint(
@@ -231,11 +230,71 @@ def test_instances_list(app_with_data):
     assert "test-inst" in body["instances"]
 
 
+def test_diagnosis_rules_endpoint_lists_fact_rules_and_config(empty_app):
+    """/api/diagnosis_rules 暴露现役事实规则 + 中心配置(阈值已解析)。"""
+    client, _db, _sink = empty_app
+    data = client.get("/api/diagnosis_rules").json()
+    ids = {r["id"] for r in data["rules"]}
+    assert {"S1", "S5", "D3a", "regime-classify"} <= ids   # 事实规则在列
+    assert data["active"] is False                          # 无引擎实例(只浏览)
+    assert "sla_ttft_p99_ms" in data["config"]              # 中心配置透出
+    assert "custom" in data["workload_forms"]
+    # 阈值已按配置解析成具体数(S1 引 sla_ttft_p99_ms)
+    s1 = next(r for r in data["rules"] if r["id"] == "S1")
+    assert s1["checks"][0]["threshold"] == data["config"]["sla_ttft_p99_ms"]
+    assert s1["checks"][0]["threshold_ref"] == "sla_ttft_p99_ms"
+    # 名字是纯事实,根因/处方分列(署名)
+    assert s1["name"] == "TTFT p99 超 SLA"
+    assert "[推断]" not in s1["name"] and s1["hypothesis"]
+
+
+def test_update_diagnosis_config_validates_and_echoes(empty_app):
+    """PUT /api/diagnosis_config:合法配置回显解析后的值;无引擎时 applied=False。"""
+    client, _db, _sink = empty_app
+    r = client.put("/api/diagnosis_config", json={"workload_form": "code", "sla_ttft_p99_ms": 123.0})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["applied"] is False                         # 测试 app 没接引擎
+    assert body["config"]["sla_ttft_p99_ms"] == 123.0
+    assert body["config"]["workload_form"] == "code"
+    # 规则里 S1 阈值随之变成 123
+    s1 = next(x for x in body["rules"] if x["id"] == "S1")
+    assert s1["checks"][0]["threshold"] == 123.0
+
+
+def test_update_diagnosis_config_rejects_invalid(empty_app):
+    """非法配置 → 400(挡住越界阈值)。"""
+    client, _db, _sink = empty_app
+    r = client.put("/api/diagnosis_config", json={"mbu_low_pct": 90, "mbu_high_pct": 80})
+    assert r.status_code == 400
+
+
+def test_diagnosis_config_hot_reload_into_running_engine(tmp_path):
+    """接了真 DiagnosisEngine 时,PUT 热生效:engine.config 立即变。"""
+    from pping_lang.rules.diagnosis_config import default_config
+    from pping_lang.rules.diagnosis_runtime import DiagnosisEngine
+    db = tmp_path / "dr.duckdb"
+    sink = LocalSink(db_path=db, instance_id="x", flush_interval_s=10.0)
+    eng = DiagnosisEngine(sink, default_config("custom"), print_to_terminal=False)
+    app = build_app(db_path=str(db), instance_id="x", engine_index=0,
+                    sink=sink, rule_store=RuleStore(), diag_engine=eng)
+    client = TestClient(app)
+    try:
+        assert client.get("/api/diagnosis_rules").json()["active"] is True
+        r = client.put("/api/diagnosis_config", json={"workload_form": "code", "sla_tpot_p99_ms": 7.0})
+        assert r.json()["applied"] is True
+        assert eng.config.sla_tpot_p99_ms == 7.0          # 热替换进了运行中的引擎
+        assert eng.config.workload_form == "code"
+    finally:
+        eng.stop()
+        sink.close()
+
+
 def test_kernels_endpoint_with_data(tmp_path):
     """/api/kernels 打包 kernel 分解;class_shares 按占比降序。"""
     db = tmp_path / "k.duckdb"
     sink = LocalSink(db_path=db, instance_id="x", flush_interval_s=10.0)
-    base = time.monotonic_ns()
+    base = time.time_ns()
     for name, val in [
         (M.KERNEL_SHARE_ATTENTION_PCT, 42.0),
         (M.KERNEL_SHARE_GEMM_PCT, 31.0),
@@ -274,7 +333,7 @@ def test_kernels_endpoint_top_kernels_from_collector(tmp_path):
     sink = LocalSink(db_path=db, instance_id="x", flush_interval_s=10.0)
 
     class _FakeCupti:
-        last_snapshot_ts = time.monotonic_ns()
+        last_snapshot_ts = time.time_ns()
         last_window_ns = int(1.0 * 1e9)
 
         def top_kernels(self):
@@ -441,7 +500,7 @@ def test_kernels_trends_endpoint(tmp_path):
     """/api/kernels/trends 从内存环返回 kernel 指标时序(给实时趋势图)。"""
     db = tmp_path / "tr2.duckdb"
     sink = LocalSink(db_path=db, instance_id="x", flush_interval_s=10.0)
-    base = time.monotonic_ns()
+    base = time.time_ns()
     for i in range(5):
         ts = base - int((5 - i) * 2 * 1e9)
         sink.push_metric(MetricPoint(ts_ns=ts, name=M.KERNEL_GPU_BUSY_PCT, value=60.0 + i))
