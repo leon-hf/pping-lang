@@ -69,12 +69,12 @@ def test_root_references_known_api_endpoints(client):
 
 
 def test_root_references_marquee_kpi_labels(client):
-    """Dashboard 必须把 marquee KPI 标签暴露给用户（中文为主、英文术语共存）。
+    """Dashboard 必须把 marquee KPI 标签暴露给用户。
 
-    服务端 `/api/kpis` 返回的是命名字段（ttft_p99_ms 等），原始 metric 名不再
-    出现在 HTML 里。改成检查用户能看到的 label。
+    i18n 后:标签文本搬进 dashboard.js 的 I18N 字典,HTML 用 t('key') 引用。
+    所以查 html + js 合起来(同 test_rules_tab 的做法)。
     """
-    body = client.get("/").text
+    body = client.get("/").text + client.get("/dashboard.js").text
     for label in ["TTFT", "TPOT", "MFU", "KV cache", "padding", "Roofline"]:
         assert label in body, f"UI missing marquee KPI label {label!r}"
 
