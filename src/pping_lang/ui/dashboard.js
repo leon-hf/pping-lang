@@ -1,3 +1,118 @@
+// ===== i18n(中/英;框架支持多语,加语言只需补字典 + 一个 lang-toggle 按钮)=====
+// 全局 t(key):x-text="t('k')" / :title="t('k')" 处处可用(dashboard/rulesTab/benchTab 同享)。
+// 语言存 Alpine.store('i18n').lang(响应式,切换即时重渲染)+ localStorage 持久化。
+const I18N = {
+  zh: {
+    'nav.live': '实时', 'nav.kernel': 'Kernel', 'nav.rules': '规则', 'nav.bench': '压测',
+    'brand.sub': 'vLLM 性能诊断',
+    'btn.issue': '提 Issue', 'btn.star': 'Star',
+    'hero.info': '查看 vLLM 启动命令、环境变量、解析配置',
+    'common.save': '保存', 'common.saving': '保存中…', 'common.reset': '还原',
+    'common.suggestion': '建议', 'common.inference': '推断', 'common.edit': '编辑', 'common.delete': '删除',
+    'cfg.form': '业务形态', 'cfg.advanced': '高级阈值',
+    'cfg.hintActive': '改一处,引用它的策展规则全跟着变 · 保存即热生效,无需重启',
+    'cfg.hintInactive': '引擎未运行,保存仅校验,重启后生效',
+    'cfg.sla_ttft': 'TTFT p99 SLA', 'cfg.sla_tpot': 'TPOT p99 SLA',
+    'cfg.long_prompt': '长 prompt 阈值', 'cfg.waiting': '等待队列阈值',
+    'cfg.mbu_high': 'MBU 贴顶阈值', 'cfg.mbu_low': 'MBU 偏低阈值',
+    'cfg.batch_small': '并发偏小阈值', 'cfg.mfu_low': 'MFU 偏低阈值',
+    'cfg.tail': '尾延迟比 p99/p50', 'cfg.kv': 'KV 压力阈值',
+    'cfg.prefix': '前缀命中低阈值', 'cfg.weights': '权重占显存阈值',
+    'kind.classifier': '分类器', 'kind.symptom': '入口症状', 'kind.fact': '判别', 'kind.custom': '自定义',
+    'rules.diagCurrent': '当前触发的诊断', 'rules.diagRecent': '最近命中的诊断',
+    'rules.freshHint': '最近 5 分钟去重后', 'rules.staleHint': '当前无触发 · 显示最近一次命中',
+    'rules.allGood': '一切看起来都不错', 'rules.none': '当前窗口内没有规则被触发',
+    'rules.title': '诊断规则',
+    'rules.hint': '规则名=客观事实(测出来的);根因/处方是推断,供参考、非定论。策展规则只读,自定义规则可增删改。',
+    'rules.newRule': '+ 新建规则', 'rules.newRuleDisabled': '引擎未运行,暂不可建',
+    'rules.precondition': '前置:', 'rules.matchAny': '任一满足', 'rules.matchAll': '全部满足',
+    'rules.onlyRegime': '仅 ',
+    'rules.classifierNote': '引擎按 Roofline 算术强度 vs 脊点判定(无阈值)',
+    'rules.customTitle': '自定义规则',
+    'rules.customHintActive': '命中即在「触发的诊断」里冒,和 S1/D3a 同路径',
+    'rules.customHintInactive': '引擎未运行,暂不可编辑',
+    'rules.customEmpty': '还没有自定义规则。点右上「+ 新建规则」加一条 —— 它会和策展规则一起参与诊断。',
+    'common.close': '关闭', 'common.copy': '复制',
+    'live.tier1': '用户感知指标', 'live.tier1hint': '最近 60 秒 · 每 2s 刷新', 'live.tier2': '效率与诊断',
+    'kpi.ttft': 'TTFT 平均', 'kpi.ttft.sub': '首 token 延迟', 'kpi.reqs': '请求',
+    'kpi.tpot': 'TPOT 平均', 'kpi.tpot.sub': '每 token 间隔',
+    'kpi.tput': 'Output 吞吐', 'kpi.tput.sub': '系统聚合', 'kpi.tput.perreq': '单请求',
+    'kpi.kv': 'KV cache', 'kpi.running': '运行请求', 'kpi.waiting': '等待队列',
+    'kpi.mfu': 'MFU', 'kpi.mfu.sub': '算力利用率',
+    'kpi.gpuutil': 'GPU 利用率', 'kpi.gpuutil.sub': 'SM 忙碌',
+    'kpi.vram': '显存占用', 'kpi.vram.sub': 'VRAM 容量', 'kpi.prefix': 'Prefix cache 命中',
+    'startup.btn': '启动信息', 'startup.title': 'vLLM 启动信息',
+    'startup.cmdline': '启动命令', 'startup.noCmdline': '未捕获到 cmdline(plugin 早于 sys.argv 设定?)',
+    'startup.env': '环境变量', 'startup.noEnv': '无相关环境变量(仅含 VLLM_/PPING_LANG_/HF_/CUDA_/TORCH_ 等前缀)',
+    'startup.resolved': 'vLLM 解析配置', 'startup.resolvedSub': 'CLI + 默认值合并后的最终生效值',
+    'startup.noConfig': '无 vllm_config(plugin 实例化时未拿到,常见于本地 demo)',
+    'startup.masked': '名称含 TOKEN/KEY/SECRET,值已脱敏',
+    'lang.label': '语言 / Language',
+  },
+  en: {
+    'nav.live': 'Live', 'nav.kernel': 'Kernel', 'nav.rules': 'Rules', 'nav.bench': 'Bench',
+    'brand.sub': 'vLLM perf diagnostics',
+    'btn.issue': 'Issue', 'btn.star': 'Star',
+    'hero.info': 'View vLLM launch command, env vars, resolved config',
+    'common.save': 'Save', 'common.saving': 'Saving…', 'common.reset': 'Reset',
+    'common.suggestion': 'Suggestion', 'common.inference': 'Inference', 'common.edit': 'Edit', 'common.delete': 'Delete',
+    'cfg.form': 'Workload', 'cfg.advanced': 'Advanced',
+    'cfg.hintActive': 'Edit once — every curated rule referencing it follows; saved changes hot-reload, no restart.',
+    'cfg.hintInactive': 'Engine not running; saving only validates, takes effect after restart.',
+    'cfg.sla_ttft': 'TTFT p99 SLA', 'cfg.sla_tpot': 'TPOT p99 SLA',
+    'cfg.long_prompt': 'Long-prompt threshold', 'cfg.waiting': 'Waiting-queue threshold',
+    'cfg.mbu_high': 'MBU near-roof threshold', 'cfg.mbu_low': 'MBU low threshold',
+    'cfg.batch_small': 'Small-batch threshold', 'cfg.mfu_low': 'MFU low threshold',
+    'cfg.tail': 'Tail latency p99/p50', 'cfg.kv': 'KV pressure threshold',
+    'cfg.prefix': 'Prefix-hit low threshold', 'cfg.weights': 'Weights/HBM threshold',
+    'kind.classifier': 'Classifier', 'kind.symptom': 'Symptom', 'kind.fact': 'Fact rule', 'kind.custom': 'Custom',
+    'rules.diagCurrent': 'Active diagnoses', 'rules.diagRecent': 'Recent diagnoses',
+    'rules.freshHint': 'Last 5 min, deduped', 'rules.staleHint': 'None active — showing the latest hit',
+    'rules.allGood': 'All looks good', 'rules.none': 'No rules fired in the current window',
+    'rules.title': 'Diagnosis rules',
+    'rules.hint': 'Rule name = objective fact (measured); root cause / fix is inference — for reference, not a verdict. Curated rules are read-only; custom rules are editable.',
+    'rules.newRule': '+ New rule', 'rules.newRuleDisabled': 'Engine not running — can’t create',
+    'rules.precondition': 'Precondition:', 'rules.matchAny': 'any matches', 'rules.matchAll': 'all match',
+    'rules.onlyRegime': 'only ',
+    'rules.classifierNote': 'Engine classifies by Roofline arithmetic intensity vs ridge (no threshold)',
+    'rules.customTitle': 'Custom rules',
+    'rules.customHintActive': 'Fires into “Active diagnoses” just like S1/D3a',
+    'rules.customHintInactive': 'Engine not running — read-only',
+    'rules.customEmpty': 'No custom rules yet. Click “+ New rule” (top-right) to add one — it joins the curated rules in diagnosis.',
+    'common.close': 'Close', 'common.copy': 'Copy',
+    'live.tier1': 'User-facing metrics', 'live.tier1hint': 'Last 60s · refreshed every 2s', 'live.tier2': 'Efficiency & diagnostics',
+    'kpi.ttft': 'TTFT avg', 'kpi.ttft.sub': 'first-token latency', 'kpi.reqs': 'reqs',
+    'kpi.tpot': 'TPOT avg', 'kpi.tpot.sub': 'per-token interval',
+    'kpi.tput': 'Output throughput', 'kpi.tput.sub': 'system aggregate', 'kpi.tput.perreq': 'per-request',
+    'kpi.kv': 'KV cache', 'kpi.running': 'Running reqs', 'kpi.waiting': 'Waiting queue',
+    'kpi.mfu': 'MFU', 'kpi.mfu.sub': 'compute utilization',
+    'kpi.gpuutil': 'GPU utilization', 'kpi.gpuutil.sub': 'SM busy',
+    'kpi.vram': 'VRAM used', 'kpi.vram.sub': 'VRAM capacity', 'kpi.prefix': 'Prefix cache hit',
+    'startup.btn': 'Startup info', 'startup.title': 'vLLM startup info',
+    'startup.cmdline': 'Launch command', 'startup.noCmdline': 'cmdline not captured (plugin ran before sys.argv?)',
+    'startup.env': 'Environment variables', 'startup.noEnv': 'No relevant env vars (only VLLM_/PPING_LANG_/HF_/CUDA_/TORCH_ prefixes)',
+    'startup.resolved': 'vLLM resolved config', 'startup.resolvedSub': 'final values after merging CLI + defaults',
+    'startup.noConfig': 'No vllm_config (not available at plugin init; common in local demo)',
+    'startup.masked': 'name contains TOKEN/KEY/SECRET — value masked',
+    'lang.label': 'Language / 语言',
+  },
+};
+function _uiLang() {
+  try { const s = window.Alpine && Alpine.store('i18n'); if (s && s.lang) return s.lang; } catch (e) { /* pre-init */ }
+  return localStorage.getItem('pping_lang_ui')
+    || ((navigator.language || '').toLowerCase().startsWith('zh') ? 'zh' : 'en');
+}
+window.t = function (key) {
+  const lang = _uiLang();
+  return (I18N[lang] && I18N[lang][key]) || I18N.en[key] || key;
+};
+document.addEventListener('alpine:init', () => {
+  Alpine.store('i18n', {
+    lang: localStorage.getItem('pping_lang_ui')
+      || ((navigator.language || '').toLowerCase().startsWith('zh') ? 'zh' : 'en'),
+  });
+});
+
 let _chart = null;
 let _ttftChart = null;
 let _tpotChart = null;
@@ -588,19 +703,20 @@ function rulesTab() {
     reasoning: [1000, 30], code: [100, 20], custom: [2000, 50],
   };
   // 配置项 → [中文标签, 单位]。决定哪些字段在表单里出现 + 顺序
+  // [i18n key, 单位] —— 标签走 t(),决定哪些字段在高级网格里出现 + 顺序
   const CFG_LABELS = {
-    sla_ttft_p99_ms: ['TTFT p99 SLA', 'ms'],
-    sla_tpot_p99_ms: ['TPOT p99 SLA', 'ms'],
-    long_prompt_tokens: ['长 prompt 阈值', 'tokens'],
-    waiting_reqs: ['等待队列阈值', 'reqs'],
-    mbu_high_pct: ['MBU 贴顶阈值', '%'],
-    mbu_low_pct: ['MBU 偏低阈值', '%'],
-    batch_small_reqs: ['并发偏小阈值', 'reqs'],
-    mfu_low_ratio: ['MFU 偏低阈值', '0–1'],
-    tail_ratio: ['尾延迟比 p99/p50', '×'],
-    kv_pressure_ratio: ['KV 压力阈值', '0–1'],
-    prefix_hit_low: ['前缀命中低阈值', '0–1'],
-    weights_hbm_ratio: ['权重占显存阈值', '0–1'],
+    sla_ttft_p99_ms: ['cfg.sla_ttft', 'ms'],
+    sla_tpot_p99_ms: ['cfg.sla_tpot', 'ms'],
+    long_prompt_tokens: ['cfg.long_prompt', 'tokens'],
+    waiting_reqs: ['cfg.waiting', 'reqs'],
+    mbu_high_pct: ['cfg.mbu_high', '%'],
+    mbu_low_pct: ['cfg.mbu_low', '%'],
+    batch_small_reqs: ['cfg.batch_small', 'reqs'],
+    mfu_low_ratio: ['cfg.mfu_low', '0–1'],
+    tail_ratio: ['cfg.tail', '×'],
+    kv_pressure_ratio: ['cfg.kv', '0–1'],
+    prefix_hit_low: ['cfg.prefix', '0–1'],
+    weights_hbm_ratio: ['cfg.weights', '0–1'],
   };
   const KIND_LABEL = { classifier: '分类器', symptom: '入口症状', fact: '判别' };
   return {
@@ -619,7 +735,7 @@ function rulesTab() {
     ruleCategory(rule_id) {
       const r = this.allRules().find(x => x.id === rule_id);
       if (!r) return '';
-      return r.custom ? '自定义' : (KIND_LABEL[r.kind] || r.kind || '');
+      return r.custom ? t('kind.custom') : (t('kind.' + r.kind) || r.kind || '');
     },
 
     async load() {
