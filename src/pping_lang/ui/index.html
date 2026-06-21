@@ -348,8 +348,8 @@
             <div x-show="rooflineSource === 'analytical'"
                  style="margin-top: 6px; padding: 6px 10px; background: rgba(217, 119, 6, 0.08); border-left: 3px solid var(--amber); border-radius: 3px; font-size: 11px; color: var(--text);"
                  :title="rooflineFormula">
-              ⚠ 估算数据 · 当前 vllm 不发 perf_stats，按 token 计数 + 模型参数推算（<span x-text="rooflineParamsB"></span>B 参数）。
-              <span style="color: var(--muted-2);">点形状对，绝对值有误差；升 vllm ≥0.20 自动切回实测。</span>
+              <span x-text="t('roof.estimate', { b: rooflineParamsB })"></span>
+              <span style="color: var(--muted-2);" x-text="t('roof.estimateNote')"></span>
             </div>
           </div>
           <div style="display: flex; gap: 14px; align-items: center; flex-wrap: wrap;">
@@ -414,12 +414,10 @@
                 </template>
               </ul>
             </div>
-            <div class="rv-foot" :title="`样本数=${rooflineVerdict.n}  AI 中位=${rooflineVerdict.medAI.toFixed(2)}  knee=${rooflineVerdict.knee.toFixed(0)}`">
-              中位 AI=<span x-text="rooflineVerdict.medAI.toFixed(2)"></span>
-              · 拐点=<span x-text="rooflineVerdict.knee.toFixed(0)"></span>
-              · 样本=<span x-text="rooflineVerdict.n"></span>
-              <span x-show="rooflineVerdict.medAI < rooflineVerdict.knee" style="color: var(--indigo);"> · 位于 memory-bound 区</span>
-              <span x-show="rooflineVerdict.medAI >= rooflineVerdict.knee" style="color: var(--rose);"> · 位于 compute-bound 区</span>
+            <div class="rv-foot" :title="t('roof.footTip', { n: rooflineVerdict.n, ai: rooflineVerdict.medAI.toFixed(2), knee: rooflineVerdict.knee.toFixed(0) })">
+              <span x-text="t('roof.foot', { ai: rooflineVerdict.medAI.toFixed(2), knee: rooflineVerdict.knee.toFixed(0), n: rooflineVerdict.n })"></span>
+              <span x-show="rooflineVerdict.medAI < rooflineVerdict.knee" style="color: var(--indigo);" x-text="' · ' + t('roof.inMemBound')"></span>
+              <span x-show="rooflineVerdict.medAI >= rooflineVerdict.knee" style="color: var(--rose);" x-text="' · ' + t('roof.inCmpBound')"></span>
             </div>
           </div>
         </template>
