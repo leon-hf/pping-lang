@@ -8,7 +8,7 @@
 [![Python](https://img.shields.io/badge/python-3.10%20|%203.11%20|%203.12-4c8bf5)](https://pypi.org/project/pping-lang/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-43a047)](LICENSE)
 [![Status](https://img.shields.io/badge/status-pre--alpha-fb8c00)](#项目状态)
-[![Tests](https://img.shields.io/badge/tests-442%20passing-43a047)](tests/)
+[![Tests](https://img.shields.io/badge/tests-444%20passing-43a047)](tests/)
 
 [快速上手](#快速上手) · [仪表盘](#仪表盘) · [兼容性](#兼容性) · [架构](#架构) · [路线图](#路线图)
 
