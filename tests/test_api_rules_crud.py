@@ -159,7 +159,7 @@ def test_test_endpoint_no_data_returns_no_fire(client):
 def test_test_endpoint_with_data_evaluates(client):
     c, _, db, sink = client
     # Push 5 GPU util samples averaging 30 (below 50 threshold)
-    base = time.monotonic_ns()
+    base = time.time_ns()
     for i in range(5):
         sink.push_metric(MetricPoint(
             ts_ns=base - i * 10**8,  # within 1s
@@ -177,7 +177,7 @@ def test_test_endpoint_with_data_evaluates(client):
 
 def test_test_endpoint_with_override_uses_override(client):
     c, _, db, sink = client
-    base = time.monotonic_ns()
+    base = time.time_ns()
     for i in range(5):
         sink.push_metric(MetricPoint(
             ts_ns=base - i * 10**8, name=M.GPU_UTIL_PCT, value=30.0,
