@@ -1,37 +1,40 @@
 :root {
-    /* White base + warm coral accents (Vercel / Stripe / Linear lineage) */
-    --bg: #ffffff;
+    /* Linear 风格:冷石板灰基底 + 靛蓝主强调。
+       --coral 现为「品牌靛蓝」(原所有品牌处自动跟着变);红色(compute roof / 错误)走 --rose。 */
+    --bg: #fbfbfd;
     --surface: #ffffff;
-    --surface-alt: #faf6ef;
-    --surface-tint: #fdfaf4;
-    --border: #ece7df;
-    --border-strong: #d6cfc3;
-    --text-strong: #1c1410;
-    --text: #3d342c;
-    --muted: #7a6e63;
-    --muted-2: #a8998a;
+    --surface-alt: #f7f7fa;
+    --surface-tint: #fafafd;
+    --surface-2: #f7f7fa;
+    --border: #ececf1;
+    --border-strong: #dcdce3;
+    --text-strong: #1c1c22;
+    --text: #3a3a44;
+    --muted: #6e6e78;
+    --muted-2: #9a9aa4;
+    --muted-3: #c4c4cc;
 
-    /* Diverse accent palette */
-    --coral: #dc4d3e;
-    --coral-soft: #fdeae5;
-    --coral-strong: #a8311f;
-    --amber: #c2660d;
-    --amber-soft: #fdf1d8;
-    --rose: #be1556;
-    --rose-soft: #ffe3ec;
+    /* 强调色族(冷 / Linear 调) */
+    --coral: #5b5bd6;          /* = 品牌靛蓝(原 coral 品牌处全变这个) */
+    --coral-soft: #eeeefb;
+    --coral-strong: #4a4ac0;
+    --amber: #b7791f;
+    --amber-soft: #fbf0dc;
+    --rose: #d8483f;           /* = 红(compute roof / 错误 / 告警) */
+    --rose-soft: #fce9e7;
     --teal: #0d8b80;
-    --teal-soft: #d5f1ec;
-    --indigo: #5147c8;
-    --indigo-soft: #e8e5fb;
-    --sage: #5a8f1f;
-    --sage-soft: #e9f4d3;
+    --teal-soft: #e0f3f0;
+    --indigo: #5b5bd6;         /* memory roof,与品牌同靛蓝 */
+    --indigo-soft: #eeeefb;
+    --sage: #3f9a63;
+    --sage-soft: #e7f4ee;
 
-    --shadow-sm: 0 1px 2px rgba(28, 20, 16, 0.04);
-    --shadow-md: 0 1px 3px rgba(28, 20, 16, 0.05), 0 6px 16px -4px rgba(28, 20, 16, 0.06);
-    --shadow-lg: 0 1px 3px rgba(28, 20, 16, 0.06), 0 12px 32px -8px rgba(28, 20, 16, 0.1);
+    --shadow-sm: 0 1px 2px rgba(20, 20, 40, 0.04);
+    --shadow-md: 0 1px 3px rgba(20, 20, 40, 0.05), 0 6px 16px -4px rgba(20, 20, 40, 0.06);
+    --shadow-lg: 0 1px 3px rgba(20, 20, 40, 0.06), 0 12px 32px -8px rgba(20, 20, 40, 0.1);
     --radius-sm: 6px;
-    --radius: 10px;
-    --radius-lg: 16px;
+    --radius: 9px;
+    --radius-lg: 13px;
   }
   * { box-sizing: border-box; }
   html, body { height: 100%; }
@@ -41,7 +44,7 @@
                  "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
     background: var(--bg);
     background-image:
-      radial-gradient(ellipse 70% 35% at 50% 0%, rgba(220, 77, 62, 0.025), transparent 70%);
+      radial-gradient(ellipse 70% 35% at 50% 0%, rgba(91, 91, 214, 0.025), transparent 70%);
     background-attachment: fixed;
     color: var(--text);
     font-size: 14px;
@@ -72,10 +75,10 @@
     width: 32px;
     height: 32px;
     border-radius: 9px;
-    background: linear-gradient(135deg, var(--coral) 0%, var(--amber) 100%);
+    background: linear-gradient(135deg, var(--coral) 0%, #7c6cf0 100%);
     display: grid;
     place-items: center;
-    box-shadow: 0 2px 8px -2px rgba(220, 77, 62, 0.35);
+    box-shadow: 0 2px 8px -2px rgba(91, 91, 214, 0.35);
   }
   .brand-mark svg { width: 17px; height: 17px; color: white; }
   .brand h1 {
@@ -132,6 +135,11 @@
     gap: 4px;
     border-bottom: 1px solid var(--border);
     background: var(--surface);
+    /* 滚动时吸顶,吸在 sticky header(高 64px:padding 16×2 + brand-mark 32)正下方。
+       z-index 9 < header 的 10:万一像素级重叠,header 压在上面。--surface 不透明,内容不透上来。*/
+    position: sticky;
+    top: 64px;
+    z-index: 9;
   }
   nav.tabs button {
     background: none;
@@ -191,16 +199,16 @@
     gap: 22px;
     align-items: center;
     box-shadow: var(--shadow-sm);
-    background-image: linear-gradient(135deg, rgba(220, 77, 62, 0.03) 0%, transparent 40%);
+    background-image: linear-gradient(135deg, rgba(91, 91, 214, 0.03) 0%, transparent 40%);
   }
   .hero-icon {
     width: 56px; height: 56px;
     border-radius: 14px;
-    background: linear-gradient(135deg, var(--coral) 0%, var(--rose) 100%);
+    background: linear-gradient(135deg, var(--coral) 0%, #7c6cf0 100%);
     display: grid;
     place-items: center;
     color: white;
-    box-shadow: 0 6px 16px -6px rgba(220, 77, 62, 0.4);
+    box-shadow: 0 6px 16px -6px rgba(91, 91, 214, 0.4);
   }
   .hero-icon svg { width: 26px; height: 26px; }
   .hero-body { min-width: 0; }
@@ -250,11 +258,11 @@
     font-weight: 600;
     font-size: 12px;
   }
-  .chip.coral { background: var(--coral-soft); border-color: rgba(220, 77, 62, 0.18); }
+  .chip.coral { background: var(--coral-soft); border-color: rgba(91, 91, 214, 0.18); }
   .chip.coral .chip-val { color: var(--coral-strong); }
   .chip.amber { background: var(--amber-soft); border-color: rgba(194, 102, 13, 0.18); }
   .chip.amber .chip-val { color: var(--amber); }
-  .chip.indigo { background: var(--indigo-soft); border-color: rgba(81, 71, 200, 0.18); }
+  .chip.indigo { background: var(--indigo-soft); border-color: rgba(91, 91, 214, 0.18); }
   .chip.indigo .chip-val { color: var(--indigo); }
   .chip.teal { background: var(--teal-soft); border-color: rgba(13, 139, 128, 0.18); }
   .chip.teal .chip-val { color: var(--teal); }
@@ -267,7 +275,7 @@
     gap: 7px;
     padding: 8px 16px 8px 13px;
     background: var(--coral-soft);
-    border: 1px solid rgba(220, 77, 62, 0.35);
+    border: 1px solid rgba(91, 91, 214, 0.35);
     color: var(--coral-strong);
     border-radius: 999px;
     cursor: pointer;
@@ -276,15 +284,15 @@
     font-weight: 600;
     letter-spacing: -0.005em;
     white-space: nowrap;
-    box-shadow: 0 1px 3px rgba(220, 77, 62, 0.15);
+    box-shadow: 0 1px 3px rgba(91, 91, 214, 0.15);
     transition: background 0.15s, color 0.15s, border-color 0.15s,
                 transform 0.1s, box-shadow 0.15s;
   }
   .hero-info-btn:hover {
-    background: linear-gradient(135deg, var(--coral) 0%, var(--rose) 100%);
+    background: linear-gradient(135deg, var(--coral) 0%, #7c6cf0 100%);
     color: white;
     border-color: var(--coral);
-    box-shadow: 0 4px 12px -2px rgba(220, 77, 62, 0.4);
+    box-shadow: 0 4px 12px -2px rgba(91, 91, 214, 0.4);
     transform: translateY(-1px);
   }
   .hero-info-btn:active { transform: translateY(0); }
@@ -294,7 +302,7 @@
   .modal-backdrop {
     position: fixed;
     inset: 0;
-    background: rgba(28, 20, 16, 0.35);
+    background: rgba(20, 20, 40, 0.35);
     backdrop-filter: blur(2px);
     display: grid;
     place-items: center;
@@ -309,7 +317,7 @@
     max-height: 85vh;
     display: flex;
     flex-direction: column;
-    box-shadow: 0 24px 60px -16px rgba(28, 20, 16, 0.3);
+    box-shadow: 0 24px 60px -16px rgba(20, 20, 40, 0.3);
     overflow: hidden;
   }
   .modal-head {
@@ -374,7 +382,7 @@
   .modal-section .copy-btn:hover {
     background: var(--surface-tint);
     color: var(--coral);
-    border-color: rgba(220, 77, 62, 0.25);
+    border-color: rgba(91, 91, 214, 0.25);
   }
   .modal-section pre.cmdline {
     background: var(--surface-alt);
@@ -618,7 +626,7 @@
     border-radius: 8px;
     border-left: 3px solid var(--indigo);
   }
-  .roofline-verdict.cmp { border-left-color: var(--coral); }
+  .roofline-verdict.cmp { border-left-color: var(--rose); }
   .roofline-verdict.empty {
     color: var(--muted-2);
     font-size: 12.5px;
@@ -659,7 +667,7 @@
     overflow: hidden;
   }
   .rv-bar-fill { height: 100%; border-radius: 4px; transition: width 0.4s; }
-  .rv-bar-compute { background: var(--coral); }
+  .rv-bar-compute { background: var(--rose); }
   .rv-bar-memory { background: var(--indigo); }
   .rv-bar-val { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
   .rv-bar-detail { color: var(--muted-2); font-weight: 400; font-size: 11px; }
@@ -964,8 +972,8 @@
   .btn:hover { opacity: 0.88; }
   .btn:active { transform: translateY(0.5px); }
   .btn.primary {
-    background: linear-gradient(135deg, var(--coral) 0%, var(--rose) 100%);
-    box-shadow: 0 4px 12px -4px rgba(220, 77, 62, 0.4);
+    background: linear-gradient(135deg, var(--coral) 0%, #7c6cf0 100%);
+    box-shadow: 0 4px 12px -4px rgba(91, 91, 214, 0.4);
   }
   .btn.secondary {
     background: var(--surface);
@@ -1174,7 +1182,7 @@
   .form-grid input:focus, .form-grid select:focus, .form-grid textarea:focus {
     outline: none;
     border-color: var(--coral);
-    box-shadow: 0 0 0 3px rgba(220, 77, 62, 0.12);
+    box-shadow: 0 0 0 3px rgba(91, 91, 214, 0.12);
   }
   .form-grid textarea { resize: vertical; min-height: 64px; }
   .form-grid .hint {
@@ -1269,7 +1277,7 @@
   .slo-field:focus {
     outline: none;
     border-color: var(--coral);
-    box-shadow: 0 0 0 3px rgba(220, 77, 62, 0.12);
+    box-shadow: 0 0 0 3px rgba(91, 91, 214, 0.12);
   }
   .slo-field:disabled {
     background: var(--surface-alt);

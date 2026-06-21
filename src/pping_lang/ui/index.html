@@ -402,7 +402,7 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
           </div>
           <div style="display: flex; gap: 14px; align-items: center; flex-wrap: wrap;">
             <span style="display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--muted);">
-              <span style="width: 14px; height: 2.5px; background: var(--coral); border-radius: 2px;"></span>
+              <span style="width: 14px; height: 2.5px; background: var(--rose); border-radius: 2px;"></span>
               Compute roof
             </span>
             <span style="display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--muted);">
@@ -467,7 +467,7 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
               · 拐点=<span x-text="rooflineVerdict.knee.toFixed(0)"></span>
               · 样本=<span x-text="rooflineVerdict.n"></span>
               <span x-show="rooflineVerdict.medAI < rooflineVerdict.knee" style="color: var(--indigo);"> · 位于 memory-bound 区</span>
-              <span x-show="rooflineVerdict.medAI >= rooflineVerdict.knee" style="color: var(--coral);"> · 位于 compute-bound 区</span>
+              <span x-show="rooflineVerdict.medAI >= rooflineVerdict.knee" style="color: var(--rose);"> · 位于 compute-bound 区</span>
             </div>
           </div>
         </template>
@@ -495,7 +495,7 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
             <div style="margin-top: 4px; font-size: 11.5px; color: var(--muted-2);">点 = 相近 step 聚合（越大 = 步数越多）· 离上界多远 = 还能压多少 · 配合下面 PC Sampling 看具体哪个 kernel、为什么</div>
           </div>
           <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap; font-size: 11px; color: var(--muted);">
-            <span style="display: inline-flex; align-items: center; gap: 5px;"><span style="width:13px;height:2.5px;background:var(--coral);border-radius:2px;"></span>Compute roof</span>
+            <span style="display: inline-flex; align-items: center; gap: 5px;"><span style="width:13px;height:2.5px;background:var(--rose);border-radius:2px;"></span>Compute roof</span>
             <span style="display: inline-flex; align-items: center; gap: 5px;"><span style="width:13px;height:2.5px;background:var(--indigo);border-radius:2px;"></span>Memory roof</span>
             <span style="display: inline-flex; align-items: center; gap: 5px;"><span style="width:8px;height:8px;background:var(--teal);border-radius:50%;"></span>当前样本</span>
           </div>
@@ -505,7 +505,7 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
         <template x-if="system.gpu_peak">
           <div style="margin-top: 10px; padding: 9px 13px; background: var(--surface-alt); border-radius: 8px; font-size: 11.5px; color: var(--muted); line-height: 1.75;">
             <strong style="color: var(--text); font-weight: 600;">屋脊线怎么算的</strong>（<span x-text="system.gpu_name || 'GPU'"></span> · 全部从 GPU 现读 CUDA 设备属性）·
-            <span style="color: var(--coral); font-weight: 600;">Compute roof</span> = <strong x-text="system.gpu_peak.bf16_tflops.toFixed(0)"></strong> TFLOPS（= SM数 × SM时钟 × 架构 bf16 Tensor 吞吐）·
+            <span style="color: var(--rose); font-weight: 600;">Compute roof</span> = <strong x-text="system.gpu_peak.bf16_tflops.toFixed(0)"></strong> TFLOPS（= SM数 × SM时钟 × 架构 bf16 Tensor 吞吐）·
             <span style="color: var(--indigo); font-weight: 600;">Memory roof</span> = <strong x-text="system.gpu_peak.mem_bw_gbs.toFixed(0)"></strong> GB/s（= 显存时钟 × 位宽 × 2）·
             拐点 = <strong x-text="(system.gpu_peak.bf16_tflops / system.gpu_peak.mem_bw_gbs * 1000).toFixed(0)"></strong> FLOP/byte
             <span style="color: var(--muted-2);">（拐点左 = 访存受限,拐点右 = 算力受限;点 y = 实测吞吐 TFLOPs/s,x = FLOPs/字节）</span>
@@ -529,7 +529,7 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
             <span x-show="scalingSweep.running" x-text="'⏳ ' + (scalingSweep.progress || '压测中…')"></span>
           </button>
           <span x-show="scalingSweep.running" style="font-size: 11.5px; color: var(--muted-2);">压测流量打到本机 vLLM,期间面板数据会受压测影响</span>
-          <span x-show="scalingSweep.error" style="font-size: 12px; color: var(--coral);" x-text="'压测失败:' + scalingSweep.error"></span>
+          <span x-show="scalingSweep.error" style="font-size: 12px; color: var(--rose);" x-text="'压测失败:' + scalingSweep.error"></span>
         </div>
         <template x-if="scalingSweep.verdict">
           <div style="margin-top: 10px; padding: 12px 14px; border-radius: 8px; border: 1px solid var(--border-strong); border-left: 3px solid var(--teal); background: var(--surface-tint); font-size: 12px; color: var(--text); line-height: 1.8;">
@@ -538,7 +538,7 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
             <div style="margin-top: 7px; display: flex; gap: 14px; flex-wrap: wrap;">
               <template x-for="(r, ri) in scalingSweep.verdict.rows" :key="r.b">
                 <span style="font-variant-numeric: tabular-nums; font-size: 11.5px;"
-                      :style="(ri > 0 && r.eff_pct != null && r.eff_pct < 70) ? 'color: var(--coral); font-weight: 600;' : 'color: var(--muted);'">
+                      :style="(ri > 0 && r.eff_pct != null && r.eff_pct < 70) ? 'color: var(--rose); font-weight: 600;' : 'color: var(--muted);'">
                   B=<span x-text="r.b"></span>: <span x-text="fmt(r.tflops, 2)"></span> TFLOPs/s<span x-show="ri > 0 && r.eff_pct != null">(扩展效率 <span x-text="fmt(r.eff_pct, 0)"></span>%)</span>
                 </span>
               </template>
@@ -1068,12 +1068,12 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
                 <div style="display: flex; height: 18px; border-radius: 5px; overflow: hidden; background: #e9ebee;">
                   <div :style="`width:${warpSplit().issued}%;background:#0d8b80`" :title="`发射指令 ${fmt(warpSplit().issued,1)}%`"></div>
                   <div :style="`width:${warpSplit().slack}%;background:#9bb04f`" :title="`就绪未选中 ${fmt(warpSplit().slack,1)}%`"></div>
-                  <div :style="`width:${warpSplit().stall}%;background:#be1556`" :title="`真 stall ${fmt(warpSplit().stall,1)}%`"></div>
+                  <div :style="`width:${warpSplit().stall}%;background:#c2334f`" :title="`真 stall ${fmt(warpSplit().stall,1)}%`"></div>
                 </div>
                 <div style="display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 9px; font-size: 11.5px; color: var(--muted);">
                   <span style="display: inline-flex; align-items: center; gap: 5px;"><span style="width:9px;height:9px;border-radius:2px;background:#0d8b80;display:inline-block;"></span>发射指令(干活) <strong style="color: var(--text);" x-text="fmt(warpSplit().issued,1)+'%'"></strong></span>
                   <span style="display: inline-flex; align-items: center; gap: 5px;"><span style="width:9px;height:9px;border-radius:2px;background:#9bb04f;display:inline-block;"></span>就绪未选中(占用率有余量) <strong style="color: var(--text);" x-text="fmt(warpSplit().slack,1)+'%'"></strong></span>
-                  <span style="display: inline-flex; align-items: center; gap: 5px;"><span style="width:9px;height:9px;border-radius:2px;background:#be1556;display:inline-block;"></span>真 stall(在等) <strong style="color: var(--text);" x-text="fmt(warpSplit().stall,1)+'%'"></strong></span>
+                  <span style="display: inline-flex; align-items: center; gap: 5px;"><span style="width:9px;height:9px;border-radius:2px;background:#c2334f;display:inline-block;"></span>真 stall(在等) <strong style="color: var(--text);" x-text="fmt(warpSplit().stall,1)+'%'"></strong></span>
                 </div>
                 <div style="margin-top: 7px; font-size: 11.5px; color: var(--muted);"
                      x-text="warpSplit().stall >= 60 ? '→ 大量周期在真 stall:延迟瓶颈,看下面卡在什么' : (warpSplit().slack >= 30 ? '→ 有就绪 warp 没被选中:占用率充足,瓶颈不在并行度' : '→ 发射占比较高:GPU 比较忙碌')"></div>
@@ -1137,8 +1137,8 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
 
       <!-- Currently triggered diagnoses (parent dashboard() scope) -->
       <div class="section-head" style="margin-top: 0;">
-        <h2>当前触发的诊断<span class="count" x-text="`(${diagnoses.length})`"></span></h2>
-        <span class="hint" x-show="diagnoses.length > 0">最近 5 分钟去重后</span>
+        <h2><span x-text="diagnosesStale ? '最近命中的诊断' : '当前触发的诊断'"></span><span class="count" x-text="`(${diagnoses.length})`"></span></h2>
+        <span class="hint" x-show="diagnoses.length > 0" x-text="diagnosesStale ? '当前无触发 · 显示最近一次命中' : '最近 5 分钟去重后'"></span>
       </div>
       <div class="diagnoses" style="margin-bottom: 32px;">
         <template x-if="diagnoses.length === 0">

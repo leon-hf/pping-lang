@@ -20,7 +20,7 @@ const _roofLabelsPlugin = {
         const el = meta.data[i];
         ctx.save();
         ctx.font = (p.labelBold ? '600 ' : '400 ') + '10.5px Inter, "PingFang SC", sans-serif';
-        ctx.fillStyle = p.labelColor || '#7a6e63';
+        ctx.fillStyle = p.labelColor || '#6e6e78';
         ctx.textAlign = 'left';
         ctx.fillText(p.label, el.x + 9, el.y + (p.labelDy != null ? p.labelDy : 4));
         ctx.restore();
@@ -43,18 +43,18 @@ function _makeRooflineChart(ctx) {
           pointHoverBorderColor: '#fff', pointHoverBorderWidth: 2, showLine: false, order: 3,
         },
         {
-          label: 'Compute roof', data: [], showLine: true, borderColor: '#dc4d3e', borderWidth: 2.5,
+          label: 'Compute roof', data: [], showLine: true, borderColor: '#d8483f', borderWidth: 2.5,
           pointRadius: 0, fill: 'origin', backgroundColor: 'rgba(220, 77, 62, 0.06)', tension: 0, order: 1,
         },
         {
-          label: 'Memory roof', data: [], showLine: true, borderColor: '#5147c8', borderWidth: 2.5,
+          label: 'Memory roof', data: [], showLine: true, borderColor: '#5b5bd6', borderWidth: 2.5,
           pointRadius: 0, fill: 'origin', backgroundColor: 'rgba(81, 71, 200, 0.06)', tension: 0, order: 2,
         },
         {
           // 调优地图:decode 的算术强度≈batch → 扩 batch 沿带宽上界向右爬,ridge point 后 compute-bound
-          label: 'batch scaling envelope', data: [], showLine: true, borderColor: '#a8998a',
+          label: 'batch scaling envelope', data: [], showLine: true, borderColor: '#9a9aa4',
           borderDash: [5, 4], borderWidth: 1.5, pointRadius: 3.5, pointStyle: 'rectRot',
-          backgroundColor: '#a8998a', fill: false, order: 4,
+          backgroundColor: '#9a9aa4', fill: false, order: 4,
         },
         {
           // P0-C:实测 scaling 曲线(压测扫并发档)—— 缺口从哪个 B 张开 = 真实瓶颈位置
@@ -66,10 +66,13 @@ function _makeRooflineChart(ctx) {
     },
     options: {
       responsive: true, maintainAspectRatio: false, animation: false,
+      // ridge point 标注画在 compute roof 顶端(peakC = 绘图区最顶),标签还往上 9px + 文字高度,
+      // 没顶部留白就会顶出画布被裁。留 26px 顶部 padding 给最顶那行标签。
+      layout: { padding: { top: 26 } },
       plugins: {
         legend: { display: false },
         tooltip: {
-          backgroundColor: '#1c1410', titleColor: '#fff', bodyColor: '#fdf9f2', padding: 11,
+          backgroundColor: '#1c1c22', titleColor: '#fff', bodyColor: '#f4f4f7', padding: 11,
           cornerRadius: 8, displayColors: false, borderWidth: 0, titleFont: { weight: '600' },
           callbacks: {
             title: () => '',
@@ -97,13 +100,13 @@ function _makeRooflineChart(ctx) {
         // roofline 的参照系是两条 roof 线本身,不需要网格
         x: {
           type: 'logarithmic',
-          title: { display: true, text: 'Arithmetic Intensity (FLOPs / byte)', color: '#7a6e63', font: { size: 11.5, weight: '600' } },
-          ticks: { color: '#a8998a', font: { size: 11 } }, grid: { display: false },
+          title: { display: true, text: 'Arithmetic Intensity (FLOPs / byte)', color: '#6e6e78', font: { size: 11.5, weight: '600' } },
+          ticks: { color: '#9a9aa4', font: { size: 11 } }, grid: { display: false },
         },
         y: {
           type: 'logarithmic',
-          title: { display: true, text: 'Achieved Throughput (TFLOPs/s)', color: '#7a6e63', font: { size: 11.5, weight: '600' } },
-          ticks: { color: '#a8998a', font: { size: 11 } }, grid: { display: false },
+          title: { display: true, text: 'Achieved Throughput (TFLOPs/s)', color: '#6e6e78', font: { size: 11.5, weight: '600' } },
+          ticks: { color: '#9a9aa4', font: { size: 11 } }, grid: { display: false },
         },
       },
     },
@@ -142,7 +145,7 @@ function _applyRooflineData(chart, data) {
     const rest = agg.filter(p => p !== dec && p.n > 0);
     if (rest.length) {
       const pf = rest.reduce((a, p) => (p.x > a.x ? p : a));
-      if (pf.x > dec.x * 2.5) { pf.label = 'prefill'; pf.labelColor = '#7a6e63'; }
+      if (pf.x > dec.x * 2.5) { pf.label = 'prefill'; pf.labelColor = '#6e6e78'; }
     }
   }
   chart.data.datasets[0].data = agg;
@@ -160,10 +163,10 @@ function _applyRooflineData(chart, data) {
       if (b > knee * 1.1) break;
       traj.push({
         x: b, y: Math.min(peakBW * b, peakC), b,
-        label: [1, 8, 32, 128].includes(b) ? `B=${b}` : '', labelDy: -9, labelColor: '#a8998a',
+        label: [1, 8, 32, 128].includes(b) ? `B=${b}` : '', labelDy: -9, labelColor: '#9a9aa4',
       });
     }
-    traj.push({ x: knee, y: peakC, b: Math.round(knee), label: `ridge point (AI=${knee.toFixed(0)})`, labelDy: -9, labelColor: '#dc4d3e' });
+    traj.push({ x: knee, y: peakC, b: Math.round(knee), label: `ridge point (AI=${knee.toFixed(0)})`, labelDy: -9, labelColor: '#d8483f' });
     chart.data.datasets[3].data = traj;
   } else {
     chart.data.datasets[1].data = [];
@@ -221,9 +224,9 @@ function _createMiniLatencyChart(canvasId, color) {
       plugins: {
         legend: { display: false },
         tooltip: {
-          backgroundColor: '#1c1410',
+          backgroundColor: '#1c1c22',
           titleColor: '#fff',
-          bodyColor: '#fdf9f2',
+          bodyColor: '#f4f4f7',
           padding: 9,
           cornerRadius: 6,
           displayColors: true,
@@ -239,12 +242,12 @@ function _createMiniLatencyChart(canvasId, color) {
         y: {
           beginAtZero: true,
           ticks: {
-            color: '#a8998a',
+            color: '#9a9aa4',
             font: { size: 10 },
             maxTicksLimit: 4,
             callback: (v) => v + 'ms',
           },
-          grid: { color: '#f3ebdb', drawBorder: false },
+          grid: { color: '#ececf1', drawBorder: false },
         },
         x: { display: false, grid: { display: false } },
       },
@@ -262,12 +265,12 @@ function _updateMiniLatencyChart(chart, buckets) {
 
 // kernel 类(堆叠面积)— 顺序 = 画的层序
 const _KCLASSES = [
-  ['gemm', '#5147c8', 'GEMM'], ['attention', '#0d8b80', 'Attention'],
-  ['comm', '#dc4d3e', '通信'], ['norm', '#c2660d', 'Norm'],
-  ['activation', '#5a8f1f', 'Activation'], ['rotary', '#be1556', 'Rotary'],
-  ['other', '#a8998a', '其它'],
+  ['gemm', '#5b5bd6', 'GEMM'], ['attention', '#0d8b80', 'Attention'],
+  ['comm', '#d8483f', '通信'], ['norm', '#b7791f', 'Norm'],
+  ['activation', '#3f9a63', 'Activation'], ['rotary', '#c2334f', 'Rotary'],
+  ['other', '#9a9aa4', '其它'],
 ];
-const _kTip = {backgroundColor:'#1c1410',titleColor:'#fff',bodyColor:'#fdf9f2',padding:9,cornerRadius:6,borderWidth:0,titleFont:{weight:'600',size:11},bodyFont:{size:11}};
+const _kTip = {backgroundColor:'#1c1c22',titleColor:'#fff',bodyColor:'#f4f4f7',padding:9,cornerRadius:6,borderWidth:0,titleFont:{weight:'600',size:11},bodyFont:{size:11}};
 function _createKClassChart() {
   const ctx = document.getElementById('k-class-chart'); if (!ctx) return null;
   return new Chart(ctx.getContext('2d'), {
@@ -282,7 +285,7 @@ function _createKClassChart() {
       plugins: {legend: {display: false},
         tooltip: {..._kTip, callbacks: {label: c => `${c.dataset.label}: ${c.parsed.y == null ? '—' : c.parsed.y.toFixed(0) + '%'}`}}},
       scales: {
-        y: {stacked: true, min: 0, max: 100, ticks: {color: '#a8998a', font: {size: 10}, maxTicksLimit: 5, callback: v => v + '%'}, grid: {color: '#f3ebdb', drawBorder: false}},
+        y: {stacked: true, min: 0, max: 100, ticks: {color: '#9a9aa4', font: {size: 10}, maxTicksLimit: 5, callback: v => v + '%'}, grid: {color: '#ececf1', drawBorder: false}},
         x: {display: false, grid: {display: false}},
       },
     },
@@ -294,15 +297,15 @@ function _createKUtilChart() {
     type: 'line',
     data: {labels: [], datasets: [
       {label: 'GPU busy', data: [], borderColor: '#0d8b80', backgroundColor: '#0d8b801a', borderWidth: 2, fill: true, pointRadius: 0, tension: 0.3},
-      {label: '同步等待 (launch-bound)', data: [], borderColor: '#c2660d', backgroundColor: 'transparent', borderWidth: 2, fill: false, pointRadius: 0, tension: 0.3},
+      {label: '同步等待 (launch-bound)', data: [], borderColor: '#b7791f', backgroundColor: 'transparent', borderWidth: 2, fill: false, pointRadius: 0, tension: 0.3},
     ]},
     options: {
       responsive: true, maintainAspectRatio: false, animation: false,
       interaction: {mode: 'index', intersect: false},
-      plugins: {legend: {display: true, position: 'top', align: 'end', labels: {font: {size: 10}, boxWidth: 10, color: '#7a6e63'}},
+      plugins: {legend: {display: true, position: 'top', align: 'end', labels: {font: {size: 10}, boxWidth: 10, color: '#6e6e78'}},
         tooltip: {..._kTip, callbacks: {label: c => `${c.dataset.label}: ${c.parsed.y == null ? '—' : c.parsed.y.toFixed(0) + '%'}`}}},
       scales: {
-        y: {min: 0, max: 100, ticks: {color: '#a8998a', font: {size: 10}, maxTicksLimit: 5, callback: v => v + '%'}, grid: {color: '#f3ebdb', drawBorder: false}},
+        y: {min: 0, max: 100, ticks: {color: '#9a9aa4', font: {size: 10}, maxTicksLimit: 5, callback: v => v + '%'}, grid: {color: '#ececf1', drawBorder: false}},
         x: {display: false, grid: {display: false}},
       },
     },
@@ -370,11 +373,15 @@ function benchTab() {
         if (!this.form.model && (sys.served_model_name || sys.model)) {
           this.form.model = sys.served_model_name || sys.model;
         }
-        // Endpoint heuristic: vLLM usually listens on :8000 on the same host
-        // as the dashboard. Use the page's hostname so this works across
-        // localhost / WSL forwarded / remote dashboard access.
+        // Endpoint:优先用后端解析出的真实 vLLM 端点(从启动 cmdline 的 --host/--port,
+        // 已把 0.0.0.0 归一成 127.0.0.1)。压测在服务端跑,这个端点服务端本机可达、且端口正确
+        // (vLLM 不在默认 :8000 时也不会猜错)。后端没给(老版本)才退回 :8000 的浏览器 host 猜测。
         if (this.form.endpoint === 'http://localhost:8000') {
-          this.form.endpoint = `http://${window.location.hostname}:8000`;
+          if (sys.vllm_endpoint) {
+            this.form.endpoint = sys.vllm_endpoint;
+          } else {
+            this.form.endpoint = `http://${window.location.hostname}:8000`;
+          }
         }
       } catch (e) {
         console.warn('[bench] prefill from /api/system failed:', e);
@@ -751,6 +758,7 @@ function dashboard() {
     e2eHasData: false,
     e2eAvg: null,
     diagnoses: [],
+    diagnosesStale: false,   // true = 当前无触发,面板显示的是最近一次命中(history 回退)
     benchRunning: 0,
     showStartupInfo: false,
     cmdlineCopyLabel: '复制',
@@ -763,11 +771,11 @@ function dashboard() {
     // kernel 语义类 → 颜色 / 中文标签(分段条 + 图例)
     kernelColor(cls) {
       return {
-        attention: '#0d8b80', gemm: '#5147c8', norm: '#c2660d',
-        rotary: '#be1556', activation: '#5a8f1f', comm: '#dc4d3e',
-        elementwise: '#3f7fa8', sampling: '#9b59b6', index: '#b8860b',
-        memcpy: '#7a6e63', other: '#a8998a',
-      }[cls] || '#a8998a';
+        attention: '#0d8b80', gemm: '#5b5bd6', norm: '#b7791f',
+        rotary: '#c2334f', activation: '#3f9a63', comm: '#d8483f',
+        elementwise: '#3f7fa8', sampling: '#9b59b6', index: '#b7791f',
+        memcpy: '#6e6e78', other: '#9a9aa4',
+      }[cls] || '#9a9aa4';
     },
     kernelLabel(cls) {
       return {
@@ -981,11 +989,11 @@ function dashboard() {
     },
     stallColor(cls) {
       return {
-        memory_dependency: '#5147c8', shared_dependency: '#0d8b80',
-        memory_throttle: '#7a5cc8', math_pipe: '#c2660d', exec_dependency: '#be1556',
-        sync: '#dc4d3e', fetch_control: '#5a8f1f', dispatch: '#9a8f1f',
-        scheduler_slack: '#9bb04f', other: '#a8998a',
-      }[cls] || '#a8998a';
+        memory_dependency: '#5b5bd6', shared_dependency: '#0d8b80',
+        memory_throttle: '#7a5cc8', math_pipe: '#b7791f', exec_dependency: '#c2334f',
+        sync: '#d8483f', fetch_control: '#3f9a63', dispatch: '#9a8f1f',
+        scheduler_slack: '#9bb04f', other: '#9a9aa4',
+      }[cls] || '#9a9aa4';
     },
     // 打开 Kernel tab 时调:先拉缓存结果;若可用且还没有结果,自动跑一次取证 ——
     // 免得用户找不到/不点"采集 stall 证据"按钮就以为 tab 空的(§A)。
@@ -1201,8 +1209,8 @@ function dashboard() {
 
       _chart = _makeRooflineChart(ctx);
       // Mini latency-trend charts (TTFT / TPOT / E2E)
-      _ttftChart = _createMiniLatencyChart('ttft-chart', '#dc4d3e');
-      _tpotChart = _createMiniLatencyChart('tpot-chart', '#5147c8');
+      _ttftChart = _createMiniLatencyChart('ttft-chart', '#d8483f');
+      _tpotChart = _createMiniLatencyChart('tpot-chart', '#5b5bd6');
       _e2eChart  = _createMiniLatencyChart('e2e-chart',  '#0d8b80');
       // kernel 趋势图懒创建(canvas 在 x-if 里,见 _updateKernelTrends)
 
@@ -1267,12 +1275,13 @@ function dashboard() {
 
     async refresh() {
       try {
-        const [healthR, kpisR, rooflineR, trendsR, diagR, benchStatusR, kernelsR, tlR, kTrendsR] = await Promise.all([
+        const [healthR, kpisR, rooflineR, trendsR, diagR, diagHistR, benchStatusR, kernelsR, tlR, kTrendsR] = await Promise.all([
           fetch('/api/health').then(r => r.json()),
           fetch('/api/kpis?window=60').then(r => r.json()),
           fetch('/api/roofline?seconds=60').then(r => r.json()),
           fetch('/api/latency_trends?seconds=300&buckets=30').then(r => r.json()),
           fetch('/api/diagnoses?seconds=300').then(r => r.json()),
+          fetch('/api/diagnoses/history?limit=200').then(r => r.json()).catch(() => ({diagnoses: []})),
           fetch('/api/bench/status').then(r => r.json()).catch(() => ({running: []})),
           fetch('/api/kernels?window=60').then(r => r.json()).catch(() => ({enabled: false, class_shares: []})),
           fetch('/api/kernels/timeline?max_events=800').then(r => r.json()).catch(() => ({timeline: null})),
@@ -1286,12 +1295,24 @@ function dashboard() {
         if (!this.tlFrozen) this.timeline = tlR.timeline;   // 冻结时不覆盖,保持可缩放
         _updateKernelTrends(kTrendsR);
 
-        const seen = new Set();
-        this.diagnoses = (diagR.diagnoses || []).filter(d => {
-          if (seen.has(d.rule_id)) return false;
-          seen.add(d.rule_id);
-          return true;
-        });
+        // 当前触发(近 5 分钟)按 rule_id 去重;空窗时回退到内存环里**最近一次命中**(history,
+        // 不论多久前),面板不归零。stale=true 时标签提示"显示最近一次命中、当前无触发"。
+        const dedupeByRule = (arr) => {
+          const seen = new Set();
+          return (arr || []).filter(d => {
+            if (seen.has(d.rule_id)) return false;
+            seen.add(d.rule_id);
+            return true;
+          });
+        };
+        const current = dedupeByRule(diagR.diagnoses);
+        if (current.length > 0) {
+          this.diagnoses = current;
+          this.diagnosesStale = false;
+        } else {
+          this.diagnoses = dedupeByRule(diagHistR.diagnoses);
+          this.diagnosesStale = this.diagnoses.length > 0;
+        }
 
         this.updateRoofline(rooflineR);
         this.updateLatencyTrends(trendsR);
