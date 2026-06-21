@@ -93,7 +93,8 @@ def _driver_loop() -> None:
         time.sleep(prime_delay_s)
 
     from pping_lang.collector.cupti import (  # noqa: PLC0415
-        CtypesPcSamplingLib, PcSamplingController,
+        CtypesPcSamplingLib,
+        PcSamplingController,
     )
     lib = CtypesPcSamplingLib()
     ctl = PcSamplingController(lib)

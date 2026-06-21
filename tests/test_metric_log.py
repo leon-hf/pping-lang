@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from pping_lang.sink.metric_log import AppendLog, JsonlStore
 
-
 # ── AppendLog ──────────────────────────────────────────────────────────────
 
 def test_append_and_read_roundtrip(tmp_path):
