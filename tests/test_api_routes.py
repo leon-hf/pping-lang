@@ -621,8 +621,11 @@ def test_diagnoses_empty_when_no_db_tables(tmp_path):
 def test_deep_evidence_endpoint_runs_and_concludes(tmp_path):
     """POST /api/kernels/deep_evidence 跑取证窗 → stall 分解 + findings。"""
     from pping_lang.collector.cupti import (
-        CuptiKernelCollector, FakeActivitySource, FakePcSamplingLib,
-        PcSamplingController, StallSample,
+        CuptiKernelCollector,
+        FakeActivitySource,
+        FakePcSamplingLib,
+        PcSamplingController,
+        StallSample,
     )
     db = tmp_path / "de.duckdb"
     sink = LocalSink(db_path=db, instance_id="x", flush_interval_s=10.0)

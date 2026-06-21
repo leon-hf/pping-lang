@@ -183,7 +183,8 @@ class SourceCorrelator:
                         continue
                     seen.add(cb)
                     try:
-                        blob = open(cb, "rb").read()
+                        with open(cb, "rb") as _f:
+                            blob = _f.read()
                     except Exception:  # noqa: BLE001
                         continue
                     crc = self._cubin_crc(blob)
