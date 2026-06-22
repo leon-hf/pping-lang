@@ -11,8 +11,11 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-43a047)](LICENSE)
 [![Status](https://img.shields.io/badge/status-pre--alpha-fb8c00)](#项目状态)
 [![Tests](https://img.shields.io/badge/tests-444%20passing-43a047)](tests/)
+[![Live Demo](https://img.shields.io/badge/%F0%9F%8C%90%20Live%20Demo-online-5b5bd6)](https://leon-hf.github.io/pping-lang/)
 
-[快速上手](#快速上手) · [仪表盘](#仪表盘) · [兼容性](#兼容性) · [架构](#架构) · [路线图](#路线图)
+**[🌐 在线演示 Live Demo →](https://leon-hf.github.io/pping-lang/)** —— 浏览器直接看真机采到的仪表盘（实时 / Kernel / 规则 / 压测，中英双语）
+
+[在线演示](https://leon-hf.github.io/pping-lang/) · [快速上手](#快速上手) · [仪表盘](#仪表盘) · [兼容性](#兼容性) · [架构](#架构) · [路线图](#路线图)
 
 </div>
 
