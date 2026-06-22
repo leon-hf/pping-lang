@@ -437,6 +437,39 @@ def test_kernel_findings_quiet_when_healthy():
     assert findings == []
 
 
+def test_kernel_findings_i18n_en():
+    """findings 支持 lang='en':英文无中文;默认 zh 不变。kernel + deep-evidence(stall)两套都测。"""
+    import re
+
+    from pping_lang.api.routes import _kernel_findings, _stall_findings
+    cjk = re.compile(r"[一-鿿]")
+    kw = dict(
+        class_shares=[{"cls": "gemm", "pct": 87.0}],
+        top_kernels=[{"name": "cutlass_x", "cls": "gemm", "pct": 50.0}]
+        + [{"name": f"g{i}", "cls": "gemm", "pct": 1.0} for i in range(10)],
+        sync_share=27.0, memcpy_share=12.0, in_graph=30.0,
+        launch_rate=47000.0, overhead_cb_ms=80.0, window_s=2.0,
+    )
+    en = _kernel_findings(lang="en", **kw)
+    zh = _kernel_findings(**kw)  # default zh
+    assert en and zh
+    en_txt = " | ".join(f["title"] + f["detail"] for f in en)
+    assert not cjk.search(en_txt), f"en kernel findings still have CJK: {en_txt}"
+    assert "Launch-bound" in en_txt and "GEMM" in en_txt
+    assert cjk.search(" | ".join(f["title"] + f["detail"] for f in zh))  # default stays Chinese
+
+    result = {
+        "available": True,
+        "stall_shares": [{"cls": "memory_dependency", "pct": 60.0},
+                         {"cls": "scheduler_slack", "pct": 45.0}],
+        "kernel_table": [{"kernel": "k", "dominant_stall": "memory_dependency", "dominant_pct": 70.0}],
+        "overhead": {"hwfull": 1, "dropped": 5},
+    }
+    sf_en = _stall_findings(result, lang="en")
+    assert sf_en and not cjk.search(" | ".join(f["title"] + f["detail"] for f in sf_en))
+    assert cjk.search(" | ".join(f["title"] + f["detail"] for f in _stall_findings(result)))  # default zh
+
+
 def test_kernels_flamegraph_endpoint(tmp_path):
     """/api/kernels/flamegraph 透出 collector 的 Python→kernel 火焰图树。"""
     db = tmp_path / "fg.duckdb"
