@@ -409,6 +409,12 @@ const I18N = {
     'rule.D3a.name': 'MFU、MBU 双低', 'rule.D3a.hypothesis': '两个屋顶都没贴近 —— 算力、带宽都有富余,瓶颈不在硬件(可能是 batch 没拼起来 / launch 开销 / 小算子未融合)。', 'rule.D3a.suggestion': '检查 batch 是否拼起来 / Continuous Batching / CUDA Graph / 算子融合。',
     'rule.D3c.name': '前缀缓存命中率低', 'rule.D3c.hypothesis': '前缀缓存命中低(若 workload 有公共前缀,则有复用空间;否则正常)。', 'rule.D3c.suggestion': '检查 prompt 模板公共前缀 / 开 enable_prefix_caching / RadixAttention。',
     'rule.D4a.name': 'KV 用量高且发生抢占', 'rule.D4a.hypothesis': 'KV 池将满并已触发抢占。', 'rule.D4a.suggestion': 'KV 量化(FP8) / 降 max_model_len / KV offload。',
+    'decode.vllmFusedRms': 'vLLM 自定义 · fused add + RMSNorm', 'decode.vllmRms': 'vLLM 自定义 · RMSNorm',
+    'decode.vllmRope': 'vLLM 自定义 · RoPE', 'decode.vllmSilu': 'vLLM 自定义 · SiLU/激活',
+    'decode.vllmCuda': 'vLLM 自定义 CUDA kernel', 'decode.flashinferSample': 'FlashInfer · 采样 kernel',
+    'decode.cublasGemv': 'cuBLAS GEMV(矩阵×向量,小 batch 典型)',
+    'decode.torchNative': 'PyTorch · 原生 elementwise/reduce kernel',
+    'decode.cppCompiled': 'C++ 编译 kernel(闭源/无 lineinfo)',
     'lang.label': '语言 / Language',
   },
   en: {
@@ -818,6 +824,12 @@ const I18N = {
     'rule.D3a.name': 'MFU and MBU both low', 'rule.D3a.hypothesis': 'Neither roof is close — both compute and bandwidth have headroom, so the bottleneck isn’t hardware (likely: batch not assembled / launch overhead / small ops not fused).', 'rule.D3a.suggestion': 'Check whether the batch is assembled / Continuous Batching / CUDA Graph / operator fusion.',
     'rule.D3c.name': 'Prefix-cache hit rate is low', 'rule.D3c.hypothesis': 'Low prefix-cache hits (if the workload shares a common prefix there’s reuse to gain; otherwise this is normal).', 'rule.D3c.suggestion': 'Check the prompt template’s common prefix / enable_prefix_caching / RadixAttention.',
     'rule.D4a.name': 'KV usage high and preemption occurring', 'rule.D4a.hypothesis': 'The KV pool is nearly full and preemption has triggered.', 'rule.D4a.suggestion': 'KV quantization (FP8) / lower max_model_len / KV offload.',
+    'decode.vllmFusedRms': 'vLLM custom · fused add + RMSNorm', 'decode.vllmRms': 'vLLM custom · RMSNorm',
+    'decode.vllmRope': 'vLLM custom · RoPE', 'decode.vllmSilu': 'vLLM custom · SiLU/activation',
+    'decode.vllmCuda': 'vLLM custom CUDA kernel', 'decode.flashinferSample': 'FlashInfer · sampling kernel',
+    'decode.cublasGemv': 'cuBLAS GEMV (matrix×vector, typical for small batch)',
+    'decode.torchNative': 'PyTorch · native elementwise/reduce kernel',
+    'decode.cppCompiled': 'C++ compiled kernel (closed-source / no lineinfo)',
     'lang.label': 'Language / 语言',
   },
 };
@@ -1698,6 +1710,23 @@ function dashboard() {
       }
       if (cls === 'comm') return 'Comm (NCCL)';
       return this.kernelLabel(cls);
+    },
+    // 后端 decode_kernel_name 的中文标签 → 按短语客户端翻译(保留中文,en 出英文;PC sampling 出数据时才显示)
+    kernelDecodeI18n(s) {
+      if (!s) return s;
+      const M = {
+        'vLLM 自定义 · fused add + RMSNorm': 'decode.vllmFusedRms',
+        'vLLM 自定义 · RMSNorm': 'decode.vllmRms',
+        'vLLM 自定义 · RoPE': 'decode.vllmRope',
+        'vLLM 自定义 · SiLU/激活': 'decode.vllmSilu',
+        'vLLM 自定义 CUDA kernel': 'decode.vllmCuda',
+        'FlashInfer · 采样 kernel': 'decode.flashinferSample',
+        'cuBLAS GEMV(矩阵×向量,小 batch 典型)': 'decode.cublasGemv',
+        'PyTorch · 原生 elementwise/reduce kernel': 'decode.torchNative',
+        'C++ 编译 kernel(闭源/无 lineinfo)': 'decode.cppCompiled',
+      };
+      const k = M[s];
+      return k ? t(k) : s;
     },
     // #3 这个 kernel 浪费的"全局 GPU 时间"= 时间占比 × 它内部 stall 比例
     kernelStallTimePct(k) {
