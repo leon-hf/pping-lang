@@ -17,7 +17,7 @@
       <div class="brand-mark">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
       </div>
-      <h1>pping-lang<span class="sub">vLLM 性能诊断</span></h1>
+      <h1>pping-lang<span class="sub" x-text="t('brand.sub')"></span></h1>
     </div>
     <div class="meta">
       <span class="status-pill"><span class="status-dot"></span>healthy</span>
@@ -30,31 +30,35 @@
       <span class="meta-sep"></span>
       <span style="color: var(--muted-2);" x-text="`v${health.version || ''}`"></span>
       <span class="meta-sep"></span>
-      <a class="header-link" href="https://github.com/leon-hf/pping-lang/issues/new" target="_blank" rel="noopener" title="提交 issue / 反馈问题或建议">
+      <div class="lang-toggle" :title="t('lang.label')">
+        <button :class="{ active: $store.i18n.lang === 'zh' }" @click="$store.i18n.lang='zh'; localStorage.setItem('pping_lang_ui','zh')">中</button>
+        <button :class="{ active: $store.i18n.lang === 'en' }" @click="$store.i18n.lang='en'; localStorage.setItem('pping_lang_ui','en')">EN</button>
+      </div>
+      <a class="header-link" href="https://github.com/leon-hf/pping-lang/issues/new" target="_blank" rel="noopener" :title="t('btn.issue')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><line x1="12" y1="8" x2="12" y2="12.5"/><circle cx="12" cy="16" r="1.1" fill="currentColor" stroke="none"/></svg>
-        提 Issue
+        <span x-text="t('btn.issue')"></span>
       </a>
-      <a class="header-link star" href="https://github.com/leon-hf/pping-lang" target="_blank" rel="noopener" title="去 GitHub 给个 Star ⭐">
+      <a class="header-link star" href="https://github.com/leon-hf/pping-lang" target="_blank" rel="noopener" :title="t('btn.star')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
-        Star
+        <span x-text="t('btn.star')"></span>
       </a>
     </div>
   </header>
 
   <nav class="tabs">
-    <button :class="{ active: tab === 'live' }" @click="tab = 'live'">实时</button>
+    <button :class="{ active: tab === 'live' }" @click="tab = 'live'" x-text="t('nav.live')"></button>
     <button :class="{ active: tab === 'kernel' }" @click="tab = 'kernel'">
-      Kernel
+      <span x-text="t('nav.kernel')"></span>
       <span x-show="kernels.enabled" class="tab-badge" style="background: var(--teal-soft); color: var(--teal);">CUPTI</span>
     </button>
     <button :class="{ active: tab === 'rules' }" @click="tab = 'rules'">
-      规则
+      <span x-text="t('nav.rules')"></span>
       <span x-show="diagnoses.length > 0" class="tab-badge"
             :class="{ crit: diagnoses.some(d => d.severity === 'critical') }"
             x-text="diagnoses.length"></span>
     </button>
     <button :class="{ active: tab === 'bench' }" @click="tab = 'bench'">
-      压测
+      <span x-text="t('nav.bench')"></span>
       <span x-show="benchRunning > 0" class="tab-badge"
             x-text="benchRunning"></span>
     </button>
@@ -101,13 +105,13 @@
           </div>
         </div>
         <div class="hero-pulse">
-          <button class="hero-info-btn" @click="showStartupInfo = true" title="查看 vLLM 启动命令、环境变量、解析配置">
+          <button class="hero-info-btn" @click="showStartupInfo = true" :title="t('hero.info')">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <circle cx="12" cy="12" r="10"/>
               <line x1="12" y1="16" x2="12" y2="12"/>
               <line x1="12" y1="8" x2="12.01" y2="8"/>
             </svg>
-            启动信息
+            <span x-text="t('startup.btn')"></span>
           </button>
           <div class="label">TTFT p99</div>
           <div class="val"><span x-text="fmt(kpis.ttft_p99_ms, 0)"></span><span class="unit">ms</span></div>
@@ -119,19 +123,19 @@
            @click.self="showStartupInfo = false" @keydown.escape.window="showStartupInfo = false">
         <div class="modal" role="dialog" aria-modal="true">
           <div class="modal-head">
-            <h2>vLLM 启动信息 · <span x-text="system.instance_id"></span></h2>
-            <button class="modal-close" @click="showStartupInfo = false" aria-label="关闭">×</button>
+            <h2><span x-text="t('startup.title')"></span> · <span x-text="system.instance_id"></span></h2>
+            <button class="modal-close" @click="showStartupInfo = false" :aria-label="t('common.close')">×</button>
           </div>
           <div class="modal-body">
 
             <!-- 启动命令 -->
             <div class="modal-section">
               <div class="section-head-row">
-                <h3>启动命令</h3>
-                <button class="copy-btn" @click="copyCmdline()" x-text="cmdlineCopyLabel">复制</button>
+                <h3 x-text="t('startup.cmdline')"></h3>
+                <button class="copy-btn" @click="copyCmdline()" x-text="cmdlineCopyLabel || t('common.copy')"></button>
               </div>
               <template x-if="(system.cmdline || []).length === 0">
-                <div class="empty">未捕获到 cmdline（plugin 早于 sys.argv 设定？）</div>
+                <div class="empty" x-text="t('startup.noCmdline')"></div>
               </template>
               <template x-if="(system.cmdline || []).length > 0">
                 <pre class="cmdline" x-text="(system.cmdline || []).join(' ')"></pre>
@@ -141,10 +145,10 @@
             <!-- 环境变量 -->
             <div class="modal-section">
               <div class="section-head-row">
-                <h3>环境变量 <span style="font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--muted-2);" x-text="`(${Object.keys(system.env || {}).length})`"></span></h3>
+                <h3><span x-text="t('startup.env')"></span> <span style="font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--muted-2);" x-text="`(${Object.keys(system.env || {}).length})`"></span></h3>
               </div>
               <template x-if="Object.keys(system.env || {}).length === 0">
-                <div class="empty">无相关环境变量（仅含 VLLM_/PPING_LANG_/HF_/CUDA_/TORCH_ 等前缀）</div>
+                <div class="empty" x-text="t('startup.noEnv')"></div>
               </template>
               <template x-if="Object.keys(system.env || {}).length > 0">
                 <table class="kv">
@@ -153,7 +157,7 @@
                       <td x-text="key"></td>
                       <td>
                         <template x-if="system.env[key] === '***'">
-                          <span class="masked" title="名称含 TOKEN/KEY/SECRET，值已脱敏">***</span>
+                          <span class="masked" :title="t('startup.masked')">***</span>
                         </template>
                         <template x-if="system.env[key] !== '***'">
                           <span x-text="system.env[key]"></span>
@@ -168,10 +172,10 @@
             <!-- 解析配置 -->
             <div class="modal-section">
               <div class="section-head-row">
-                <h3>vLLM 解析配置 <span style="font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--muted-2);">CLI + 默认值合并后的最终生效值</span></h3>
+                <h3><span x-text="t('startup.resolved')"></span> <span style="font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--muted-2);" x-text="t('startup.resolvedSub')"></span></h3>
               </div>
               <template x-if="!system.resolved_config || Object.keys(system.resolved_config).length === 0">
-                <div class="empty">无 vllm_config（plugin 实例化时未拿到，常见于本地 demo）</div>
+                <div class="empty" x-text="t('startup.noConfig')"></div>
               </template>
               <template x-for="group in Object.keys(system.resolved_config || {}).sort()" :key="group">
                 <div class="config-group">
@@ -194,23 +198,16 @@
 
       <!-- KPI grid — Tier 1: user-facing latency & capacity -->
       <div class="section-head">
-        <h2>用户感知指标</h2>
-        <span class="hint">最近 60 秒 · 每 2s 刷新</span>
+        <h2 x-text="t('live.tier1')"></h2>
+        <span class="hint" x-text="t('live.tier1hint')"></span>
       </div>
 
       <div class="kpis">
         <div class="kpi coral" :class="{ warn: kpis.ttft_p99_ms > 1000 && kpis.ttft_p99_ms <= 2000, crit: kpis.ttft_p99_ms > 2000 }"
-             title="TTFT = Time To First Token
-从用户发送请求到收到第一个生成 token 之间的延迟。
-大数字 = 窗口内平均（典型水平）；下方分布条 = p50→p95→p99（看尾部恶化,告警颜色按 p99）。
-解读：
-  · 主要由 prefill 阶段决定（要处理整个 prompt）
-  · 长 prompt / 高并发 / 排队都会拉高 TTFT
-  · 用户感觉的「卡了多久才有反应」就是这个
-SLA 常见档：<200ms 即时；<500ms 流畅；<1s 可接受；>2s 用户开始流失。">
-          <div class="label">TTFT 平均 <span class="kpi-sub-label">首 token 延迟 · <span x-text="kpis.ttft?.n ?? 0"></span> 请求</span></div>
+             :title="t('tip.ttft')">
+          <div class="label"><span x-text="t('kpi.ttft')"></span> <span class="kpi-sub-label"><span x-text="t('kpi.ttft.sub')"></span> · <span x-text="kpis.ttft?.n ?? 0"></span> <span x-text="t('kpi.reqs')"></span></span></div>
           <div class="value"><span x-text="fmt(kpis.ttft?.avg, 0)"></span><span class="unit">ms</span></div>
-          <div x-show="kpis.ttft && kpis.ttft.p99" title="分位分布:每行一条,p99 = 满刻度。p95/p99 行越接近 p50 行 = 尾部越稳;p99 远长于 p50 = 尾延迟恶化。">
+          <div x-show="kpis.ttft && kpis.ttft.p99" :title="t('tip.dist')">
             <div class="pct-rows">
               <div class="pct-row"><span class="pq">p50</span><div class="pr-track"><i :style="`width:${pctW(kpis.ttft,'p50')}%`"></i></div><b x-text="fmt(kpis.ttft?.p50, 0)"></b></div>
               <div class="pct-row"><span class="pq">p95</span><div class="pr-track"><i :style="`width:${pctW(kpis.ttft,'p95')}%`"></i></div><b x-text="fmt(kpis.ttft?.p95, 0)"></b></div>
@@ -219,21 +216,13 @@ SLA 常见档：<200ms 即时；<500ms 流畅；<1s 可接受；>2s 用户开始
           </div>
         </div>
         <div class="kpi rose" :class="{ warn: kpis.tpot_p99_ms > 50 && kpis.tpot_p99_ms <= 100, crit: kpis.tpot_p99_ms > 100 }"
-             title="TPOT = Time Per Output Token
-生成每个 token 的平均时间（每次 forward pass 的时长）。
-大数字 = 窗口内平均；下方分布条 = p50→p95→p99（尾延迟,告警颜色按 p99）。
-解读：
-  · 主要由 decode 阶段的带宽决定（要读完一遍权重）
-  · 用户感觉的「文字一个个吐出来的快慢」就是这个
-  · 1/TPOT = 单请求 token 速度（50ms TPOT = 20 tok/s）
-SLA 常见档：<30ms 流畅；<50ms 可接受；>100ms 明显卡顿。
-ITL fallback：vllm <0.20 不发 TPOT 时，用 iter 间隔近似（语义略不同）。">
+             :title="t('tip.tpot')">
           <div class="label">
-            TPOT 平均 <span class="kpi-sub-label" x-text="kpis.tpot_source === 'itl' ? '(ITL fallback)' : '每 token 间隔'"></span>
+            <span x-text="t('kpi.tpot')"></span> <span class="kpi-sub-label" x-text="kpis.tpot_source === 'itl' ? '(ITL fallback)' : t('kpi.tpot.sub')"></span>
           </div>
           <div class="value"><span x-text="fmt(kpis.tpot?.avg, 0)"></span><span class="unit">ms</span></div>
           <div x-show="kpis.tpot && kpis.tpot.p99"
-               :title="(kpis.tpot_source === 'itl' ? '注意:当前 vllm 未发 TPOT,回退到 ITL 近似。' : '') + '分位分布:每行一条,p99 = 满刻度。p99 远长于 p50 = 尾延迟恶化。告警颜色按 p99。'">
+               :title="(kpis.tpot_source === 'itl' ? t('tip.tpotItl') : '') + t('tip.dist')">
             <div class="pct-rows">
               <div class="pct-row"><span class="pq">p50</span><div class="pr-track"><i :style="`width:${pctW(kpis.tpot,'p50')}%`"></i></div><b x-text="fmt(kpis.tpot?.p50, 0)"></b></div>
               <div class="pct-row"><span class="pq">p95</span><div class="pr-track"><i :style="`width:${pctW(kpis.tpot,'p95')}%`"></i></div><b x-text="fmt(kpis.tpot?.p95, 0)"></b></div>
@@ -242,155 +231,111 @@ ITL fallback：vllm <0.20 不发 TPOT 时，用 iter 间隔近似（语义略不
           </div>
         </div>
         <div class="kpi teal"
-             title="Output 吞吐 = 系统每秒产出的 token 总数
-公式：窗口内 sum(gen_tokens) / 窗口秒数
-解读两个值各看不同的事：
-  · 系统聚合（大字）：所有并发请求合起来每秒吐多少 token —— 衡量容量、$/token
-  · 单请求（小字 = 1000/TPOT_p50）：单个用户感觉每秒吐多少 token —— 衡量打字速度
-两者关系：系统聚合 ≈ 单请求速度 × 并发数（理想情况下）。
-扩 batch 时系统聚合涨、单请求速度可能微跌 — 用户略卡但总产能高。">
-          <div class="label">Output 吞吐 <span class="kpi-sub-label">系统聚合</span></div>
+             :title="t('tip.tput')">
+          <div class="label"><span x-text="t('kpi.tput')"></span> <span class="kpi-sub-label" x-text="t('kpi.tput.sub')"></span></div>
           <div class="value"><span x-text="fmt(kpis.output_tps, 0)"></span><span class="unit">tok/s</span></div>
           <div class="sub-line" x-show="kpis.per_req_decode_tps">
-            单请求 <span x-text="fmt(kpis.per_req_decode_tps, 0)"></span> tok/s
+            <span x-text="t('kpi.tput.perreq')"></span> <span x-text="fmt(kpis.per_req_decode_tps, 0)"></span> tok/s
           </div>
         </div>
         <div class="kpi amber" :class="{ warn: kpis.kv_cache > 0.8 && kpis.kv_cache <= 0.9, crit: kpis.kv_cache > 0.9 }"
-             title="KV cache 使用率 = 已分配 KV 块 / 总 KV 块
-vllm 把每个请求的注意力 K/V 缓存切成固定大小的 block 管理。
-解读：
-  · 这是显存里『装请求』的容量水位，跟前面『显存占用』不是一回事
-  · <50%：还能塞更多并发，扩 max_num_seqs 没风险
-  · >80%：接近极限，新请求要么排队要么抢占老请求 (preemption)
-  · >90%：preemption 频率会陡升，吞吐反而下降
-和 --gpu-memory-utilization 互动：那个参数决定 KV cache 总池子多大。">
+             :title="t('tip.kv')">
           <div class="label">KV cache</div>
           <div class="value"><span x-text="fmt(kpis.kv_cache * 100, 0)"></span><span class="unit">%</span></div>
         </div>
         <div class="kpi indigo"
-             title="运行中请求数 = 当前正在 forward pass 的请求数 (batch size)
-vllm 的『continuous batching』每个 iter 都可能改变这个数。
-解读：
-  · 衡量当前并发度，跟 TPS 一起看
-  · 远低于 max_num_seqs：吃不满，扩客户端并发
-  · 等于 max_num_seqs：满载，看是被吞吐限制还是被显存限制
-  · 跟 waiting_reqs 比较：running 上不去 + waiting 排队 = 显存瓶颈">
-          <div class="label">运行请求</div>
+             :title="t('tip.running')">
+          <div class="label" x-text="t('kpi.running')"></div>
           <div class="value" x-text="fmt(kpis.running_reqs, 0)"></div>
         </div>
         <div class="kpi sage" :class="{ warn: kpis.waiting_reqs > 20 }"
-             title="等待队列长度 = 已收到但没排上 running 的请求数
-显存不够或者 max_num_seqs 满了，新请求就堆在这里。
-解读：
-  · 长期 >0：消化速度跟不上进来速度 —— 加 GPU 或限流
-  · 突发 >0 后快速归零：偶发流量尖峰，正常
-  · 持续 >20：用户感觉 TTFT 飙升，是规则告警阈值">
-          <div class="label">等待队列</div>
+             :title="t('tip.waiting')">
+          <div class="label" x-text="t('kpi.waiting')"></div>
           <div class="value" x-text="fmt(kpis.waiting_reqs, 0)"></div>
         </div>
       </div>
 
       <!-- KPI grid — Tier 2: efficiency & diagnostics -->
       <div class="section-head" style="margin-top: 28px;">
-        <h2 style="font-size: 16px;">效率与诊断</h2>
+        <h2 style="font-size: 16px;" x-text="t('live.tier2')"></h2>
       </div>
 
       <div class="kpis">
         <div class="kpi teal" :class="{ warn: kpis.mfu > 0 && kpis.mfu < 0.2 }"
-             title="MFU = Model FLOPs Utilization
-实际算力 / GPU 峰值算力，衡量「跑模型时 GPU 算力真正被用了多少」。
-公式：MFU = (6 · params · tokens/sec) / peak_TFLOPS
-解读：
-  · 训练通常 30-55% 算良好（A100/H100 上）
-  · 推理 decode 阶段天然低（~1-5%）—— 受带宽限制，不是 MFU 越高越好
-  · prefill 阶段高（>30%）才是 MFU 真正有意义的时候
-依赖 vllm ≥0.20 的 perf_stats，当前 0.13 不发，这里会显示 —">
-          <div class="label">MFU <span class="kpi-sub-label">算力利用率</span></div>
+             :title="t('tip.mfu')">
+          <div class="label"><span x-text="t('kpi.mfu')"></span> <span class="kpi-sub-label" x-text="t('kpi.mfu.sub')"></span></div>
           <div class="value"><span x-text="fmt(kpis.mfu * 100, 0)"></span><span class="unit">%</span></div>
         </div>
         <div class="kpi indigo" :class="{ warn: kpis.gpu_util !== null && kpis.gpu_util < 30 }"
-             title="GPU 利用率 = SM (Streaming Multiprocessor) 忙碌时间占比
-NVML 报的值，反映「过去采样间隔内，至少一个 kernel 在跑」的时间比例。
-注意：不代表算力用满了 —— decode 阶段常见 70-90% 但 MFU 只有 1-5%，
-因为 SM 在「跑 kernel 等数据」也算忙。
-真正衡量算力效率要看 MFU。">
-          <div class="label">GPU 利用率 <span class="kpi-sub-label">SM 忙碌</span></div>
+             :title="t('tip.gpuutil')">
+          <div class="label"><span x-text="t('kpi.gpuutil')"></span> <span class="kpi-sub-label" x-text="t('kpi.gpuutil.sub')"></span></div>
           <div class="value"><span x-text="fmt(kpis.gpu_util, 0)"></span><span class="unit">%</span></div>
         </div>
         <div class="kpi rose" :class="{ warn: kpis.gpu_mem_used_pct > 85 && kpis.gpu_mem_used_pct <= 95, crit: kpis.gpu_mem_used_pct > 95 }"
-             title="显存占用率 = 已用 VRAM / 总 VRAM
-权重 + KV cache + 激活值 + CUDA workspace 之和。
-vllm 启动时 --gpu-memory-utilization 决定权重+KV的目标占比（默认 0.9）。
-持续 >95% 容易触发 preemption / OOM。">
-          <div class="label">显存占用 <span class="kpi-sub-label">VRAM 容量</span></div>
+             :title="t('tip.vram')">
+          <div class="label"><span x-text="t('kpi.vram')"></span> <span class="kpi-sub-label" x-text="t('kpi.vram.sub')"></span></div>
           <div class="value"><span x-text="fmt(kpis.gpu_mem_used_pct, 0)"></span><span class="unit">%</span></div>
         </div>
         <div class="kpi sage" :class="{ warn: kpis.prefix_cache_hit !== null && kpis.prefix_cache_hit < 0.1 }"
-             title="Prefix cache 命中率 = 复用前缀的 KV 块 / 总查询块
-vllm 会缓存已经算过的 prompt 前缀的 KV，下次请求命中前缀可以跳过 prefill。
-多轮对话 / system prompt 固定的场景应该 >50%；一次性请求自然为 0。">
-          <div class="label">Prefix cache 命中</div>
+             :title="t('tip.prefix')">
+          <div class="label" x-text="t('kpi.prefix')"></div>
           <div class="value"><span x-text="fmt(kpis.prefix_cache_hit * 100, 0)"></span><span class="unit">%</span></div>
         </div>
         <div class="kpi amber" :class="{ warn: kpis.padding_ratio > 0.3 }"
-             title="CUDA padding = (cudagraph 实际批量 - 真实 token) / cudagraph 批量
-vllm 用 CUDA graph 加速时按固定 batch size 跑，少的 token 用 padding 填。
-padding 越高浪费越大。>30% 说明 batch 大小档位选得不合适。">
+             :title="t('tip.padding')">
           <div class="label">CUDA padding</div>
           <div class="value"><span x-text="fmt(kpis.padding_ratio * 100, 0)"></span><span class="unit">%</span></div>
         </div>
         <div class="kpi coral" :class="{ warn: kpis.preempt_per_min > 0 && kpis.preempt_per_min <= 5, crit: kpis.preempt_per_min > 5 }"
-             title="抢占 / 分钟 = 每分钟有多少请求被 swap out
-KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来。
->0 说明显存紧张，>5/min 是明显信号 — 应当减小 max_num_seqs 或扩 VRAM。">
-          <div class="label">抢占 / 分钟</div>
+             :title="t('tip.preempt')">
+          <div class="label" x-text="t('kpi.preempt')"></div>
           <div class="value" x-text="fmt(kpis.preempt_per_min, 1)"></div>
         </div>
       </div>
 
       <!-- Latency trends (TTFT / TPOT / E2E) -->
       <div class="section-head" style="margin-top: 28px;">
-        <h2 style="font-size: 16px;">用户延迟趋势</h2>
-        <span class="hint">最近 5 分钟 · 实线 平均 / 浅线 p99</span>
+        <h2 style="font-size: 16px;" x-text="t('live.latTrends')"></h2>
+        <span class="hint" x-text="t('live.latHint')"></span>
       </div>
 
       <div class="latency-trends">
         <div class="lat-card">
           <div class="lat-head">
-            <span class="lat-title">TTFT · 首 token 延迟</span>
+            <span class="lat-title" x-text="t('lat.ttft')"></span>
             <span class="lat-now">
-              <span class="label-p">平均</span>
+              <span class="label-p" x-text="t('common.avg')"></span>
               <span x-text="fmt(kpis.ttft?.avg, 0)"></span><span class="unit">ms</span>
             </span>
           </div>
           <div class="lat-chart" x-show="ttftHasData"><canvas id="ttft-chart"></canvas></div>
-          <div class="lat-empty" x-show="!ttftHasData">暂无 TTFT 数据</div>
+          <div class="lat-empty" x-show="!ttftHasData" x-text="t('lat.noTtft')"></div>
         </div>
 
         <div class="lat-card">
           <div class="lat-head">
-            <span class="lat-title">TPOT · 单 token 生成时间</span>
+            <span class="lat-title" x-text="t('lat.tpot')"></span>
             <span class="lat-now">
-              <span class="label-p">平均</span>
+              <span class="label-p" x-text="t('common.avg')"></span>
               <span x-text="fmt(kpis.tpot?.avg, 0)"></span><span class="unit">ms</span>
             </span>
           </div>
-          <div class="lat-source" x-show="tpotSource === 'itl'">数据源：ITL fallback（当前 vllm 没发 TPOT 字段，用 iter 间隔近似）</div>
+          <div class="lat-source" x-show="tpotSource === 'itl'" x-text="t('lat.itlSource')"></div>
           <div class="lat-chart" x-show="tpotHasData"><canvas id="tpot-chart"></canvas></div>
-          <div class="lat-empty" x-show="!tpotHasData">暂无 TPOT / ITL 数据</div>
+          <div class="lat-empty" x-show="!tpotHasData" x-text="t('lat.noTpot')"></div>
         </div>
 
         <div class="lat-card">
           <div class="lat-head">
-            <span class="lat-title">E2E · 端到端延迟</span>
+            <span class="lat-title" x-text="t('lat.e2e')"></span>
             <span class="lat-now" x-show="e2eHasData">
-              <span class="label-p">平均</span>
+              <span class="label-p" x-text="t('common.avg')"></span>
               <span x-text="fmt(e2eAvg, 0)"></span><span class="unit">ms</span>
             </span>
             <span class="lat-now" x-show="!e2eHasData" style="color: var(--muted-2);">—</span>
           </div>
           <div class="lat-chart" x-show="e2eHasData"><canvas id="e2e-chart"></canvas></div>
-          <div class="lat-empty" x-show="!e2eHasData">暂无 E2E 数据<br/>（跑一次 bench 触发请求完成事件）</div>
+          <div class="lat-empty" x-show="!e2eHasData"><span x-text="t('lat.noE2e')"></span><br/><span x-text="t('lat.noE2eHint')"></span></div>
         </div>
       </div>
 
@@ -398,15 +343,13 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
       <div class="chart-card">
         <div class="head">
           <div>
-            <h3>Roofline 实时诊断</h3>
-            <div style="margin-top: 4px; font-size: 11.5px; color: var(--muted-2);">
-              点 = 相近 step 聚合（越大 = 步数越多）· 看离上界还有多远，判断 compute-bound 还是 memory-bound
-            </div>
+            <h3 x-text="t('roof.title')"></h3>
+            <div style="margin-top: 4px; font-size: 11.5px; color: var(--muted-2);" x-text="t('roof.desc')"></div>
             <div x-show="rooflineSource === 'analytical'"
                  style="margin-top: 6px; padding: 6px 10px; background: rgba(217, 119, 6, 0.08); border-left: 3px solid var(--amber); border-radius: 3px; font-size: 11px; color: var(--text);"
                  :title="rooflineFormula">
-              ⚠ 估算数据 · 当前 vllm 不发 perf_stats，按 token 计数 + 模型参数推算（<span x-text="rooflineParamsB"></span>B 参数）。
-              <span style="color: var(--muted-2);">点形状对，绝对值有误差；升 vllm ≥0.20 自动切回实测。</span>
+              <span x-text="t('roof.estimate', { b: rooflineParamsB })"></span>
+              <span style="color: var(--muted-2);" x-text="t('roof.estimateNote')"></span>
             </div>
           </div>
           <div style="display: flex; gap: 14px; align-items: center; flex-wrap: wrap;">
@@ -420,7 +363,7 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
             </span>
             <span style="display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--muted);">
               <span style="width: 8px; height: 8px; background: var(--teal); border-radius: 50%;"></span>
-              当前样本
+              <span x-text="t('roof.sample')"></span>
             </span>
           </div>
         </div>
@@ -430,12 +373,12 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
         <template x-if="rooflineVerdict">
           <div class="roofline-verdict" :class="rooflineVerdict.bound === 'memory' ? 'mem' : 'cmp'">
             <div class="rv-headline">
-              <span class="rv-tag" x-text="rooflineVerdict.bound === 'memory' ? '当前结论' : '当前结论'"></span>
+              <span class="rv-tag" x-text="t('roof.verdict')"></span>
               <span class="rv-text" x-text="rooflineVerdict.headline"></span>
             </div>
             <div class="rv-bars">
               <div class="rv-bar-row">
-                <span class="rv-bar-label">算力利用</span>
+                <span class="rv-bar-label" x-text="t('roof.computeUtil')"></span>
                 <div class="rv-bar-track">
                   <div class="rv-bar-fill rv-bar-compute"
                        :style="`width: ${Math.min(100, rooflineVerdict.computeUtil * 100).toFixed(1)}%`"></div>
@@ -449,7 +392,7 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
                 </span>
               </div>
               <div class="rv-bar-row">
-                <span class="rv-bar-label">带宽利用</span>
+                <span class="rv-bar-label" x-text="t('roof.bwUtil')"></span>
                 <div class="rv-bar-track">
                   <div class="rv-bar-fill rv-bar-memory"
                        :style="`width: ${Math.min(100, rooflineVerdict.bwUtil * 100).toFixed(1)}%`"></div>
@@ -464,26 +407,24 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
               </div>
             </div>
             <div class="rv-suggest">
-              <div class="rv-suggest-title">提速方向</div>
+              <div class="rv-suggest-title" x-text="t('roof.speedup')"></div>
               <ul>
                 <template x-for="(s, i) in rooflineVerdict.suggestions" :key="i">
                   <li x-text="s"></li>
                 </template>
               </ul>
             </div>
-            <div class="rv-foot" :title="`样本数=${rooflineVerdict.n}  AI 中位=${rooflineVerdict.medAI.toFixed(2)}  knee=${rooflineVerdict.knee.toFixed(0)}`">
-              中位 AI=<span x-text="rooflineVerdict.medAI.toFixed(2)"></span>
-              · 拐点=<span x-text="rooflineVerdict.knee.toFixed(0)"></span>
-              · 样本=<span x-text="rooflineVerdict.n"></span>
-              <span x-show="rooflineVerdict.medAI < rooflineVerdict.knee" style="color: var(--indigo);"> · 位于 memory-bound 区</span>
-              <span x-show="rooflineVerdict.medAI >= rooflineVerdict.knee" style="color: var(--rose);"> · 位于 compute-bound 区</span>
+            <div class="rv-foot" :title="t('roof.footTip', { n: rooflineVerdict.n, ai: rooflineVerdict.medAI.toFixed(2), knee: rooflineVerdict.knee.toFixed(0) })">
+              <span x-text="t('roof.foot', { ai: rooflineVerdict.medAI.toFixed(2), knee: rooflineVerdict.knee.toFixed(0), n: rooflineVerdict.n })"></span>
+              <span x-show="rooflineVerdict.medAI < rooflineVerdict.knee" style="color: var(--indigo);" x-text="' · ' + t('roof.inMemBound')"></span>
+              <span x-show="rooflineVerdict.medAI >= rooflineVerdict.knee" style="color: var(--rose);" x-text="' · ' + t('roof.inCmpBound')"></span>
             </div>
           </div>
         </template>
 
         <template x-if="!rooflineVerdict">
           <div class="roofline-verdict empty">
-            没有样本可解读 — 跑一次 bench 触发数据。
+            <span x-text="t('roof.noSamples')"></span>
           </div>
         </template>
       </div>
@@ -493,62 +434,57 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
     <!-- ===== Kernel tab (CUPTI 阶段 1a) ===== -->
     <div x-show="tab === 'kernel'">
       <div class="section-head" style="margin-top: 0;">
-        <h2>Kernel 级 Profiling<span class="hint" style="margin-left: 10px;">PC Sampling 采样实测 · 每个 kernel 占多少 GPU 时间 + 为什么慢（无需 Nsight、按需短窗）</span></h2>
+        <h2 x-text="t('kern.profileTitle')"><span class="hint" style="margin-left: 10px;" x-text="t('kern.profileHint')"></span></h2>
       </div>
 
       <!-- Roofline(模型级,与 Overview 同数据)— 宏观定位:整模型在屋脊线哪、离峰值多远 -->
       <div class="chart-card" style="margin-bottom: 18px;">
         <div class="head">
           <div>
-            <h3>Roofline · 宏观定位 <span style="color: var(--muted-2); font-weight: 400; font-size: 12px;">整模型在屋脊线的位置（与 Overview 同数据）</span></h3>
-            <div style="margin-top: 4px; font-size: 11.5px; color: var(--muted-2);">点 = 相近 step 聚合（越大 = 步数越多）· 离上界多远 = 还能压多少 · 配合下面 PC Sampling 看具体哪个 kernel、为什么</div>
+            <h3 x-text="t('kern.rooflineTitle')"><span style="color: var(--muted-2); font-weight: 400; font-size: 12px;" x-text="t('kern.rooflineSubtitle')"></span></h3>
+            <div style="margin-top: 4px; font-size: 11.5px; color: var(--muted-2);" x-text="t('kern.rooflineHint')"></div>
           </div>
           <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap; font-size: 11px; color: var(--muted);">
             <span style="display: inline-flex; align-items: center; gap: 5px;"><span style="width:13px;height:2.5px;background:var(--rose);border-radius:2px;"></span>Compute roof</span>
             <span style="display: inline-flex; align-items: center; gap: 5px;"><span style="width:13px;height:2.5px;background:var(--indigo);border-radius:2px;"></span>Memory roof</span>
-            <span style="display: inline-flex; align-items: center; gap: 5px;"><span style="width:8px;height:8px;background:var(--teal);border-radius:50%;"></span>当前样本</span>
+            <span style="display: inline-flex; align-items: center; gap: 5px;"><span style="width:8px;height:8px;background:var(--teal);border-radius:50%;"></span><span x-text="t('roof.sample')"></span></span>
           </div>
         </div>
         <div class="chart-wrap" style="height: 260px;"><canvas id="kernel-roofline-chart"></canvas></div>
         <!-- 屋脊线怎么算的:两个峰值参数 + 拐点 -->
         <template x-if="system.gpu_peak">
           <div style="margin-top: 10px; padding: 9px 13px; background: var(--surface-alt); border-radius: 8px; font-size: 11.5px; color: var(--muted); line-height: 1.75;">
-            <strong style="color: var(--text); font-weight: 600;">屋脊线怎么算的</strong>（<span x-text="system.gpu_name || 'GPU'"></span> · 全部从 GPU 现读 CUDA 设备属性）·
-            <span style="color: var(--rose); font-weight: 600;">Compute roof</span> = <strong x-text="system.gpu_peak.bf16_tflops.toFixed(0)"></strong> TFLOPS（= SM数 × SM时钟 × 架构 bf16 Tensor 吞吐）·
-            <span style="color: var(--indigo); font-weight: 600;">Memory roof</span> = <strong x-text="system.gpu_peak.mem_bw_gbs.toFixed(0)"></strong> GB/s（= 显存时钟 × 位宽 × 2）·
-            拐点 = <strong x-text="(system.gpu_peak.bf16_tflops / system.gpu_peak.mem_bw_gbs * 1000).toFixed(0)"></strong> FLOP/byte
-            <span style="color: var(--muted-2);">（拐点左 = 访存受限,拐点右 = 算力受限;点 y = 实测吞吐 TFLOPs/s,x = FLOPs/字节）</span>
+            <strong style="color: var(--text); font-weight: 600;" x-text="t('kern.howComputed')"></strong>（<span x-text="system.gpu_name || 'GPU'"></span> · <span x-text="t('kern.rooflineFrom')"></span>）·
+            <span style="color: var(--rose); font-weight: 600;">Compute roof</span> = <strong x-text="system.gpu_peak.bf16_tflops.toFixed(0)"></strong> <span x-text="t('cleanup.computeRoofFormula')"></span> ·
+            <span style="color: var(--indigo); font-weight: 600;">Memory roof</span> = <strong x-text="system.gpu_peak.mem_bw_gbs.toFixed(0)"></strong> <span x-text="t('cleanup.memoryRoofFormula')"></span> ·
+            <span x-text="t('cleanup.knee')"></span> = <strong x-text="(system.gpu_peak.bf16_tflops / system.gpu_peak.mem_bw_gbs * 1000).toFixed(0)"></strong> FLOP/byte
+            <span style="color: var(--muted-2);" x-text="t('kern.kneeDesc')"></span>
           </div>
         </template>
         <!-- Scaling 分析:decode AI≈batch,沿 envelope 外推扩 batch 的吞吐上界 -->
         <template x-if="rooflineScale">
           <div style="margin-top: 10px; padding: 11px 14px; background: var(--teal-soft); border-radius: 8px; font-size: 12px; color: var(--text); line-height: 1.8;">
-            <strong>Scaling 分析</strong> · decode 阶段权重每 step 全量读取一次,FLOPs 随 batch 线性 → <strong>AI ≈ 有效 batch size</strong>(图中虚线 envelope)。
-            当前 operating point:AI ≈ <strong x-text="fmt(rooflineScale.ai, 1)"></strong>,实测 <strong x-text="fmt(rooflineScale.cur, 2)"></strong> TFLOPs/s,带宽上界利用率 <strong x-text="fmt(rooflineScale.bwUtil, 0) + '%'"></strong>。
-            bandwidth-bound 外推:<strong>B=32</strong> → <strong x-text="fmt(rooflineScale.t32, 0)"></strong> TFLOPs/s(×<span x-text="fmt(Math.min(rooflineScale.gain, 999), 0)"></span>);
-            B ≥ <strong x-text="rooflineScale.knee"></strong>(ridge point)进入 compute-bound。
-            优化路径:提高并发 / <code>max_num_seqs</code>。
-            <span style="color: var(--muted-2);">外推为线性带宽假设,实际受 scheduler / KV cache 容量约束,以压测实测为准。</span>
+            <strong x-text="t('kern.scalingAnalysis')"></strong>
           </div>
         </template>
         <!-- P0-C:实测 scaling 闭环 —— 一键压测扫并发,实测曲线叠在 envelope 上,外推变实测 -->
         <div style="margin-top: 10px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
           <button class="btn" :disabled="scalingSweep.running" @click="startScalingSweep()">
-            <span x-show="!scalingSweep.running">▶ 实测 scaling 曲线(压测扫并发 1/4/16/64,约 2 分钟)</span>
-            <span x-show="scalingSweep.running" x-text="'⏳ ' + (scalingSweep.progress || '压测中…')"></span>
+            <span x-show="!scalingSweep.running" x-text="t('kern.scalingSweepBtn')"></span>
+            <span x-show="scalingSweep.running" x-text="'⏳ ' + (scalingSweep.progress || t('kern.scalingSweepInProgress'))"></span>
           </button>
-          <span x-show="scalingSweep.running" style="font-size: 11.5px; color: var(--muted-2);">压测流量打到本机 vLLM,期间面板数据会受压测影响</span>
-          <span x-show="scalingSweep.error" style="font-size: 12px; color: var(--rose);" x-text="'压测失败:' + scalingSweep.error"></span>
+          <span x-show="scalingSweep.running" style="font-size: 11.5px; color: var(--muted-2);" x-text="t('kern.scalingSweepNote')"></span>
+          <span x-show="scalingSweep.error" style="font-size: 12px; color: var(--rose);" x-text="t('kern.scalingSweepError', {err: scalingSweep.error})"></span>
         </div>
         <template x-if="scalingSweep.verdict">
           <div style="margin-top: 10px; padding: 12px 14px; border-radius: 8px; border: 1px solid var(--border-strong); border-left: 3px solid var(--teal); background: var(--surface-tint); font-size: 12px; color: var(--text); line-height: 1.8;">
-            <strong>📏 实测 scaling 结论</strong>(图中实心绿线 = 实测;虚线 = 理论 envelope)<br>
+            <strong x-text="t('kern.scalingVerdict')"></strong>(<span x-text="t('kern.verdictChart')"></span>)<br>
             <span x-text="scalingSweep.verdict.text"></span>
             <div style="margin-top: 7px; display: flex; gap: 14px; flex-wrap: wrap;">
               <template x-for="(r, ri) in scalingSweep.verdict.rows" :key="r.b">
                 <span style="font-variant-numeric: tabular-nums; font-size: 11.5px;"
                       :style="(ri > 0 && r.eff_pct != null && r.eff_pct < 70) ? 'color: var(--rose); font-weight: 600;' : 'color: var(--muted);'">
-                  B=<span x-text="r.b"></span>: <span x-text="fmt(r.tflops, 2)"></span> TFLOPs/s<span x-show="ri > 0 && r.eff_pct != null">(扩展效率 <span x-text="fmt(r.eff_pct, 0)"></span>%)</span>
+                  B=<span x-text="r.b"></span>: <span x-text="fmt(r.tflops, 2)"></span> TFLOPs/s<span x-show="ri > 0 && r.eff_pct != null"><span x-text="t('cleanup.scalingEff', {pct: fmt(r.eff_pct, 0)})"></span></span>
                 </span>
               </template>
             </div>
@@ -557,17 +493,17 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
         <template x-if="rooflineVerdict">
           <div class="roofline-verdict" :class="rooflineVerdict.bound === 'memory' ? 'mem' : 'cmp'">
             <div class="rv-headline">
-              <span class="rv-tag">当前结论</span>
+              <span class="rv-tag" x-text="t('roof.verdict')"></span>
               <span class="rv-text" x-text="rooflineVerdict.headline"></span>
             </div>
             <div class="rv-bars">
               <div class="rv-bar-row">
-                <span class="rv-bar-label">算力利用</span>
+                <span class="rv-bar-label" x-text="t('roof.computeUtil')"></span>
                 <div class="rv-bar-track"><div class="rv-bar-fill rv-bar-compute" :style="`width: ${Math.min(100, rooflineVerdict.computeUtil * 100).toFixed(1)}%`"></div></div>
                 <span class="rv-bar-val"><span x-text="(rooflineVerdict.computeUtil * 100).toFixed(0)"></span>%</span>
               </div>
               <div class="rv-bar-row">
-                <span class="rv-bar-label">带宽利用</span>
+                <span class="rv-bar-label" x-text="t('roof.bwUtil')"></span>
                 <div class="rv-bar-track"><div class="rv-bar-fill rv-bar-memory" :style="`width: ${Math.min(100, rooflineVerdict.bwUtil * 100).toFixed(1)}%`"></div></div>
                 <span class="rv-bar-val"><span x-text="(rooflineVerdict.bwUtil * 100).toFixed(0)"></span>%</span>
               </div>
@@ -581,19 +517,16 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
         <div class="chart-card">
           <div class="head">
             <div>
-              <h3>每个 Kernel 的 GPU 时间占比<span style="color: var(--muted-2); font-weight: 400; font-size: 13px; margin-left: 8px;">PC Sampling 采样 · 按占比降序</span></h3>
-              <div style="margin-top: 4px; font-size: 11.5px; color: var(--muted-2);">
-                采样命中数 ∝ GPU 活跃时间 → 每个 kernel 吃掉多少 GPU 时间（采样估计,非精确 μs）· 并给出它<strong>主导的 stall 原因</strong> ·
-                基于最近一次取证（共 <span x-text="fmt(deep.result.sample_total, 0)"></span> 样本）
-              </div>
+              <h3 x-text="t('kern.kernelTimePct')"><span style="color: var(--muted-2); font-weight: 400; font-size: 13px; margin-left: 8px;" x-text="t('kern.kernelSampling')"></span></h3>
+              <div style="margin-top: 4px; font-size: 11.5px; color: var(--muted-2);" x-text="t('kern.kernelHint', {n: fmt(deep.result.sample_total, 0)})"></div>
             </div>
             <button class="btn" :disabled="deep.running" @click="runDeepEvidence(5)">
-              <span x-show="!deep.running">重新采集</span><span x-show="deep.running">采集中…</span>
+              <span x-show="!deep.running" x-text="t('kern.recollect')"></span><span x-show="deep.running" x-text="t('kern.collecting')"></span>
             </button>
           </div>
           <!-- 按算子类型聚合的 GPU 时间占比(gemm / attention / comm / norm / …) -->
           <div x-show="deep.result.kernel_class_shares && deep.result.kernel_class_shares.length" style="margin-top: 14px;">
-            <div style="font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 8px;">按算子类型 · 占 GPU 时间</div>
+            <div style="font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 8px;" x-text="t('kern.byKernelClass')"></div>
             <div style="display: flex; flex-wrap: wrap; gap: 8px 12px;">
               <template x-for="cs in deep.result.kernel_class_shares.filter(x => x.time_pct >= 0.05)" :key="cs.cls">
                 <span style="display: inline-flex; align-items: center; gap: 6px; padding: 4px 11px; border-radius: 999px; background: var(--surface-alt); font-size: 12px;">
@@ -608,25 +541,23 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
           <template x-if="issuedVerdict() && bottleneckVerdict()">
             <div style="margin-top: 16px; padding: 14px 16px; border-radius: 10px; border: 1px solid var(--border-strong); border-left: 3px solid var(--teal); background: var(--surface-tint);">
               <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
-                <span style="font-size: 13px; font-weight: 700; color: var(--text-strong);">GPU 利用诊断</span>
-                <span style="font-size: 12.5px; color: var(--text);">
-                  <strong x-text="fmt(issuedVerdict().stall, 0) + '%'"></strong> 的采样周期在<strong>等待 (stall)</strong>,仅 <strong x-text="fmt(issuedVerdict().issued, 0) + '%'"></strong> 在真正发射指令
-                </span>
+                <span style="font-size: 13px; font-weight: 700; color: var(--text-strong);" x-text="t('kern.gpuUtilDiag')"></span>
+                <span style="font-size: 12.5px; color: var(--text);" x-text="t('kern.stallDesc', {stall: fmt(issuedVerdict().stall, 0), issued: fmt(issuedVerdict().issued, 0)})"></span>
               </div>
               <div style="display: flex; height: 14px; border-radius: 4px; overflow: hidden; margin: 10px 0; background: #e9ebee;">
-                <div :style="`width:${issuedVerdict().issued}%;background:var(--teal)`" :title="`发射指令 ${fmt(issuedVerdict().issued,0)}%`"></div>
-                <div :style="`width:${issuedVerdict().stall}%;background:${stallColor(bottleneckVerdict().cls)}`" :title="`stall ${fmt(issuedVerdict().stall,0)}%`"></div>
+                <div :style="`width:${issuedVerdict().issued}%;background:var(--teal)`" :title="t('cleanup.issuedTitle', {pct: fmt(issuedVerdict().issued,0)})"></div>
+                <div :style="`width:${issuedVerdict().stall}%;background:${stallColor(bottleneckVerdict().cls)}`" :title="t('cleanup.stallTitle', {pct: fmt(issuedVerdict().stall,0)})"></div>
               </div>
               <div style="font-size: 13px; color: var(--text);">
-                主因 <strong :style="`color:${stallColor(bottleneckVerdict().cls)}`" x-text="stallLabel(bottleneckVerdict().cls)"></strong>（占 stall 的 <span x-text="fmt(bottleneckVerdict().pct, 0)"></span>%）→
+                <span x-text="t('cleanup.mainCause')"></span> <strong :style="`color:${stallColor(bottleneckVerdict().cls)}`" x-text="stallLabel(bottleneckVerdict().cls)"></strong><span x-text="t('cleanup.ofStall', {pct: fmt(bottleneckVerdict().pct, 0)})"></span> →
                 <strong style="color: var(--text-strong);" x-text="bottleneckVerdict().type"></strong>
               </div>
               <div x-show="bottleneckVerdict().action" style="margin-top: 5px; font-size: 12px; color: var(--muted);" x-text="'💡 ' + bottleneckVerdict().action"></div>
               <template x-if="topRecoverable() && topRecoverable().pct >= 1">
                 <div style="margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border);">
                   <span style="font-size: 12.5px; color: var(--text);">
-                    🎯 最大可回收点:<strong x-text="kernelFriendly(topRecoverable().k.kernel, topRecoverable().k.cls)"></strong>
-                    —— 全局约 <strong style="color: var(--text-strong);" x-text="fmt(topRecoverable().pct, 0) + '%'"></strong> 的 GPU 时间是它在等待,优先优化它。
+                    <span x-text="t('cleanup.topRecoverablePre')"></span><strong x-text="kernelFriendly(topRecoverable().k.kernel, topRecoverable().k.cls)"></strong>
+                    <span x-text="t('cleanup.topRecoverableMid')"></span> <strong style="color: var(--text-strong);" x-text="fmt(topRecoverable().pct, 0) + '%'"></strong> <span x-text="t('cleanup.topRecoverablePost')"></span>
                   </span>
                 </div>
               </template>
@@ -637,19 +568,18 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
           <template x-if="sourceHotspots().length">
             <div style="margin-top: 16px; padding: 14px 16px; border-radius: 10px; border: 1px solid var(--border-strong); border-left: 3px solid var(--indigo); background: var(--surface-tint);">
               <div style="display: flex; align-items: center; gap: 9px; flex-wrap: wrap; margin-bottom: 4px;">
-                <span style="font-size: 13px; font-weight: 700; color: var(--text-strong);">🔬 源码级热点</span>
-                <span style="font-size: 12px; color: var(--muted);">PC 样本精确落到 <strong>Python 源码行</strong>(Triton/自编译 kernel,带 lineinfo)</span>
+                <span style="font-size: 13px; font-weight: 700; color: var(--text-strong);" x-text="t('kern.sourceHotspots')"></span>
+                <span style="font-size: 12px; color: var(--muted);" x-text="t('kern.sourceDesc')"></span>
               </div>
               <div style="font-size: 11.5px; color: var(--muted-2); margin-bottom: 11px;">
-                这些 kernel 合计占 GPU 时间 <strong x-text="fmt(sourceHotspotsTimePct(), 1) + '%'"></strong> ——
-                <span x-show="sourceHotspotsTimePct() < 20">本负载主导热点在闭源 cutlass/cuBLAS GEMM(下表,只能到 SASS 偏移);能定位到源码的是下面这些 Triton kernel。</span>
-                <span x-show="sourceHotspotsTimePct() >= 20">占比可观,源码级定位直接可行动。</span>
+                <span x-show="sourceHotspotsTimePct() < 20" x-text="t('kern.sourceTimePct', {pct: fmt(sourceHotspotsTimePct(), 1)})"></span>
+                <span x-show="sourceHotspotsTimePct() >= 20" x-text="t('kern.sourceTimePctHigh')"></span>
               </div>
               <template x-for="h in sourceHotspots()" :key="h.kernel">
                 <div style="margin-bottom: 12px;">
                   <div style="display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-bottom: 6px;">
                     <span style="font-family: var(--mono, ui-monospace, monospace); font-size: 12px; color: var(--text-strong); font-weight: 600;" x-text="kernelFriendly(h.kernel, 'index')"></span>
-                    <span style="font-size: 11px; color: var(--muted-2);" x-text="h.decode || ''"></span>
+                    <span style="font-size: 11px; color: var(--muted-2);" x-text="kernelDecodeI18n(h.decode) || ''"></span>
                   </div>
                   <template x-for="ln in h.lines" :key="ln.loc">
                     <div style="margin-bottom: 5px;">
@@ -671,16 +601,16 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
             </div>
           </template>
 
-          <div style="font-size: 11px; color: var(--muted-2); margin-top: 16px;">点任意行展开 → 看该 kernel 的完整 stall 构成 + 优化建议</div>
+          <div style="font-size: 11px; color: var(--muted-2); margin-top: 16px;" x-text="t('kern.expandKernelDetail')"></div>
           <div style="overflow-x: auto; margin-top: 8px;">
             <table class="kernel-table">
               <thead>
                 <tr>
                   <th style="width: 34%;">Kernel</th>
-                  <th>类</th>
-                  <th style="text-align: right; width: 148px;">GPU 时间占比</th>
-                  <th style="text-align: right; width: 156px;" title="= GPU 时间占比 × 该 kernel 内部 stall 比例。它占的全局 GPU 时间里有多少花在等待 —— 这部分才是可优化回收的。">stall 时间<span style="font-weight: 400; color: var(--muted-2);"> 可回收</span></th>
-                  <th>主导 stall</th>
+                  <th x-text="t('kern.kernelClass')"></th>
+                  <th style="text-align: right; width: 148px;" x-text="t('kern.kernelGpuTime')"></th>
+                  <th style="text-align: right; width: 156px;" x-text="t('kern.kernelStallRecoverable')"></th>
+                  <th x-text="t('cleanup.dominantStall')"></th>
                   <th style="width: 26px;"></th>
                 </tr>
               </thead>
@@ -717,7 +647,7 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
                   <tr x-show="kernelExpanded === i">
                     <td colspan="6" style="background: var(--surface-alt);">
                       <div style="padding: 11px 8px;">
-                        <div style="font-size: 11px; font-weight: 600; color: var(--muted); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.04em;">这个 kernel 的 stall 构成（占它自己的样本）</div>
+                        <div style="font-size: 11px; font-weight: 600; color: var(--muted); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.04em;" x-text="t('kern.kernelStallTitle')"></div>
                         <div style="display: flex; flex-direction: column; gap: 4px; max-width: 580px;">
                           <template x-for="ent in Object.entries(k.breakdown || {}).filter(e => e[0] !== 'issued' && e[1] > 0).sort((a, b) => b[1] - a[1]).slice(0, 9)" :key="ent[0]">
                             <div style="display: flex; align-items: center; gap: 8px;">
@@ -733,9 +663,7 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
                         <!-- P3 最深热点:双轨(源码行 / SASS 偏移 + kernel 名解码)-->
                         <template x-if="kernelHotspot(k)">
                           <div style="margin-top: 11px;">
-                            <div style="font-size: 11px; font-weight: 600; color: var(--muted); margin-bottom: 7px; text-transform: uppercase; letter-spacing: 0.04em;">
-                              最深热点 <span style="font-weight: 400; text-transform: none; color: var(--muted-2);">· PC sampling 落到指令地址(stall 样本集中在哪)</span>
-                            </div>
+                            <div style="font-size: 11px; font-weight: 600; color: var(--muted); margin-bottom: 7px; text-transform: uppercase; letter-spacing: 0.04em;" x-text="t('kern.kernelDeepHotspot')"><span style="font-weight: 400; text-transform: none; color: var(--muted-2);">· <span x-text="t('kern.kernelHotspotDesc')"></span></span></div>
                             <!-- 轨一:可映射 → Python 源码行(行号 + 占比条 + 该行代码原文)-->
                             <template x-if="kernelHotspot(k).mappable && kernelHotspot(k).lines.length">
                               <div style="display: flex; flex-direction: column; gap: 9px; max-width: 640px;">
@@ -754,21 +682,21 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
                                     </div>
                                   </div>
                                 </template>
-                                <div style="font-size: 11px; color: var(--muted-2);" x-text="'源文件:' + (kernelHotspot(k).lines[0].path || '')"></div>
+                                <div style="font-size: 11px; color: var(--muted-2);" x-text="t('kern.sourceFile', {path: kernelHotspot(k).lines[0].path || ''})"></div>
                               </div>
                             </template>
                             <!-- 轨二:闭源库 → SASS 偏移 + kernel 名解码 -->
                             <template x-if="!kernelHotspot(k).mappable">
                               <div style="font-size: 12px; color: var(--text); line-height: 1.7;">
-                                <span x-show="kernelHotspot(k).decode" style="display: inline-block; padding: 2px 8px; background: var(--surface); border: 1px solid var(--border); border-radius: 5px; font-size: 11.5px; margin-bottom: 6px;" x-text="kernelHotspot(k).decode"></span>
-                                <div style="color: var(--muted);">
-                                  闭源库 kernel(无 lineinfo)→ 给到 <strong>SASS 指令偏移级</strong>热点:
+                                <span x-show="kernelHotspot(k).decode" style="display: inline-block; padding: 2px 8px; background: var(--surface); border: 1px solid var(--border); border-radius: 5px; font-size: 11.5px; margin-bottom: 6px;" x-text="kernelDecodeI18n(kernelHotspot(k).decode)"></span>
+                                <div style="color: var(--muted);" x-text="t('kern.closedLibKernel')" ></div>
+                              <div style="color: var(--muted);">
                                   <template x-for="(sp, si) in kernelHotspot(k).sass" :key="si">
                                     <span style="font-family: var(--mono, ui-monospace, monospace);" x-text="(si ? ' · ' : ' ') + sp.offset + ' (' + fmt(sp.pct, 1) + '%)'"></span>
                                   </template>
                                 </div>
                                 <div style="font-size: 11px; color: var(--muted-2); margin-top: 4px;">
-                                  想到源码行需 kernel 带 <code>-lineinfo</code>(Triton/自编译默认带);cutlass/cuBLAS 闭源到此为止 —— 偏移 + kernel 名(tile/dtype)已足够定位是哪段在卡。
+                                  <span x-text="t('cleanup.lineinfoPre')"></span> <code>-lineinfo</code><span x-text="t('cleanup.lineinfoPost')"></span>
                                 </div>
                               </div>
                             </template>
@@ -776,7 +704,7 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
                             <template x-if="launchFrames(kernelHotspot(k)).length">
                               <div style="margin-top: 9px; padding-top: 9px; border-top: 1px dashed var(--border);">
                                 <div style="font-size: 11px; color: var(--muted); margin-bottom: 5px;">
-                                  ↗ <strong>启动来源</strong>（launch 栈,向外归因到调用它的 host 代码）
+                                  ↗ <strong x-text="t('kern.launchOrigin')"></strong>（<span x-text="t('kern.launchStack')"></span>）
                                 </div>
                                 <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 4px 2px;">
                                   <template x-for="(fr, fi) in launchFrames(kernelHotspot(k))" :key="fi">
@@ -799,11 +727,9 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
           </div>
           <div x-show="deep.result.kernel_table.length > kernelCollapsed" style="margin-top: 12px; text-align: center;">
             <button class="btn" @click="kernelShowAll = !kernelShowAll"
-                    x-text="kernelShowAll ? '收起 ▴' : ('展示全部 ' + deep.result.kernel_table.length + ' 个 ▾')"></button>
+                    x-text="kernelShowAll ? t('cleanup.collapse') : t('cleanup.showAllKernels', {n: deep.result.kernel_table.length})"></button>
           </div>
-          <div style="margin-top: 10px; font-size: 11px; color: var(--muted-2);">
-            想要逐 kernel 的<strong>精确 μs 耗时</strong>?那需要 CUPTI Activity 模式 —— 与 PC Sampling 抢同一套性能计数硬件、二者互斥,需单独部署。下方 <strong>Deep Evidence</strong> 是同一次采样的全局 stall 分解。
-          </div>
+          <div style="margin-top: 10px; font-size: 11px; color: var(--muted-2);" x-text="t('kern.preciseMicros')"></div>
         </div>
       </template>
 
@@ -811,9 +737,9 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
       <template x-if="!kernels.enabled && (!deep.result || !deep.result.available || !deep.result.kernel_table || !deep.result.kernel_table.length)">
         <div class="chart-card">
           <div class="roofline-verdict empty" style="margin: 0;">
-            <template x-if="deep.running"><span>正在采集 PC Sampling 证据…(约 5s,稍候自动出表)</span></template>
-            <template x-if="!deep.running && deep.error"><span>PC Sampling 取证不可用 —— <span x-text="deep.error"></span></span></template>
-            <template x-if="!deep.running && !deep.error"><span>打开本页会自动采集一次;或点下方 Deep Evidence 的「采集 stall 证据」。</span></template>
+            <template x-if="deep.running"><span x-text="t('kern.collectingPcSampling')"></span></template>
+            <template x-if="!deep.running && deep.error"><span x-text="t('cleanup.pcSamplingUnavailable', {err: deep.error})"></span></template>
+            <template x-if="!deep.running && !deep.error"><span x-text="t('kern.noPcSamplingData')"></span></template>
           </div>
         </div>
       </template>
@@ -823,16 +749,16 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
           <!-- 数据新鲜度:这批数据是哪一窗的、多久前采的 -->
           <div x-show="kernels.snapshot_age_s != null" class="kernel-freshness" :class="kernelFresh() ? 'live' : 'stale'">
             <template x-if="kernelFresh()">
-              <span>🟢 实时 · 每 <span x-text="fmt(kernels.rollup_window_s, 0)"></span>s 聚合一次,当前数据采集于 <strong x-text="kernelAgeText()"></strong></span>
+              <span>🟢 <span x-text="t('kern.dataFreshness')"></span> · <span x-text="t('kern.aggregated', {w: fmt(kernels.rollup_window_s, 0), when: kernelAgeText()})"></span></span>
             </template>
             <template x-if="!kernelFresh()">
-              <span>⏸ 当前无 GPU 活动 —— 下面是 <strong x-text="kernelAgeText()"></strong> 最后一次有 kernel 运行时(最近 <span x-text="fmt(kernels.rollup_window_s, 0)"></span>s 窗口)的数据,<u>不是当前值</u></span>
+              <span x-text="t('kern.noActivity', {when: kernelAgeText(), w: fmt(kernels.rollup_window_s, 0)})"></span>
             </template>
           </div>
 
           <!-- 诊断结论:把数字翻译成人话(诊断不止观测) -->
           <div x-show="kernels.findings && kernels.findings.length" style="margin-bottom: 18px;">
-            <div style="font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 10px;">诊断结论</div>
+            <div style="font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 10px;" x-text="t('kern.findings')"></div>
             <div style="display: flex; flex-direction: column; gap: 9px;">
               <template x-for="(f, i) in kernels.findings" :key="i">
                 <div class="kfinding" :class="f.level">
@@ -846,27 +772,27 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
           <!-- 概览卡片行 -->
           <div class="kpis" style="margin-bottom: 18px;">
             <div class="kpi teal">
-              <div class="label">GPU busy <span class="kpi-sub-label">占墙钟</span></div>
+              <div class="label" x-text="t('kern.gpuBusy')"><span class="kpi-sub-label" x-text="t('kern.wallClockShare')"></span></div>
               <div class="value"><span x-text="fmt(kernels.gpu_busy_pct, 1)"></span><span class="unit">%</span></div>
             </div>
             <div class="kpi indigo">
-              <div class="label">Kernel 启动频率</div>
+              <div class="label" x-text="t('kern.launchFreq')"></div>
               <div class="value"><span x-text="fmt(kernels.launch_count_per_s, 0)"></span><span class="unit">/s</span></div>
             </div>
             <div class="kpi">
-              <div class="label">平均 kernel 时长</div>
+              <div class="label" x-text="t('kern.meanDuration')"></div>
               <div class="value"><span x-text="fmt(kernels.mean_dur_us, 2)"></span><span class="unit">µs</span></div>
             </div>
             <div class="kpi">
-              <div class="label">CUDA Graph 内</div>
+              <div class="label" x-text="t('kern.inCudaGraph')"></div>
               <div class="value"><span x-text="fmt(kernels.in_graph_pct, 0)"></span><span class="unit">%</span></div>
             </div>
             <div class="kpi">
-              <div class="label">memcpy <span class="kpi-sub-label">占墙钟</span></div>
+              <div class="label"><span x-text="t('kern.memcpy')"></span><span class="kpi-sub-label" x-text="t('kern.wallClockShare')"></span></div>
               <div class="value"><span x-text="fmt(kernels.memcpy_share_pct, 1)"></span><span class="unit">%</span></div>
             </div>
             <div class="kpi">
-              <div class="label">同步等待 <span class="kpi-sub-label">占墙钟</span></div>
+              <div class="label"><span x-text="t('kern.syncWait')"></span><span class="kpi-sub-label" x-text="t('kern.wallClockShare')"></span></div>
               <div class="value"><span x-text="fmt(kernels.sync_share_pct, 1)"></span><span class="unit">%</span></div>
             </div>
           </div>
@@ -875,8 +801,8 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
           <div style="display: grid; grid-template-columns: 3fr 2fr; gap: 16px; margin-bottom: 18px;">
             <div class="chart-card">
               <div class="head"><div>
-                <h3>kernel 类占比 · 实时趋势 <span style="color: var(--muted-2); font-weight: 400; font-size: 12px;">最近 ~3 分钟</span></h3>
-                <div style="margin-top: 4px; font-size: 11.5px; color: var(--muted-2);">堆叠面积 = 各类 kernel 占 GPU 计算时间随时间变化</div>
+                <h3 x-text="t('kern.classTrend')"><span style="color: var(--muted-2); font-weight: 400; font-size: 12px;" x-text="t('kern.last3Min')"></span></h3>
+                <div style="margin-top: 4px; font-size: 11.5px; color: var(--muted-2);" x-text="t('kern.stackedArea')"></div>
               </div></div>
               <div class="chart-wrap" style="height: 180px; margin-top: 10px;"><canvas id="k-class-chart"></canvas></div>
               <div style="display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 8px; font-size: 10.5px; color: var(--muted);">
@@ -887,8 +813,8 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
             </div>
             <div class="chart-card">
               <div class="head"><div>
-                <h3>GPU 利用 vs 等待 · 实时趋势</h3>
-                <div style="margin-top: 4px; font-size: 11.5px; color: var(--muted-2);">GPU busy 高 + 同步等待低 = 健康;等待飙高 = launch-bound</div>
+                <h3 x-text="t('kern.utilTrend')"></h3>
+                <div style="margin-top: 4px; font-size: 11.5px; color: var(--muted-2);" x-text="t('kern.utilNote')"></div>
               </div></div>
               <div class="chart-wrap" style="height: 180px; margin-top: 10px;"><canvas id="k-util-chart"></canvas></div>
             </div>
@@ -899,8 +825,8 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
             <div class="chart-card" style="margin-bottom: 18px;">
               <div class="head">
                 <div>
-                  <h3>执行时间线 <span style="color: var(--muted-2); font-weight: 400; font-size: 12px;">最近 <span x-text="timelineView().total"></span> 个 kernel · 跨度 <span x-text="timelineView().spanMs.toFixed(1)"></span> ms</span></h3>
-                  <div style="margin-top: 4px; font-size: 11.5px; color: var(--muted-2);">x=时间 · 行=GPU stream · 块=kernel(宽∝耗时) · 空白=GPU 空闲 · <b>点 ＋ 放大、拖滚动条平移</b></div>
+                  <h3 x-text="t('kern.timeline')"><span style="color: var(--muted-2); font-weight: 400; font-size: 12px;" x-text="t('kern.timelineSpan', {n: timelineView().total, span: timelineView().spanMs.toFixed(1)})"></span></h3>
+                  <div style="margin-top: 4px; font-size: 11.5px; color: var(--muted-2);" x-text="t('kern.timelineHint')"></div>
                 </div>
                 <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap; font-size: 11px; color: var(--muted);">
                   <template x-for="c in ['gemm','attention','comm','norm','activation','memcpy']" :key="c">
@@ -910,17 +836,17 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
               </div>
               <!-- 一行:导出 trace(左) + 实时/冻结/缩放控制(右)-->
               <div style="display: flex; align-items: center; gap: 10px; margin-top: 12px; padding: 9px 13px; background: var(--teal-soft); border: 1px solid color-mix(in srgb, var(--teal) 22%, transparent); border-radius: 8px; font-size: 11.5px; color: var(--text); flex-wrap: wrap;">
-                <button class="btn" @click="downloadTrace()">⬇ 导出 trace</button>
-                <span style="flex: 1; min-width: 180px; color: var(--muted);">拖进 <a href="https://ui.perfetto.dev" target="_blank" style="color: var(--teal); font-weight: 600;">ui.perfetto.dev</a> 看(Nsight / PyTorch 同款格式)· 下方为页内预览</span>
+                <button class="btn" @click="downloadTrace()" x-text="t('kern.exportTrace')"></button>
+                <span style="flex: 1; min-width: 180px; color: var(--muted);" x-text="t('kern.perfettoInst')"></span>
                 <button class="btn" @click="tlToggleFreeze()"
                         :style="tlFrozen ? 'background:var(--amber-soft);color:var(--amber);border-color:var(--amber)' : ''"
-                        x-text="tlFrozen ? '⏸ 已冻结' : '🔴 实时'"></button>
+                        x-text="tlFrozen ? t('cleanup.frozen') : t('cleanup.liveTl')"></button>
                 <span style="display: inline-flex; align-items: center; gap: 4px;">
-                  <button class="btn" @click="tlZoom(0.5)" title="缩小">−</button>
-                  <button class="btn" @click="tlFit()" title="适应宽度">适应</button>
-                  <button class="btn" @click="tlZoom(2)" title="放大(围绕选中块)">＋</button>
+                  <button class="btn" @click="tlZoom(0.5)" :title="t('kern.zoomOut')">−</button>
+                  <button class="btn" @click="tlFit()" :title="t('kern.fitWidth')" x-text="t('cleanup.fit')"></button>
+                  <button class="btn" @click="tlZoom(2)" :title="t('kern.zoomIn')">＋</button>
                 </span>
-                <span x-show="tlSelName" style="white-space: nowrap; color: var(--teal); font-weight: 600;">▸ 选中 <span x-text="tlSelName.slice(0,28)"></span>(点 ＋ 放大它)</span>
+                <span x-show="tlSelName" style="white-space: nowrap; color: var(--teal); font-weight: 600;" x-text="t('kern.selected', {name: tlSelName.slice(0,28)})"></span>
               </div>
               <!-- 主时间线:左固定 stream 标签 + 右横向滚动条带(放大=内层变宽,平移=滚动)-->
               <div style="display: flex; gap: 8px; margin-top: 12px;">
@@ -952,15 +878,15 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
                 <div style="margin-top: 12px; padding: 11px 14px; border: 1px solid var(--border-strong); border-left: 3px solid var(--text-strong); border-radius: 8px; background: var(--surface-tint);">
                   <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 7px;">
                     <span class="kcls" :style="`background:${kernelColor(tlSelectedBlock().cls)}1a;color:${kernelColor(tlSelectedBlock().cls)}`" x-text="kernelLabel(tlSelectedBlock().cls)"></span>
-                    <span style="font-weight: 600; font-size: 12.5px; color: var(--text-strong);">选中 kernel 详情</span>
-                    <button class="btn" style="margin-left: auto; padding: 2px 9px; font-size: 11px;" @click="tlSelIdx = null; tlSelMs = null; tlSelName = ''">取消选中</button>
+                    <span style="font-weight: 600; font-size: 12.5px; color: var(--text-strong);" x-text="t('kern.selectedDetail')"></span>
+                    <button class="btn" style="margin-left: auto; padding: 2px 9px; font-size: 11px;" @click="tlSelIdx = null; tlSelMs = null; tlSelName = ''" x-text="t('kern.deselect')"></button>
                   </div>
                   <code style="display: block; font-family: ui-monospace, Consolas, monospace; font-size: 11.5px; color: var(--text-strong); word-break: break-all; line-height: 1.5; margin-bottom: 9px;" x-text="tlSelectedBlock().name"></code>
                   <div style="display: flex; flex-wrap: wrap; gap: 7px 26px; font-size: 12px; color: var(--muted);">
-                    <div>耗时 <b style="color: var(--text);" x-text="tlSelectedBlock().durus.toFixed(2) + ' µs'"></b></div>
-                    <div>起始 <b style="color: var(--text);" x-text="tlSelectedBlock().startMs.toFixed(3) + ' ms'"></b></div>
-                    <div>stream <b style="color: var(--text);" x-text="tlSelectedBlock().stream"></b></div>
-                    <div>CUDA Graph 内 <b style="color: var(--text);" x-text="tlSelectedBlock().ingraph ? '是' : '否'"></b></div>
+                    <div><span x-text="t('kern.duration')"></span> <b style="color: var(--text);" x-text="tlSelectedBlock().durus.toFixed(2) + ' µs'"></b></div>
+                    <div><span x-text="t('kern.startTime')"></span> <b style="color: var(--text);" x-text="tlSelectedBlock().startMs.toFixed(3) + ' ms'"></b></div>
+                    <div><span x-text="t('kern.stream')"></span> <b style="color: var(--text);" x-text="tlSelectedBlock().stream"></b></div>
+                    <div><span x-text="t('kern.inGraph')"></span> <b style="color: var(--text);" x-text="tlSelectedBlock().ingraph ? t('kern.yes') : t('kern.no')"></b></div>
                   </div>
                 </div>
               </template>
@@ -968,17 +894,17 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
           </template>
           <template x-if="!timelineView()">
             <div class="chart-card" style="margin-bottom: 18px;">
-              <div class="roofline-verdict empty" style="margin: 0;">CUPTI 执行时间线暂无数据(需采集器在采集 kernel)。</div>
+              <div class="roofline-verdict empty" style="margin: 0;" x-text="t('cleanup.cuptiTimelineEmpty')"></div>
             </div>
           </template>
 
           <!-- 原始 per-kernel 明细表(未洗) -->
           <div class="chart-card">
             <div class="head">
-              <div><h3>原始 Kernel 明细<span style="color: var(--muted-2); font-weight: 400; font-size: 13px;" title="本窗口出现的不同 kernel 名数量(去重)。模型每步跑同一套 kernel,所以通常稳定;换模型/配置会变。上限 100。">（去重 <span x-text="kernels.top_kernels.length"></span> 种 kernel）</span></h3>
+              <div><h3 x-text="t('kern.rawKernelDetail')"><span style="color: var(--muted-2); font-weight: 400; font-size: 13px;" :title="t('kern.kernelNameNote')" x-text="t('kern.unique', {n: kernels.top_kernels.length})"></span></h3>
                 <div style="margin-top: 4px; font-size: 11.5px; color: var(--muted-2);">
-                  真实 mangled 名 + GPU 硬件实测耗时(<code>end−start</code>),按占比降序 ·
-                  <strong>所有数值均为最近一个聚合窗口（约 <span x-text="fmt(kernels.rollup_window_s, 0)"></span>s）内的量,每窗刷新</strong>
+                  <span x-text="t('cleanup.rawKernelPre')"></span> (<code>end−start</code>)<span x-text="t('cleanup.rawKernelPost')"></span> ·
+                  <strong x-text="t('kern.allValuesWindow', {w: fmt(kernels.rollup_window_s, 0)})"></strong>
                 </div>
               </div>
             </div>
@@ -986,13 +912,13 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
               <table class="kernel-table">
                 <thead>
                   <tr>
-                    <th style="width: 44%;">Kernel 名（原始）</th>
-                    <th>类</th>
-                    <th style="text-align: right;">调用</th>
-                    <th style="text-align: right;">总耗时</th>
-                    <th style="text-align: right;">平均</th>
-                    <th style="text-align: right;">占比</th>
-                    <th style="text-align: right;">Graph</th>
+                    <th style="width: 44%;" x-text="t('kern.kernelNameRaw')"></th>
+                    <th x-text="t('kern.kernelClass')"></th>
+                    <th style="text-align: right;" x-text="t('kern.calls')"></th>
+                    <th style="text-align: right;" x-text="t('kern.totalTime')"></th>
+                    <th style="text-align: right;" x-text="t('kern.average')"></th>
+                    <th style="text-align: right;" x-text="t('kern.share')"></th>
+                    <th style="text-align: right;" x-text="t('kern.graphShare')"></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1010,7 +936,7 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
                     </tr>
                   </template>
                   <template x-if="!kernels.top_kernels.length">
-                    <tr><td colspan="7" style="text-align: center; color: var(--muted-2); padding: 18px;">暂无 per-kernel 明细（需注入式采集器在采,或本窗无 kernel）</td></tr>
+                    <tr><td colspan="7" style="text-align: center; color: var(--muted-2); padding: 18px;" x-text="t('kern.noKernelDetail')"></td></tr>
                   </template>
                 </tbody>
               </table>
@@ -1018,12 +944,12 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
             <!-- 展示更多 / 收起 -->
             <div x-show="kernels.top_kernels.length > kernelCollapsed" style="margin-top: 12px; text-align: center;">
               <button class="btn" @click="kernelShowAll = !kernelShowAll"
-                      x-text="kernelShowAll ? '收起 ▴' : ('展示全部 ' + kernels.top_kernels.length + ' 个 ▾')"></button>
+                      x-text="kernelShowAll ? t('kern.collapse') : t('kern.showAll', {n: kernels.top_kernels.length})"></button>
             </div>
             <!-- 自我观测 -->
             <div style="margin-top: 12px; font-size: 11px; color: var(--muted-2);">
-              采集开销 <span x-text="fmt(kernels.overhead_cb_ms, 3)"></span> ms/窗（守 5% 预算）
-              <template x-if="kernels.dropped_total"><span> · 丢弃 <span x-text="fmt(kernels.dropped_total, 0)"></span> 条（已自动降级）</span></template>
+              <span x-text="t('kern.overhead', {overhead: fmt(kernels.overhead_cb_ms, 3)})"></span>
+              <template x-if="kernels.dropped_total"><span x-text="t('kern.dropped', {n: fmt(kernels.dropped_total, 0)})"></span></template>
             </div>
           </div>
         </div>
@@ -1033,13 +959,13 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
       <div class="chart-card" style="margin-top: 18px;">
         <div class="head" style="display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;">
           <div>
-            <h3>🔬 Deep Evidence — 为什么慢 <span style="color: var(--muted-2); font-weight: 400; font-size: 12px;">PC Sampling 取证 · 按需短窗</span></h3>
-            <div style="margin-top: 4px; font-size: 11.5px; color: var(--muted-2);">上面看"哪个 kernel";这里看<strong>整体</strong>:warp 周期都花哪了、全局卡在什么 stall、以及这些数是怎么测出来的</div>
+            <h3 x-text="t('kern.deepEvidence')"><span style="color: var(--muted-2); font-weight: 400; font-size: 12px;" x-text="t('kern.deepEvidenceSub')"></span></h3>
+            <div style="margin-top: 4px; font-size: 11.5px; color: var(--muted-2);" x-text="t('kern.deepHint')"></div>
           </div>
           <div>
             <button class="btn" :disabled="deep.running" @click="runDeepEvidence(5)">
-              <span x-show="!deep.running">采集 stall 证据(5s)</span>
-              <span x-show="deep.running">采集中…</span>
+              <span x-show="!deep.running" x-text="t('kern.collectEvidence')"></span>
+              <span x-show="deep.running" x-text="t('kern.collecting')"></span>
             </button>
           </div>
         </div>
@@ -1047,8 +973,7 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
         <!-- 不可用 -->
         <template x-if="deep.error">
           <div class="roofline-verdict empty" style="margin: 12px 0 0;">
-            <strong>PC Sampling 取证不可用</strong> — <span x-text="deep.error"></span><br>
-            <span style="font-size: 11px; color: var(--muted-2);">需 Linux + libppingcupti.so + 放开 GPU 性能计数器权限;与 torch 同进程需 1b 注入式(见设计文档 §12)。</span>
+            <span x-text="t('kern.unavailable', {err: deep.error})"></span>
           </div>
         </template>
 
@@ -1071,28 +996,23 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
             <!-- #1 Warp 周期三态:发指令 / 就绪未选中(余量) / 真 stall -->
             <template x-if="warpSplit()">
               <div style="margin-bottom: 18px;">
-                <div style="font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 8px;">
-                  Warp 周期去向 <span style="font-weight: 400; text-transform: none;">· 占全部 <span x-text="fmt(deep.result.sample_total, 0)"></span> 样本</span>
-                </div>
+                <div style="font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 8px;" x-text="t('kern.warpCycleDirection')"><span style="font-weight: 400; text-transform: none;" x-text="t('kern.allSamples', {n: fmt(deep.result.sample_total, 0)})"></span></div>
                 <div style="display: flex; height: 18px; border-radius: 5px; overflow: hidden; background: #e9ebee;">
-                  <div :style="`width:${warpSplit().issued}%;background:#0d8b80`" :title="`发射指令 ${fmt(warpSplit().issued,1)}%`"></div>
-                  <div :style="`width:${warpSplit().slack}%;background:#9bb04f`" :title="`就绪未选中 ${fmt(warpSplit().slack,1)}%`"></div>
-                  <div :style="`width:${warpSplit().stall}%;background:#c2334f`" :title="`真 stall ${fmt(warpSplit().stall,1)}%`"></div>
+                  <div :style="`width:${warpSplit().issued}%;background:#0d8b80`" :title="t('cleanup.warpIssuedTitle', {pct: fmt(warpSplit().issued,1)})"></div>
+                  <div :style="`width:${warpSplit().slack}%;background:#9bb04f`" :title="t('cleanup.warpSlackTitle', {pct: fmt(warpSplit().slack,1)})"></div>
+                  <div :style="`width:${warpSplit().stall}%;background:#c2334f`" :title="t('cleanup.warpStallTitle', {pct: fmt(warpSplit().stall,1)})"></div>
                 </div>
                 <div style="display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 9px; font-size: 11.5px; color: var(--muted);">
-                  <span style="display: inline-flex; align-items: center; gap: 5px;"><span style="width:9px;height:9px;border-radius:2px;background:#0d8b80;display:inline-block;"></span>发射指令(干活) <strong style="color: var(--text);" x-text="fmt(warpSplit().issued,1)+'%'"></strong></span>
-                  <span style="display: inline-flex; align-items: center; gap: 5px;"><span style="width:9px;height:9px;border-radius:2px;background:#9bb04f;display:inline-block;"></span>就绪未选中(占用率有余量) <strong style="color: var(--text);" x-text="fmt(warpSplit().slack,1)+'%'"></strong></span>
-                  <span style="display: inline-flex; align-items: center; gap: 5px;"><span style="width:9px;height:9px;border-radius:2px;background:#c2334f;display:inline-block;"></span>真 stall(在等) <strong style="color: var(--text);" x-text="fmt(warpSplit().stall,1)+'%'"></strong></span>
+                  <span style="display: inline-flex; align-items: center; gap: 5px;"><span style="width:9px;height:9px;border-radius:2px;background:#0d8b80;display:inline-block;"></span><span x-text="t('kern.issued')"></span> <strong style="color: var(--text);" x-text="fmt(warpSplit().issued,1)+'%'"></strong></span>
+                  <span style="display: inline-flex; align-items: center; gap: 5px;"><span style="width:9px;height:9px;border-radius:2px;background:#9bb04f;display:inline-block;"></span><span x-text="t('kern.slack')"></span> <strong style="color: var(--text);" x-text="fmt(warpSplit().slack,1)+'%'"></strong></span>
+                  <span style="display: inline-flex; align-items: center; gap: 5px;"><span style="width:9px;height:9px;border-radius:2px;background:#c2334f;display:inline-block;"></span><span x-text="t('kern.stallWait')"></span> <strong style="color: var(--text);" x-text="fmt(warpSplit().stall,1)+'%'"></strong></span>
                 </div>
-                <div style="margin-top: 7px; font-size: 11.5px; color: var(--muted);"
-                     x-text="warpSplit().stall >= 60 ? '→ 大量周期在真 stall:延迟瓶颈,看下面卡在什么' : (warpSplit().slack >= 30 ? '→ 有就绪 warp 没被选中:占用率充足,瓶颈不在并行度' : '→ 发射占比较高:GPU 比较忙碌')"></div>
+                <div style="margin-top: 7px; font-size: 11.5px; color: var(--muted);" x-text="warpSplit().stall >= 60 ? t('kern.stallAnalysis') : (warpSplit().slack >= 30 ? t('kern.slackAnalysis') : t('kern.issuedAnalysis'))"></div>
               </div>
             </template>
 
             <!-- #2 全局 stall 构成(点行展开 → #4 原始 PerfWorks reason)-->
-            <div style="font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 8px;">
-              stall 分解 <span style="font-weight: 400; text-transform: none;">· 占 stall 样本(= 全部 − issued)· 点行看原始硬件指标名</span>
-            </div>
+            <div style="font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 8px;" x-text="t('kern.stallBreakdown')"><span style="font-weight: 400; text-transform: none;" x-text="t('kern.stallBreakdownSub')"></span></div>
             <div style="display: flex; flex-direction: column; gap: 9px;">
               <template x-for="s in deep.result.stall_shares.filter(x => x.pct >= 0.5)" :key="s.cls">
                 <div>
@@ -1114,7 +1034,7 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
                     <template x-for="rd in (deep.result.reason_detail[s.cls] || [])" :key="rd.reason">
                       <div style="display: flex; gap: 10px; font-size: 11px; font-family: ui-monospace, Consolas, monospace;">
                         <span style="color: var(--text);" x-text="prettyReason(rd.reason)" :title="rd.reason"></span>
-                        <span style="color: var(--muted-2);" x-text="fmt(rd.samples, 0) + ' 样本'"></span>
+                        <span style="color: var(--muted-2);" x-text="t('cleanup.samplesCount', {n: fmt(rd.samples, 0)})"></span>
                       </div>
                     </template>
                   </div>
@@ -1124,19 +1044,14 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
 
             <!-- #3 测量方法卡:怎么测的 + 代价 -->
             <div style="margin-top: 18px; padding: 11px 14px; background: var(--surface-alt); border-radius: 8px; font-size: 11.5px; color: var(--muted); line-height: 1.7;">
-              <strong style="color: var(--text); font-weight: 600;">怎么测的</strong> ·
-              采样周期 每 <span x-text="Math.pow(2, deep.result.period_log2).toLocaleString()"></span> cycle 一次(2<sup x-text="deep.result.period_log2"></sup>) ·
-              本窗 <span x-text="fmt(deep.result.window_s, 0)"></span>s 采到 <strong style="color: var(--text);" x-text="fmt(deep.result.sample_total, 0)"></strong> 样本 ·
-              GetData 累计开销 <span x-text="fmt(deep.result.overhead.getdata_ms, 1)"></span>ms ·
-              丢样 <span x-text="deep.result.overhead.dropped"></span> · HW 缓冲满 <span x-text="deep.result.overhead.hwfull"></span> 次 ·
-              <span style="color: var(--muted-2);">GPU 硬件采样,无需 Nsight、不停服务</span>
+              <strong style="color: var(--text); font-weight: 600;" x-text="t('kern.howMeasured')"></strong> <span x-text="t('kern.samplingPeriod', {period: Math.pow(2, deep.result.period_log2).toLocaleString(), log: deep.result.period_log2, w: fmt(deep.result.window_s, 0), samples: fmt(deep.result.sample_total, 0), getdata: fmt(deep.result.overhead.getdata_ms, 1), dropped: deep.result.overhead.dropped, hwfull: deep.result.overhead.hwfull})"></span>
             </div>
           </div>
         </template>
 
         <!-- 初始 -->
         <template x-if="!deep.result && !deep.error">
-          <div class="roofline-verdict empty" style="margin: 12px 0 0;">点上面的按钮开一个短窗 PC Sampling,看这些 kernel 内部卡在哪(访存依赖 / 计算管线 / 同步 …)。</div>
+          <div class="roofline-verdict empty" style="margin: 12px 0 0;" x-text="t('kern.noInitialData')"></div>
         </template>
       </div>
     </div>
@@ -1148,7 +1063,7 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
       <div class="cfg-bar">
         <div class="cfg-bar-main">
           <div class="cfg-seg">
-            <span class="cfg-lbl">业务形态</span>
+            <span class="cfg-lbl" x-text="t('cfg.form')"></span>
             <select x-model="cfgDraft.workload_form" @change="onFormChange($event.target.value)">
               <template x-for="f in workloadForms" :key="f"><option :value="f" x-text="f"></option></template>
             </select>
@@ -1164,18 +1079,18 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
           <div class="cfg-spacer"></div>
           <div class="cfg-acts">
             <button class="cfg-adv-toggle" :class="{ open: advancedOpen }" @click="advancedOpen = !advancedOpen">
-              <span class="chev">›</span>高级阈值 <span x-text="`(${advKeys().length})`"></span>
+              <span class="chev">›</span><span x-text="t('cfg.advanced')"></span> <span x-text="`(${advKeys().length})`"></span>
             </button>
-            <button class="btn secondary btn-sm" @click="resetConfig()" :disabled="!dirty()">还原</button>
-            <button class="btn primary btn-sm" @click="saveConfig()" :disabled="!dirty() || saving" x-text="saving ? '保存中…' : '保存'"></button>
+            <button class="btn secondary btn-sm" @click="resetConfig()" :disabled="!dirty()" x-text="t('common.reset')"></button>
+            <button class="btn primary btn-sm" @click="saveConfig()" :disabled="!dirty() || saving" x-text="saving ? t('common.saving') : t('common.save')"></button>
           </div>
         </div>
         <div class="cfg-adv" x-show="advancedOpen" x-cloak>
-          <div class="cfg-adv-head" x-text="active ? '改一处,引用它的策展规则全跟着变 · 保存即热生效,无需重启' : '引擎未运行,保存仅校验,重启后生效'"></div>
+          <div class="cfg-adv-head" x-text="active ? t('cfg.hintActive') : t('cfg.hintInactive')"></div>
           <div class="form-grid cfg-adv-grid">
             <template x-for="k in advKeys()" :key="k">
               <label>
-                <span x-text="cfgLabels[k][0]"></span> <span class="hint-inline" x-text="`(${cfgLabels[k][1]})`"></span>
+                <span x-text="t(cfgLabels[k][0])"></span> <span class="hint-inline" x-text="`(${cfgLabels[k][1]})`"></span>
                 <input type="number" step="any" x-model.number="cfgDraft[k]">
               </label>
             </template>
@@ -1185,8 +1100,8 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
 
       <!-- Currently triggered diagnoses (parent dashboard() scope) -->
       <div class="section-head" style="margin-top: 0;">
-        <h2><span x-text="diagnosesStale ? '最近命中的诊断' : '当前触发的诊断'"></span><span class="count" x-text="`(${diagnoses.length})`"></span></h2>
-        <span class="hint" x-show="diagnoses.length > 0" x-text="diagnosesStale ? '当前无触发 · 显示最近一次命中' : '最近 5 分钟去重后'"></span>
+        <h2><span x-text="diagnosesStale ? t('rules.diagRecent') : t('rules.diagCurrent')"></span><span class="count" x-text="`(${diagnoses.length})`"></span></h2>
+        <span class="hint" x-show="diagnoses.length > 0" x-text="diagnosesStale ? t('rules.staleHint') : t('rules.freshHint')"></span>
       </div>
       <div class="diagnoses" style="margin-bottom: 32px;">
         <template x-if="diagnoses.length === 0">
@@ -1194,8 +1109,8 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
             <div class="check">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
             </div>
-            <div class="title">一切看起来都不错</div>
-            <div>当前窗口内没有规则被触发</div>
+            <div class="title" x-text="t('rules.allGood')"></div>
+            <div x-text="t('rules.none')"></div>
           </div>
         </template>
         <template x-for="d in diagnoses" :key="d.rule_id">
@@ -1219,10 +1134,10 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
                 </div>
                 <span class="sev-pill" :class="d.severity" x-text="d.severity"></span>
               </div>
-              <div class="diag-msg" x-text="d.message"></div>
+              <div class="diag-msg" x-text="ruleI18n(d.rule_id, 'name', d.message)"></div>
               <div class="diag-sug">
-                <div class="diag-sug-label">建议</div>
-                <div class="diag-sug-text" x-text="d.suggestion"></div>
+                <div class="diag-sug-label" x-text="t('common.suggestion')"></div>
+                <div class="diag-sug-text" x-text="diagSuggestion(d)"></div>
               </div>
             </div>
           </div>
@@ -1232,11 +1147,11 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
       <!-- 工具条:诊断配置(弹框)+ 新建自定义规则(弹框)-->
       <div class="rules-toolbar">
         <div class="section-head" style="margin: 0;">
-          <h2>诊断规则<span class="count" x-text="`(${rules.length + customRules.length})`"></span></h2>
-          <span class="hint">规则名=客观事实(测出来的);根因/处方是推断,供参考、非定论。策展规则只读,自定义规则可增删改。</span>
+          <h2><span x-text="t('rules.title')"></span><span class="count" x-text="`(${rules.length + customRules.length})`"></span></h2>
+          <span class="hint" x-text="t('rules.hint')"></span>
         </div>
         <div style="display:flex; gap:8px;">
-          <button class="btn primary" @click="newRule()" :disabled="!customEditable" :title="customEditable ? '' : '引擎未运行,暂不可建'">+ 新建规则</button>
+          <button class="btn primary" @click="newRule()" :disabled="!customEditable" :title="customEditable ? '' : t('rules.newRuleDisabled')" x-text="t('rules.newRule')"></button>
         </div>
       </div>
 
@@ -1246,18 +1161,18 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
           <div class="rule-row">
             <div class="rule-row-main">
               <div class="rule-row-head">
-                <h3 class="rule-row-name" x-text="r.name"></h3>
+                <h3 class="rule-row-name" x-text="ruleI18n(r.id, 'name', r.name)"></h3>
                 <span class="sev-pill" :class="r.severity" x-text="r.severity"></span>
-                <span class="badge default" x-text="kindLabel[r.kind] || r.kind"></span>
-                <template x-if="r.requires_regime"><span class="badge" x-text="'仅 '+r.requires_regime"></span></template>
+                <span class="badge default" x-text="t('kind.'+r.kind)"></span>
+                <template x-if="r.requires_regime"><span class="badge" x-text="t('rules.onlyRegime')+r.requires_regime"></span></template>
               </div>
               <div class="rule-row-meta">
                 <code x-text="r.id"></code>
                 <template x-if="r.precondition.length">
-                  <span><span class="meta-sep"></span>前置:<span x-text="r.precondition.join(' / ')"></span></span>
+                  <span><span class="meta-sep"></span><span x-text="t('rules.precondition')"></span><span x-text="r.precondition.join(' / ')"></span></span>
                 </template>
                 <template x-if="r.checks.length > 1">
-                  <span><span class="meta-sep"></span><span x-text="r.match === 'any' ? '任一满足' : '全部满足'"></span></span>
+                  <span><span class="meta-sep"></span><span x-text="r.match === 'any' ? t('rules.matchAny') : t('rules.matchAll')"></span></span>
                 </template>
               </div>
               <div class="rule-row-cond" style="flex-wrap:wrap; gap:8px;">
@@ -1270,18 +1185,18 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
                     <span class="cond-agg" x-text="c.window_seconds + 's'"></span>
                   </span>
                 </template>
-                <template x-if="r.kind === 'classifier'"><span class="cond-agg">引擎按 Roofline 算术强度 vs 脊点判定(无阈值)</span></template>
+                <template x-if="r.kind === 'classifier'"><span class="cond-agg" x-text="t('rules.classifierNote')"></span></template>
               </div>
               <template x-if="r.hypothesis">
                 <div class="diag-sug" style="margin-top:10px;">
-                  <div class="diag-sug-label">推断</div>
-                  <div class="diag-sug-text" x-text="r.hypothesis"></div>
+                  <div class="diag-sug-label" x-text="t('common.inference')"></div>
+                  <div class="diag-sug-text" x-text="ruleI18n(r.id, 'hypothesis', r.hypothesis)"></div>
                 </div>
               </template>
               <template x-if="r.suggestion">
                 <div class="diag-sug" style="margin-top:8px;">
-                  <div class="diag-sug-label">建议</div>
-                  <div class="diag-sug-text" x-text="r.suggestion"></div>
+                  <div class="diag-sug-label" x-text="t('common.suggestion')"></div>
+                  <div class="diag-sug-text" x-text="ruleI18n(r.id, 'suggestion', r.suggestion)"></div>
                 </div>
               </template>
             </div>
@@ -1291,20 +1206,20 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
 
       <!-- 自定义规则(你建的;和策展规则同一引擎评、同一面板冒)-->
       <div class="section-head" style="margin-top: 28px;">
-        <h2>自定义规则<span class="count" x-text="`(${customRules.length})`"></span></h2>
-        <span class="hint" x-text="customEditable ? '命中即在「触发的诊断」里冒,和 S1/D3a 同路径' : '引擎未运行,暂不可编辑'"></span>
+        <h2><span x-text="t('rules.customTitle')"></span><span class="count" x-text="`(${customRules.length})`"></span></h2>
+        <span class="hint" x-text="customEditable ? t('rules.customHintActive') : t('rules.customHintInactive')"></span>
       </div>
       <div class="rules-list">
         <template x-if="customRules.length === 0">
-          <div class="rule-row" style="display:block; color: var(--text-dim);">还没有自定义规则。点右上「+ 新建规则」加一条 —— 它会和策展规则一起参与诊断。</div>
+          <div class="rule-row" style="display:block; color: var(--text-dim);" x-text="t('rules.customEmpty')"></div>
         </template>
         <template x-for="r in customRules" :key="r.id">
           <div class="rule-row">
             <div class="rule-row-main">
               <div class="rule-row-head">
-                <h3 class="rule-row-name" x-text="r.name"></h3>
+                <h3 class="rule-row-name" x-text="ruleI18n(r.id, 'name', r.name)"></h3>
                 <span class="sev-pill" :class="r.severity" x-text="r.severity"></span>
-                <span class="badge">自定义</span>
+                <span class="badge" x-text="t('kind.custom')"></span>
               </div>
               <div class="rule-row-meta"><code x-text="r.id"></code></div>
               <div class="rule-row-cond">
@@ -1317,22 +1232,22 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
               </div>
               <template x-if="r.hypothesis">
                 <div class="diag-sug" style="margin-top:10px;">
-                  <div class="diag-sug-label">推断</div>
-                  <div class="diag-sug-text" x-text="r.hypothesis"></div>
+                  <div class="diag-sug-label" x-text="t('common.inference')"></div>
+                  <div class="diag-sug-text" x-text="ruleI18n(r.id, 'hypothesis', r.hypothesis)"></div>
                 </div>
               </template>
               <template x-if="r.suggestion">
                 <div class="diag-sug" style="margin-top:8px;">
-                  <div class="diag-sug-label">建议</div>
-                  <div class="diag-sug-text" x-text="r.suggestion"></div>
+                  <div class="diag-sug-label" x-text="t('common.suggestion')"></div>
+                  <div class="diag-sug-text" x-text="ruleI18n(r.id, 'suggestion', r.suggestion)"></div>
                 </div>
               </template>
             </div>
             <div class="rule-row-actions">
-              <button title="编辑" @click="editRule(r)">
+              <button :title="t('common.edit')" @click="editRule(r)">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
               </button>
-              <button title="删除" class="danger" @click="deleteRule(r)">
+              <button :title="t('common.delete')" class="danger" @click="deleteRule(r)">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
               </button>
             </div>
@@ -1344,34 +1259,34 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
       <div x-show="editing" x-cloak class="modal-backdrop" @click.self="cancelEdit()" @keydown.escape.window="editing && cancelEdit()">
         <div class="modal rule-modal" role="dialog" aria-modal="true">
           <div class="modal-head">
-            <h2 x-text="editingExisting ? '编辑自定义规则' : '新建自定义规则'"></h2>
-            <button class="modal-close" @click="cancelEdit()" aria-label="关闭">×</button>
+            <h2 x-text="editingExisting ? t('custom.editTitle.edit') : t('custom.editTitle.new')"></h2>
+            <button class="modal-close" @click="cancelEdit()" :aria-label="t('custom.closeBtn')">×</button>
           </div>
           <form @submit.prevent="saveRule()" class="rule-modal-form" x-show="editing">
             <div class="modal-body">
               <div class="form-grid">
-                <label class="full">规则名 <span class="hint-inline">(客观事实,如「GPU 利用率偏低」)</span>
+                <label class="full"><span x-text="t('custom.name')"></span> <span class="hint-inline" x-text="t('custom.nameHint')"></span>
                   <input type="text" x-model="editing.name" required>
                 </label>
-                <label class="full">指标
+                <label class="full" x-text="t('custom.metric')"></label>
                   <select x-model="editing.metric">
                     <template x-for="m in availableMetrics" :key="m"><option :value="m" x-text="m"></option></template>
                   </select>
                 </label>
-                <label>操作符
+                <label x-text="t('custom.operator')"></label>
                   <select x-model="editing.op">
                     <option value="<">&lt;</option><option value="<=">&le;</option>
                     <option value=">">&gt;</option><option value=">=">&ge;</option>
                     <option value="==">==</option><option value="!=">!=</option>
                   </select>
                 </label>
-                <label>阈值
+                <label x-text="t('custom.threshold')"></label>
                   <input type="number" step="any" x-model.number="editing.threshold" required>
                 </label>
-                <label>窗口秒
+                <label x-text="t('custom.windowSeconds')"></label>
                   <input type="number" min="1" x-model.number="editing.window_seconds" required>
                 </label>
-                <label>聚合
+                <label x-text="t('custom.aggregation')"></label>
                   <select x-model="editing.aggregation">
                     <option value="avg">avg</option><option value="p50">p50</option>
                     <option value="p95">p95</option><option value="p99">p99</option>
@@ -1379,22 +1294,22 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
                     <option value="sum">sum</option><option value="count">count</option>
                   </select>
                 </label>
-                <label>Severity
+                <label x-text="t('custom.severity')"></label>
                   <select x-model="editing.severity">
                     <option value="info">info</option><option value="warning">warning</option><option value="critical">critical</option>
                   </select>
                 </label>
-                <label class="full">推断 <span class="hint-inline">(可选,根因猜测 — 会标进诊断卡)</span>
+                <label class="full"><span x-text="t('custom.hypothesis')"></span> <span class="hint-inline" x-text="t('custom.hypothesisHint')"></span>
                   <textarea x-model="editing.hypothesis" rows="2"></textarea>
                 </label>
-                <label class="full">建议 <span class="hint-inline">(可选)</span>
+                <label class="full"><span x-text="t('custom.suggestion')"></span> <span class="hint-inline" x-text="t('custom.suggestionHint')"></span>
                   <textarea x-model="editing.suggestion" rows="2"></textarea>
                 </label>
               </div>
             </div>
             <div class="form-actions">
-              <button type="button" class="btn secondary" @click="cancelEdit()">取消</button>
-              <button type="submit" class="btn primary">保存</button>
+              <button type="button" class="btn secondary" @click="cancelEdit()" x-text="t('custom.cancelBtn')"></button>
+              <button type="submit" class="btn primary" x-text="t('custom.saveBtn')"></button>
             </div>
           </form>
         </div>
@@ -1407,30 +1322,30 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
     <div x-show="tab === 'bench'" x-data="benchTab()" x-init="init()">
 
       <div class="section-head" style="margin-top: 0;">
-        <h2>新建压测</h2>
-        <span class="hint">提交后异步执行，结果落库后出现在下方历史</span>
+        <h2 x-text="t('bench.createTitle')"></h2>
+        <span class="hint" x-text="t('bench.createHint')"></span>
       </div>
 
       <div class="bench-form-card">
         <div class="form-grid">
-          <label>名称（可选）
-            <input type="text" x-model="form.name" placeholder="adhoc-时间戳">
+          <label x-text="t('bench.name')"></label>
+            <input type="text" x-model="form.name" :placeholder="t('bench.nameePlaceholder')"></input>
           </label>
-          <label>API
+          <label x-text="t('bench.api')"></label>
             <select x-model="form.api">
               <option value="chat">chat completions</option>
               <option value="completions">completions</option>
             </select>
           </label>
-          <label class="full">Endpoint
-            <input type="text" x-model="form.endpoint" placeholder="http://localhost:8000" required>
-            <span class="hint">vLLM 服务的 base URL，自动追加 /v1/...</span>
+          <label class="full" x-text="t('bench.endpoint')"></label>
+            <input type="text" x-model="form.endpoint" placeholder="http://localhost:8000" required></input>
+            <span class="hint" x-text="t('bench.endpointHint')"></span>
           </label>
-          <label class="full">调用名 <span class="hint-inline">(served-model-name)</span>
-            <input type="text" x-model="form.model" placeholder="Qwen/Qwen2.5-0.5B-Instruct" required>
-            <span class="hint">写进 OpenAI 请求 <code>{"model": "..."}</code> 的字符串，必须匹配 vLLM 启动时的 <code>--served-model-name</code>。与磁盘上权重路径无关。</span>
+          <label class="full"><span x-text="t('bench.modelName')"></span> <span class="hint-inline" x-text="t('bench.modelNameSub')"></span></label>
+            <input type="text" x-model="form.model" placeholder="Qwen/Qwen2.5-0.5B-Instruct" required></input>
+            <span class="hint" x-text="t('bench.modelNameHint')"></span>
           </label>
-          <label class="full">Prompt 数据源
+          <label class="full" x-text="t('bench.promptSource')"></label>
             <select x-model="form.prompt_source" @change="onPromptSourceChange()">
               <template x-for="src in promptSources" :key="src.value">
                 <option :value="src.value" x-text="src.label"></option>
@@ -1438,49 +1353,47 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
             </select>
             <span class="hint" x-text="currentPromptSourceDescription()"></span>
           </label>
-          <label x-show="currentPromptSourceUsesPromptTokens()">Prompt tokens
+          <label x-show="currentPromptSourceUsesPromptTokens()" x-text="t('bench.promptTokens')"></label>
             <input type="number" x-model.number="form.prompt_tokens" min="1">
           </label>
-          <label>Output tokens
+          <label x-text="t('bench.outputTokens')"></label>
             <input type="number" x-model.number="form.output_tokens" min="1">
           </label>
-          <label>Concurrency
+          <label x-text="t('bench.concurrency')"></label>
             <input type="number" x-model.number="form.concurrency" min="1">
           </label>
-          <label>测量模式
+          <label x-text="t('bench.measureMode')"></label>
             <select x-model="form.boundedBy">
-              <option value="duration">按时长</option>
-              <option value="requests">按请求数</option>
+              <option value="duration" x-text="t('bench.measureByDuration')"></option>
+              <option value="requests" x-text="t('bench.measureByRequests')"></option>
             </select>
           </label>
-          <label x-show="form.boundedBy === 'duration'">Duration（秒）
+          <label x-show="form.boundedBy === 'duration'" x-text="t('bench.duration')"></label>
             <input type="number" x-model.number="form.duration_s" min="1">
           </label>
-          <label x-show="form.boundedBy === 'requests'">Num requests
+          <label x-show="form.boundedBy === 'requests'" x-text="t('bench.numRequests')"></label>
             <input type="number" x-model.number="form.num_requests" min="1">
           </label>
-          <label>Warmup（秒）
+          <label x-text="t('bench.warmup')"></label>
             <input type="number" x-model.number="form.warmup_s" min="0">
           </label>
-          <label>Timeout（秒）
+          <label x-text="t('bench.timeout')"></label>
             <input type="number" step="any" x-model.number="form.timeout_s" min="1">
           </label>
           <div class="full slo-section">
             <div class="slo-head">
-              <span class="slo-label">SLO 约束（可选）</span>
-              <button type="button" class="slo-add-btn" @click="addSloRow()">+ 添加约束</button>
+              <span class="slo-label" x-text="t('bench.sloConstraint')"></span>
+              <button type="button" class="slo-add-btn" @click="addSloRow()" x-text="t('bench.addSloBtn')"></button>
             </div>
-            <div class="slo-empty" x-show="form.sloRows.length === 0">
-              未设约束 · 提交后 SLO 状态会标记为 n/a
-            </div>
+            <div class="slo-empty" x-show="form.sloRows.length === 0" x-text="t('bench.sloEmpty')"></div>
             <template x-for="(row, i) in form.sloRows" :key="i">
               <div class="slo-row">
                 <select x-model="row.metric" class="slo-field metric"
                         @change="onSloMetricChange(i)">
-                  <option value="ttft">TTFT · 首 token</option>
-                  <option value="tpot">TPOT · token 间</option>
-                  <option value="e2e">E2E · 端到端</option>
-                  <option value="error_rate">错误率</option>
+                  <option value="ttft" x-text="t('bench.sloMetricTtft')"></option>
+                  <option value="tpot" x-text="t('bench.sloMetricTpot')"></option>
+                  <option value="e2e" x-text="t('bench.sloMetricE2e')"></option>
+                  <option value="error_rate" x-text="t('bench.sloMetricErrorRate')"></option>
                 </select>
                 <select x-model="row.percentile" class="slo-field pct"
                         :disabled="row.metric === 'error_rate'">
@@ -1504,19 +1417,19 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
                   <option value="s">s</option>
                 </select>
                 <button type="button" class="slo-remove-btn"
-                        @click="removeSloRow(i)" title="删除这条约束">×</button>
+                        @click="removeSloRow(i)" :title="t('bench.removeSloBtn')">×</button>
               </div>
             </template>
             <div class="slo-preview" x-show="form.sloRows.length > 0">
-              <span class="slo-preview-label">提交时生成：</span>
-              <code x-text="buildSloSpec() || '(空)'"></code>
+              <span class="slo-preview-label" x-text="t('bench.sloPreviewLabel')"></span>
+              <code x-text="buildSloSpec() || t('bench.sloPreviewEmpty')"></code>
             </div>
           </div>
         </div>
         <div class="form-actions">
           <button class="btn primary" :disabled="submitting || !form.endpoint || !form.model" @click="submit()">
-            <span x-show="!submitting">开始运行</span>
-            <span x-show="submitting" x-cloak>提交中…</span>
+            <span x-show="!submitting" x-text="t('bench.submitBtn')"></span>
+            <span x-show="submitting" x-cloak x-text="t('bench.submitting')"></span>
           </button>
         </div>
       </div>
@@ -1526,7 +1439,7 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
            class="bench-running-card">
         <div class="bench-running-head">
           <span class="live-dot"></span>
-          <span class="title">正在运行</span>
+          <span class="title" x-text="t('bench.running')"></span>
           <span class="count" x-text="status.running.length"></span>
         </div>
         <template x-for="r in status.running" :key="r.run_id">
@@ -1539,14 +1452,14 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
       </div>
 
       <div class="section-head" style="margin-top: 28px;">
-        <h2>历史记录<span class="count" x-text="`(${runs.length})`"></span></h2>
-        <span class="hint">最近 50 条</span>
+        <h2><span x-text="t('bench.historyTitle')"></span><span class="count" x-text="`(${runs.length})`"></span></h2>
+        <span class="hint" x-text="t('bench.historyHint')"></span>
       </div>
 
       <template x-if="runs.length === 0">
         <div class="empty">
-          <div class="title">暂无压测记录</div>
-          <div>填上方表单点「开始运行」即可</div>
+          <div class="title" x-text="t('bench.emptyTitle')"></div>
+          <div x-text="t('bench.emptyHint')"></div>
         </div>
       </template>
 
@@ -1554,11 +1467,11 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
       <template x-if="cmpRuns()">
         <div class="chart-card" style="margin-bottom: 14px;">
           <div class="head" style="margin-bottom: 10px;">
-            <h3>结果对比 <span style="color: var(--muted-2); font-weight: 400; font-size: 12px;">Δ = B 相对 A(基准);绿 = 更好,红 = 更差,|Δ|&lt;2% 视为持平</span></h3>
-            <button class="btn" @click="cmpSel = []">清除对比</button>
+            <h3><span x-text="t('bench.compareTitle')"></span> <span style="color: var(--muted-2); font-weight: 400; font-size: 12px;" x-text="t('bench.compareHint')"></span></h3>
+            <button class="btn" @click="cmpSel = []" x-text="t('bench.clearCompare')"></button>
           </div>
           <div style="display: flex; gap: 18px; flex-wrap: wrap; margin-bottom: 10px; font-size: 12px;">
-            <span><strong style="color: var(--indigo);">A(基准)</strong> <span x-text="cmpRuns()[0].scenario_name"></span> · <code style="font-size: 11px;" x-text="cmpRuns()[0].run_id"></code> · <span style="color: var(--muted);" x-text="cmpScenario(cmpRuns()[0])"></span></span>
+            <span><strong style="color: var(--indigo);" x-text="t('cleanup.aBaseline')"></strong> <span x-text="cmpRuns()[0].scenario_name"></span> · <code style="font-size: 11px;" x-text="cmpRuns()[0].run_id"></code> · <span style="color: var(--muted);" x-text="cmpScenario(cmpRuns()[0])"></span></span>
             <span><strong style="color: var(--teal);">B</strong> <span x-text="cmpRuns()[1].scenario_name"></span> · <code style="font-size: 11px;" x-text="cmpRuns()[1].run_id"></code> · <span style="color: var(--muted);" x-text="cmpScenario(cmpRuns()[1])"></span></span>
           </div>
           <!-- 指标卡网格:每指标 A/B 双横条(按本指标 max 归一)+ Δ% 徽标 -->
@@ -1568,7 +1481,7 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
                 <div class="cmp-block-head">
                   <span class="cmp-metric" x-text="row.label"></span>
                   <span class="cmp-delta" :class="row.good === true ? 'good' : (row.good === false ? 'bad' : '')"
-                        x-text="row.pct == null ? '' : ((row.pct > 0 ? '+' : '') + row.pct.toFixed(1) + '%' + (row.good === true ? ' ↑优' : (row.good === false ? ' ↓劣' : ' ≈持平')))"></span>
+                        x-text="row.pct == null ? '' : ((row.pct > 0 ? '+' : '') + row.pct.toFixed(1) + '%' + (row.good === true ? t('cleanup.deltaBetter') : (row.good === false ? t('cleanup.deltaWorse') : t('cleanup.deltaEven'))))"></span>
                 </div>
                 <div class="cmp-bar-row">
                   <span class="cmp-ab a">A</span>
@@ -1594,16 +1507,16 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
               <div class="bench-run-head">
                 <span class="rule-row-name" x-text="r.scenario_name"></span>
                 <span class="status-chip" :class="r.status">
-                  <span x-show="r.status === 'running'">运行中</span>
-                  <span x-show="r.status === 'done'">已完成</span>
-                  <span x-show="r.status === 'failed'">失败</span>
+                  <span x-show="r.status === 'running'" x-text="t('cleanup.statusRunning')"></span>
+                  <span x-show="r.status === 'done'" x-text="t('cleanup.statusDone')"></span>
+                  <span x-show="r.status === 'failed'" x-text="t('cleanup.statusFailed')"></span>
                 </span>
                 <span class="slo-chip" :class="r.slo_status || 'na'"
                       x-show="r.slo_status && r.slo_status !== 'n/a'"
-                      x-text="r.slo_status === 'pass' ? 'SLO 通过' : 'SLO 失败'"></span>
+                      x-text="r.slo_status === 'pass' ? t('cleanup.sloPass') : t('cleanup.sloFail')"></span>
                 <button class="cmp-pill" :class="{ on: cmpSel.includes(r.run_id) }"
                         @click.stop="toggleCmp(r.run_id)"
-                        x-text="cmpSel.includes(r.run_id) ? ('对比 ' + (cmpSel.indexOf(r.run_id) === 0 ? 'A' : 'B')) : '对比'"></button>
+                        x-text="cmpSel.includes(r.run_id) ? t('cleanup.compareSlot', {slot: (cmpSel.indexOf(r.run_id) === 0 ? 'A' : 'B')}) : t('cleanup.compare')"></button>
               </div>
               <div class="bench-run-meta">
                 <code x-text="r.run_id"></code>
@@ -1615,19 +1528,19 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
             </div>
             <div class="bench-run-metrics">
               <div class="metric">
-                <div class="m-label">TTFT 平均</div>
+                <div class="m-label" x-text="t('bench.metricTtftAvg')"></div>
                 <div class="m-value" x-text="fmtMs(r.client_metrics?.ttft_ms?.mean)"></div>
               </div>
               <div class="metric">
-                <div class="m-label">TPOT 平均</div>
+                <div class="m-label" x-text="t('bench.metricTpotAvg')"></div>
                 <div class="m-value" x-text="fmtMs(r.client_metrics?.tpot_ms?.mean)"></div>
               </div>
               <div class="metric">
-                <div class="m-label">tok/s</div>
+                <div class="m-label" x-text="t('bench.metricTokPerSec')"></div>
                 <div class="m-value" x-text="fmtTps(r.client_metrics?.output_throughput_tps)"></div>
               </div>
               <div class="metric">
-                <div class="m-label">ok / err</div>
+                <div class="m-label" x-text="t('bench.metricOkErr')"></div>
                 <div class="m-value">
                   <span x-text="r.client_metrics?.ok ?? '—'"></span>
                   <span class="sep">/</span>
@@ -1638,22 +1551,22 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
             </div>
             <div class="bench-run-detail" x-show="selectedId === r.run_id" x-cloak>
               <div x-show="r.error" class="bench-error">
-                <strong>错误：</strong><span x-text="r.error"></span>
+                <strong x-text="t('bench.resultError')"></strong><span x-text="r.error"></span>
               </div>
               <div class="bench-detail-grid">
                 <div>
-                  <h4>客户端指标</h4>
+                  <h4 x-text="t('bench.clientMetrics')"></h4>
                   <table class="bench-detail-tab">
-                    <tr><td>TTFT</td><td>平均 <strong x-text="fmtMs(r.client_metrics?.ttft_ms?.mean)"></strong> · p50 <span x-text="fmtMs(r.client_metrics?.ttft_ms?.p50)"></span> / p95 <span x-text="fmtMs(r.client_metrics?.ttft_ms?.p95)"></span> / p99 <span x-text="fmtMs(r.client_metrics?.ttft_ms?.p99)"></span></td></tr>
-                    <tr><td>TPOT</td><td>平均 <strong x-text="fmtMs(r.client_metrics?.tpot_ms?.mean)"></strong> · p50 <span x-text="fmtMs(r.client_metrics?.tpot_ms?.p50)"></span> / p95 <span x-text="fmtMs(r.client_metrics?.tpot_ms?.p95)"></span> / p99 <span x-text="fmtMs(r.client_metrics?.tpot_ms?.p99)"></span></td></tr>
-                    <tr><td>E2E</td><td>平均 <strong x-text="fmtMs(r.client_metrics?.e2e_ms?.mean)"></strong> · p50 <span x-text="fmtMs(r.client_metrics?.e2e_ms?.p50)"></span> / p95 <span x-text="fmtMs(r.client_metrics?.e2e_ms?.p95)"></span> / p99 <span x-text="fmtMs(r.client_metrics?.e2e_ms?.p99)"></span></td></tr>
+                    <tr><td>TTFT</td><td><span x-text="t('common.avg')"></span> <strong x-text="fmtMs(r.client_metrics?.ttft_ms?.mean)"></strong> · p50 <span x-text="fmtMs(r.client_metrics?.ttft_ms?.p50)"></span> / p95 <span x-text="fmtMs(r.client_metrics?.ttft_ms?.p95)"></span> / p99 <span x-text="fmtMs(r.client_metrics?.ttft_ms?.p99)"></span></td></tr>
+                    <tr><td>TPOT</td><td><span x-text="t('common.avg')"></span> <strong x-text="fmtMs(r.client_metrics?.tpot_ms?.mean)"></strong> · p50 <span x-text="fmtMs(r.client_metrics?.tpot_ms?.p50)"></span> / p95 <span x-text="fmtMs(r.client_metrics?.tpot_ms?.p95)"></span> / p99 <span x-text="fmtMs(r.client_metrics?.tpot_ms?.p99)"></span></td></tr>
+                    <tr><td>E2E</td><td><span x-text="t('common.avg')"></span> <strong x-text="fmtMs(r.client_metrics?.e2e_ms?.mean)"></strong> · p50 <span x-text="fmtMs(r.client_metrics?.e2e_ms?.p50)"></span> / p95 <span x-text="fmtMs(r.client_metrics?.e2e_ms?.p95)"></span> / p99 <span x-text="fmtMs(r.client_metrics?.e2e_ms?.p99)"></span></td></tr>
                     <tr><td>Output</td><td><span x-text="fmtTps(r.client_metrics?.output_throughput_tps)"></span></td></tr>
                     <tr><td>Input</td><td><span x-text="fmtTps(r.client_metrics?.input_throughput_tps)"></span></td></tr>
                     <tr><td>Tokens</td><td>out <span x-text="r.client_metrics?.output_tokens_total ?? '—'"></span> · in <span x-text="r.client_metrics?.input_tokens_total ?? '—'"></span></td></tr>
                   </table>
                 </div>
                 <div>
-                  <h4>场景</h4>
+                  <h4 x-text="t('bench.scenario')"></h4>
                   <table class="bench-detail-tab">
                     <tr><td>Endpoint</td><td><code x-text="r.scenario?.endpoint"></code></td></tr>
                     <tr><td>Model</td><td><code x-text="r.scenario?.model"></code></td></tr>
@@ -1676,7 +1589,7 @@ KV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来�
   </main>
 
   <footer>
-    <span class="live-dot"></span>pping-lang · 每 2s 自动刷新
+    <span class="live-dot"></span>pping-lang · <span x-text="t('cleanup.autoRefresh')"></span>
   </footer>
 </div>
 

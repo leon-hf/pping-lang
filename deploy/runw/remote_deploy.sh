@@ -25,5 +25,7 @@ sudo docker exec -d \
   -e VLLM_USE_MODELSCOPE=True -e MODELSCOPE_CACHE=/models -e HF_HOME=/models \
   -e PPING_LANG_API_PORT="$DASH_PORT" -e PPING_DEPLOY_TAG="$DEPLOY_TAG" \
   "$CONTAINER" bash -lc "pping-vllm serve '$MODEL' --host 0.0.0.0 --port $OAI_PORT \
-     --gpu-memory-utilization 0.5 --max-model-len 2048 > /tmp/pvllm.log 2>&1"
+     --gpu-memory-utilization 0.5 --max-model-len 2048 --enforce-eager > /tmp/pvllm.log 2>&1"
+# --enforce-eager:跳过 CUDA graph 捕获 —— vLLM 0.21 + Blackwell(sm_120)上反复在捕获阶段挂死
+# (日志停在 KV cache、GPU 0% 空转)。eager 模式略慢但启动稳;指标/诊断/dashboard 全可用。
 echo "[runw] pping-vllm serve launching(首次下模型到 /models;之后命中缓存)"

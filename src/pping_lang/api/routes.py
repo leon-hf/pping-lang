@@ -162,67 +162,117 @@ def _kernel_findings(
     launch_rate: float | None,
     overhead_cb_ms: float | None,
     window_s: float | None,
+    lang: str = "zh",
 ) -> list[dict[str, Any]]:
     """把 kernel 指标翻译成人话结论 —— pping-lang 的命根子:给结论不给数字。
 
-    全部从阶段 1a 已采集的量派生(无需 PC Sampling)。每条 {level, title, detail}。
+    全部从阶段 1a 已采集的量派生(无需 PC Sampling)。每条 {level, claim, title, detail}。
+    lang 选 "zh"/"en";默认 zh 保持既有行为不变。
     """
+    en = lang == "en"
     findings: list[dict[str, Any]] = []
-    _label = {"gemm": "GEMM(矩阵乘)", "attention": "Attention", "comm": "通信(NCCL)",
-              "norm": "Norm", "activation": "Activation", "rotary": "Rotary", "other": "其它"}
+    _label = (
+        {"gemm": "GEMM", "attention": "Attention", "comm": "Comm (NCCL)",
+         "norm": "Norm", "activation": "Activation", "rotary": "Rotary", "other": "Other"}
+        if en else
+        {"gemm": "GEMM(矩阵乘)", "attention": "Attention", "comm": "通信(NCCL)",
+         "norm": "Norm", "activation": "Activation", "rotary": "Rotary", "other": "其它"}
+    )
 
     # 1. 哪类 kernel 主导 → X-bound
     if class_shares and class_shares[0]["pct"] >= 60:
         c = class_shares[0]
+        lbl = _label.get(c["cls"], c["cls"])
         findings.append({
-            "level": "info", "claim": "derived", "title": f"{_label.get(c['cls'], c['cls'])}-bound",
-            "detail": f"GPU 计算时间 {c['pct']:.0f}% 集中在 {_label.get(c['cls'], c['cls'])}，"
-                      f"典型 compute-bound 形态。提速方向:增大 batch 摊薄、检查 tiling、或量化。",
+            "level": "info", "claim": "derived", "title": f"{lbl}-bound",
+            "detail": (
+                f"{c['pct']:.0f}% of GPU compute time is concentrated in {lbl} — "
+                f"a classic compute-bound shape. To speed up: grow the batch to amortize, "
+                f"check tiling, or quantize."
+                if en else
+                f"GPU 计算时间 {c['pct']:.0f}% 集中在 {lbl}，"
+                f"典型 compute-bound 形态。提速方向:增大 batch 摊薄、检查 tiling、或量化。"
+            ),
         })
     # 2. 单个 kernel 主导 → 优化它收益最大
     if top_kernels and top_kernels[0]["pct"] >= 40:
         k = top_kernels[0]
         findings.append({
-            "level": "info", "claim": "derived", "title": "单 kernel 主导",
-            "detail": f"单个 kernel 占 GPU 时间 {k['pct']:.0f}%（{k['name'][:46]}），"
-                      f"优化或替换它收益最大。",
+            "level": "info", "claim": "derived",
+            "title": "Single kernel dominates" if en else "单 kernel 主导",
+            "detail": (
+                f"A single kernel takes {k['pct']:.0f}% of GPU time ({k['name'][:46]}); "
+                f"optimizing or replacing it yields the biggest win."
+                if en else
+                f"单个 kernel 占 GPU 时间 {k['pct']:.0f}%（{k['name'][:46]}），"
+                f"优化或替换它收益最大。"
+            ),
         })
     # 3. 同步等待高 → launch-bound
     if sync_share is not None and sync_share >= 15:
         findings.append({
-            "level": "warning", "claim": "hypothesis", "title": "Launch-bound（同步等待高）",
-            "detail": f"同步等待占墙钟 {sync_share:.0f}%，GPU 在等 CPU 派发 kernel。"
-                      f"增大 batch / 提高 CUDA graph 覆盖可缓解。",
+            "level": "warning", "claim": "hypothesis",
+            "title": "Launch-bound (high sync wait)" if en else "Launch-bound（同步等待高）",
+            "detail": (
+                f"Sync wait is {sync_share:.0f}% of wall-clock — the GPU is waiting on the CPU "
+                f"to dispatch kernels. A larger batch / higher CUDA Graph coverage can ease this."
+                if en else
+                f"同步等待占墙钟 {sync_share:.0f}%，GPU 在等 CPU 派发 kernel。"
+                f"增大 batch / 提高 CUDA graph 覆盖可缓解。"
+            ),
         })
     # 4. GEMM 碎片化(kernel zoo)—— 对标 zymtrace 那张图的观察
     gemm_variants = [k for k in top_kernels if k.get("cls") == "gemm"]
     if len(gemm_variants) >= 8:
         findings.append({
-            "level": "info", "claim": "hypothesis", "title": "GEMM kernel 碎片化",
-            "detail": f"出现 {len(gemm_variants)} 种不同 GEMM 变体(kernel zoo)，"
-                      f"tiling 可能次优 —— 同一矩阵乘被拆成多种形状。",
+            "level": "info", "claim": "hypothesis",
+            "title": "GEMM kernel fragmentation" if en else "GEMM kernel 碎片化",
+            "detail": (
+                f"{len(gemm_variants)} distinct GEMM variants appear (a kernel zoo); "
+                f"tiling may be suboptimal — the same matmul is split into many shapes."
+                if en else
+                f"出现 {len(gemm_variants)} 种不同 GEMM 变体(kernel zoo)，"
+                f"tiling 可能次优 —— 同一矩阵乘被拆成多种形状。"
+            ),
         })
     # 5. 内存拷贝偏多
     if memcpy_share is not None and memcpy_share >= 10:
         findings.append({
-            "level": "warning", "claim": "derived", "title": "内存拷贝开销",
-            "detail": f"memcpy 占墙钟 {memcpy_share:.0f}%，数据搬运偏多(H2D/D2H)。",
+            "level": "warning", "claim": "derived",
+            "title": "memcpy overhead" if en else "内存拷贝开销",
+            "detail": (
+                f"memcpy is {memcpy_share:.0f}% of wall-clock — a lot of data movement (H2D/D2H)."
+                if en else
+                f"memcpy 占墙钟 {memcpy_share:.0f}%，数据搬运偏多(H2D/D2H)。"
+            ),
         })
     # 6. CUDA Graph 覆盖低 + launch 频繁 → launch 开销
     if in_graph is not None and in_graph < 40 and launch_rate and launch_rate > 5000:
         findings.append({
-            "level": "info", "claim": "hypothesis", "title": "CUDA Graph 覆盖低",
-            "detail": f"仅 {in_graph:.0f}% kernel 在 graph 内、每秒 {launch_rate:.0f} 次 launch，"
-                      f"launch 开销可能偏高。",
+            "level": "info", "claim": "hypothesis",
+            "title": "Low CUDA Graph coverage" if en else "CUDA Graph 覆盖低",
+            "detail": (
+                f"Only {in_graph:.0f}% of kernels run inside a graph, at {launch_rate:.0f} launches/s; "
+                f"launch overhead may be high."
+                if en else
+                f"仅 {in_graph:.0f}% kernel 在 graph 内、每秒 {launch_rate:.0f} 次 launch，"
+                f"launch 开销可能偏高。"
+            ),
         })
     # 7. 吃自己狗粮:采集器自身开销
     if overhead_cb_ms is not None and window_s and window_s > 0:
         ov_pct = 100.0 * (overhead_cb_ms / 1000.0) / window_s
         if ov_pct >= 3:
             findings.append({
-                "level": "warning", "claim": "measurement", "title": "采集开销偏高",
-                "detail": f"本采集器开销约占 {ov_pct:.1f}%（进程内 Python，高 kernel 率下变贵)。"
-                          f"建议降采样;阶段 1b 注入式可消除。",
+                "level": "warning", "claim": "measurement",
+                "title": "Collector overhead high" if en else "采集开销偏高",
+                "detail": (
+                    f"This collector costs about {ov_pct:.1f}% (in-process Python, gets pricier at "
+                    f"high kernel rates). Consider downsampling; phase 1b injection can eliminate it."
+                    if en else
+                    f"本采集器开销约占 {ov_pct:.1f}%（进程内 Python，高 kernel 率下变贵)。"
+                    f"建议降采样;阶段 1b 注入式可消除。"
+                ),
             })
     return findings
 
@@ -243,14 +293,34 @@ _STALL_ADVICE: dict[str, str] = {
     "sync": "同步/屏障开销偏高 —— 查 tile/block 同步粒度。",
     "fetch_control": "取指/控制流开销 —— fused mega-kernel 或动态分支较多。",
 }
+_STALL_LABEL_EN: dict[str, str] = {
+    "memory_dependency": "memory dependency", "shared_dependency": "shared/MIO dependency",
+    "memory_throttle": "memory-subsystem pressure", "math_pipe": "math pipe",
+    "exec_dependency": "execution dependency", "sync": "sync", "fetch_control": "fetch/control-flow",
+    "dispatch": "dispatch", "scheduler_slack": "scheduler slack", "other": "other",
+}
+_STALL_ADVICE_EN: dict[str, str] = {
+    "memory_dependency": "The kernel spends much time waiting on global/local memory returns. Use batch/shape"
+                         " to tell latency from bandwidth — grow the batch to amortize, change tiling, raise L2 hits.",
+    "math_pipe": "The math/Tensor pipe is near saturation (compute-bound). Quantize / lower precision; don't lump Tensor-Core kernels in as compute-starved.",
+    "shared_dependency": "Shared-memory dependency — check tiling, bank conflicts, MMA pipeline.",
+    "memory_throttle": "Memory-subsystem resource intake is throttled (MIO/LG/constant cache), distinct from plain dependency waits.",
+    "exec_dependency": "Long instruction-level execution dependency chains — break dependencies and raise ILP.",
+    "sync": "Sync/barrier overhead is high — check tile/block sync granularity.",
+    "fetch_control": "Fetch/control-flow overhead — fused mega-kernels or many dynamic branches.",
+}
 
 
-def _stall_findings(result: dict[str, Any] | None) -> list[dict[str, Any]]:
+def _stall_findings(result: dict[str, Any] | None, lang: str = "zh") -> list[dict[str, Any]]:
     """把 PC Sampling stall 分解翻成人话结论(Deep Evidence 的"给结论"层)。
 
     口径遵循设计文档 §11(Codex 评审):不过度归因(访存依赖不单独断言带宽 vs 延迟);
     scheduler_slack 高是好事(非 latency-starved);真瓶颈排除 slack/other。
+    lang 选 "zh"/"en";默认 zh 保持既有行为不变。
     """
+    en = lang == "en"
+    LBL = _STALL_LABEL_EN if en else _STALL_LABEL
+    ADV = _STALL_ADVICE_EN if en else _STALL_ADVICE
     findings: list[dict[str, Any]] = []
     if not result or not result.get("available"):
         return findings
@@ -259,36 +329,52 @@ def _stall_findings(result: dict[str, Any] | None) -> list[dict[str, Any]]:
     real = [s for s in shares if s["cls"] not in ("scheduler_slack", "other")]
     if real and real[0]["pct"] >= 35:
         c = real[0]
-        lbl = _STALL_LABEL.get(c["cls"], c["cls"])
+        lbl = LBL.get(c["cls"], c["cls"])
         findings.append({
-            "level": "info", "claim": "derived", "title": f"{lbl}主导 stall",
-            "detail": f"stall 样本 {c['pct']:.0f}% 集中在{lbl}。" + _STALL_ADVICE.get(c["cls"], ""),
+            "level": "info", "claim": "derived",
+            "title": f"{lbl}-dominated stall" if en else f"{lbl}主导 stall",
+            "detail": (f"{c['pct']:.0f}% of stall samples are in {lbl}. " + ADV.get(c["cls"], ""))
+                      if en else
+                      (f"stall 样本 {c['pct']:.0f}% 集中在{lbl}。" + ADV.get(c["cls"], "")),
         })
     # 2. scheduler_slack 高 → 非 latency-starved(好事,提示瓶颈在别处)
     slack = next((s for s in shares if s["cls"] == "scheduler_slack"), None)
     if slack and slack["pct"] >= 40:
         findings.append({
-            "level": "info", "claim": "hypothesis", "title": "调度余量充足(非 latency-starved)",
-            "detail": f"{slack['pct']:.0f}% 的 stall 是 not-selected(warp 就绪但调度器选了别的)——"
-                      f" eligible warp 充足,当前不是延迟瓶颈,真正瓶颈看主导 stall 类。",
+            "level": "info", "claim": "hypothesis",
+            "title": "Plenty of scheduler slack (not latency-starved)" if en else "调度余量充足(非 latency-starved)",
+            "detail": (f"{slack['pct']:.0f}% of stalls are not-selected (warps ready but the scheduler picked "
+                       f"others) — eligible warps are plentiful, so latency isn't the current bottleneck; "
+                       f"look at the dominant stall class for the real one.")
+                      if en else
+                      (f"{slack['pct']:.0f}% 的 stall 是 not-selected(warp 就绪但调度器选了别的)——"
+                       f" eligible warp 充足,当前不是延迟瓶颈,真正瓶颈看主导 stall 类。"),
         })
     # 3. 主导 kernel 的 stall
     table: list[dict[str, Any]] = result.get("kernel_table") or []
     if table and table[0].get("dominant_stall"):
         k = table[0]
-        dom = _STALL_LABEL.get(k["dominant_stall"], k["dominant_stall"])
+        dom = LBL.get(k["dominant_stall"], k["dominant_stall"])
         findings.append({
-            "level": "info", "claim": "derived", "title": "主导 kernel 的 stall",
-            "detail": f"采样最多的 kernel（{k['kernel'][:46]}）主要卡在 {dom}"
-                      f"（{k['dominant_pct']:.0f}%）。",
+            "level": "info", "claim": "derived",
+            "title": "Top kernel's stall" if en else "主导 kernel 的 stall",
+            "detail": (f"The most-sampled kernel ({k['kernel'][:46]}) is mainly stalled on {dom} "
+                       f"({k['dominant_pct']:.0f}%).")
+                      if en else
+                      (f"采样最多的 kernel（{k['kernel'][:46]}）主要卡在 {dom}"
+                       f"（{k['dominant_pct']:.0f}%）。"),
         })
     # 4. 诚实:取证采样有丢样就标注
     ov: dict[str, Any] = result.get("overhead") or {}
     if (ov.get("hwfull") or 0) > 0 or (ov.get("dropped") or 0) > 0:
         findings.append({
-            "level": "warning", "claim": "measurement", "title": "取证采样有丢样",
-            "detail": f"HW 缓冲满 {ov.get('hwfull', 0)} 次、丢样 {ov.get('dropped', 0)} ——"
-                      f" 采样周期可调长;本次分布仍可参考但非全量。",
+            "level": "warning", "claim": "measurement",
+            "title": "Sampling had drops" if en else "取证采样有丢样",
+            "detail": (f"HW buffer full {ov.get('hwfull', 0)}×, dropped {ov.get('dropped', 0)} — the sampling "
+                       f"period can be lengthened; this distribution is still indicative but not exhaustive.")
+                      if en else
+                      (f"HW 缓冲满 {ov.get('hwfull', 0)} 次、丢样 {ov.get('dropped', 0)} ——"
+                       f" 采样周期可调长;本次分布仍可参考但非全量。"),
         })
     return findings
 
@@ -297,6 +383,11 @@ _BUILTIN_DESCRIPTIONS: dict[str, str] = {
     "mixed-short": "短问答 + 闲聊 + 简单指令（每条 50–180 tokens）",
     "mixed-long":  "长上下文：文档摘要 / 长指令 / 转录稿（每条 1000–3000 tokens）",
     "code":        "代码相关：写函数 / 解释代码 / 修 bug / 重构",
+}
+_BUILTIN_DESCRIPTIONS_EN: dict[str, str] = {
+    "mixed-short": "Short Q&A + chit-chat + simple instructions (50–180 tokens each)",
+    "mixed-long":  "Long context: doc summaries / long instructions / transcripts (1000–3000 tokens each)",
+    "code":        "Code-related: write functions / explain code / fix bugs / refactor",
 }
 
 logger = logging.getLogger(__name__)
@@ -629,6 +720,7 @@ def build_app(
     @app.get("/api/kernels")
     def kernels(
         window: int = Query(60, ge=5, le=3600, description="latest 取值窗口 (s)"),
+        lang: str = Query("zh", description="findings 语言 zh/en"),
     ) -> dict[str, Any]:
         cutoff_ns = wall_ns() - int(window * 1e9)
 
@@ -684,7 +776,7 @@ def build_app(
             class_shares=class_shares, top_kernels=top_kernels,
             sync_share=sync_share, memcpy_share=memcpy_share, in_graph=in_graph,
             launch_rate=launch_rate, overhead_cb_ms=overhead_cb_ms,
-            window_s=rollup_window_s,
+            window_s=rollup_window_s, lang=lang,
         )
 
         return {
@@ -759,22 +851,25 @@ def build_app(
     def deep_evidence(
         window: float = Query(5.0, ge=0.0, le=30.0, description="取证窗时长(秒)"),
         period_log2: int = Query(16, ge=5, le=31, description="采样周期 2^N 周期(过小会打满 HW 缓冲楔死采样)"),
+        lang: str = Query("zh", description="findings 语言 zh/en"),
     ) -> dict[str, Any]:
         if cupti is None:
-            return {"available": False, "error": "CUPTI collector 未配置", "findings": []}
+            return {"available": False, "error": "CUPTI collector not configured", "findings": []}
         result = cupti.run_deep_evidence(window_s=window, period_log2=period_log2)
-        result["findings"] = _stall_findings(result)
+        result["findings"] = _stall_findings(result, lang)
         return result
 
     # GET 读最近一次取证结果 + 当前是否可用(给 UI 渲染面板,不触发新采集)。
     @app.get("/api/kernels/deep_evidence")
-    def deep_evidence_last() -> dict[str, Any]:
+    def deep_evidence_last(
+        lang: str = Query("zh", description="findings 语言 zh/en"),
+    ) -> dict[str, Any]:
         last = cupti.last_stall_result() if cupti is not None else None
         available = cupti.pc_sampling_available() if cupti is not None else False
         return {
             "available_now": available,
             "last": last,
-            "findings": _stall_findings(last) if last else [],
+            "findings": _stall_findings(last, lang) if last else [],
         }
 
     # === GET /api/latency_trends — TTFT / TPOT / E2E bucketed p50+p99 over time ===
@@ -1042,7 +1137,7 @@ def build_app(
     # === 自定义规则 CRUD —— 与策展规则同一评估器(DiagnosisEngine 每轮一起评)===
     def _require_store():
         if custom_store is None:
-            raise HTTPException(503, "自定义规则不可用(诊断引擎未运行)")
+            raise HTTPException(503, "Custom rules unavailable (diagnosis engine not running)")
         return custom_store
 
     @app.post("/api/diagnosis_rules/custom")
@@ -1051,7 +1146,7 @@ def build_app(
         try:
             return store.add(body)
         except (ValueError, TypeError) as e:
-            raise HTTPException(400, f"非法规则: {e}")
+            raise HTTPException(400, f"Invalid rule: {e}")
 
     @app.put("/api/diagnosis_rules/custom/{rule_id}")
     def update_custom_rule(rule_id: str, body: dict = Body(...)) -> dict[str, Any]:
@@ -1059,15 +1154,15 @@ def build_app(
         try:
             return store.update(rule_id, body)
         except KeyError:
-            raise HTTPException(404, f"未找到自定义规则 {rule_id!r}")
+            raise HTTPException(404, f"Custom rule {rule_id!r} not found")
         except (ValueError, TypeError) as e:
-            raise HTTPException(400, f"非法规则: {e}")
+            raise HTTPException(400, f"Invalid rule: {e}")
 
     @app.delete("/api/diagnosis_rules/custom/{rule_id}")
     def delete_custom_rule(rule_id: str) -> dict[str, Any]:
         store = _require_store()
         if not store.delete(rule_id):
-            raise HTTPException(404, f"未找到自定义规则 {rule_id!r}")
+            raise HTTPException(404, f"Custom rule {rule_id!r} not found")
         return {"deleted": rule_id}
 
     # === PUT /api/diagnosis_config — 改中心 SLA/阈值,热生效 ===
@@ -1361,18 +1456,18 @@ def build_app(
         per_level_s: int = Query(25, ge=5, le=120, description="每档压测秒数"),
     ) -> dict[str, Any]:
         if _scaling["running"]:
-            raise HTTPException(409, "scaling sweep 已在运行")
+            raise HTTPException(409, "scaling sweep already running")
         if not _params:
-            raise HTTPException(400, "缺模型架构信息,无法把 tok/s 换算成 TFLOPs")
+            raise HTTPException(400, "Missing model architecture info; cannot convert tok/s to TFLOPs")
         model = _served_model()
         if not model:
-            raise HTTPException(400, "拿不到模型名(vllm_config 不可用)")
+            raise HTTPException(400, "Cannot resolve model name (vllm_config unavailable)")
         try:
             lv = sorted({int(x) for x in levels.split(",") if x.strip()})
         except ValueError:
-            raise HTTPException(422, f"levels 解析失败: {levels!r}")
+            raise HTTPException(422, f"Failed to parse levels: {levels!r}")
         if not lv:
-            raise HTTPException(422, "levels 为空")
+            raise HTTPException(422, "levels is empty")
         _scaling.update(running=True, error=None, progress="启动中")
         asyncio.create_task(_run_scaling_sweep(lv, per_level_s, _vllm_base_url(), model))
         return {"status": "running", "levels": lv, "per_level_s": per_level_s,
@@ -1385,16 +1480,21 @@ def build_app(
 
     # === GET /api/bench/prompt-sources — UI dropdown discovery ===
     @app.get("/api/bench/prompt-sources")
-    def bench_prompt_sources() -> dict[str, Any]:
+    def bench_prompt_sources(
+        lang: str = Query("zh", description="标签语言 zh/en"),
+    ) -> dict[str, Any]:
         from pping_lang.bench.prompts import available_builtins, load_prompts
+        en = lang == "en"
         items: list[dict[str, Any]] = [
             {
                 "value": "synthetic",
-                "label": "合成填充 (synthetic)",
-                "description": "按 prompt_tokens 长度循环 the quick brown fox 句模板",
+                "label": "Synthetic fill (synthetic)" if en else "合成填充 (synthetic)",
+                "description": ("Repeats the 'the quick brown fox' template up to prompt_tokens length"
+                                if en else "按 prompt_tokens 长度循环 the quick brown fox 句模板"),
                 "uses_prompt_tokens": True,
             },
         ]
+        descs = _BUILTIN_DESCRIPTIONS_EN if en else _BUILTIN_DESCRIPTIONS
         for name in available_builtins():
             try:
                 size = len(load_prompts(f"builtin:{name}"))
@@ -1402,8 +1502,8 @@ def build_app(
                 size = 0
             items.append({
                 "value": f"builtin:{name}",
-                "label": f"内置 {name} ({size} 条)",
-                "description": _BUILTIN_DESCRIPTIONS.get(name, ""),
+                "label": (f"Built-in {name} ({size})" if en else f"内置 {name} ({size} 条)"),
+                "description": descs.get(name, ""),
                 "uses_prompt_tokens": False,
             })
         return {"sources": items}

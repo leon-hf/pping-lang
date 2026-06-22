@@ -1,3 +1,857 @@
+// ===== i18n(中/英;框架支持多语,加语言只需补字典 + 一个 lang-toggle 按钮)=====
+// 全局 t(key):x-text="t('k')" / :title="t('k')" 处处可用(dashboard/rulesTab/benchTab 同享)。
+// 语言存 Alpine.store('i18n').lang(响应式,切换即时重渲染)+ localStorage 持久化。
+const I18N = {
+  zh: {
+    'nav.live': '实时', 'nav.kernel': 'Kernel', 'nav.rules': '规则', 'nav.bench': '压测',
+    'brand.sub': 'vLLM 性能诊断',
+    'btn.issue': '提 Issue', 'btn.star': 'Star',
+    'hero.info': '查看 vLLM 启动命令、环境变量、解析配置',
+    'common.save': '保存', 'common.saving': '保存中…', 'common.reset': '还原',
+    'common.suggestion': '建议', 'common.inference': '推断', 'common.edit': '编辑', 'common.delete': '删除',
+    'cfg.form': '业务形态', 'cfg.advanced': '高级阈值',
+    'cfg.hintActive': '改一处,引用它的策展规则全跟着变 · 保存即热生效,无需重启',
+    'cfg.hintInactive': '引擎未运行,保存仅校验,重启后生效',
+    'cfg.sla_ttft': 'TTFT p99 SLA', 'cfg.sla_tpot': 'TPOT p99 SLA',
+    'cfg.long_prompt': '长 prompt 阈值', 'cfg.waiting': '等待队列阈值',
+    'cfg.mbu_high': 'MBU 贴顶阈值', 'cfg.mbu_low': 'MBU 偏低阈值',
+    'cfg.batch_small': '并发偏小阈值', 'cfg.mfu_low': 'MFU 偏低阈值',
+    'cfg.tail': '尾延迟比 p99/p50', 'cfg.kv': 'KV 压力阈值',
+    'cfg.prefix': '前缀命中低阈值', 'cfg.weights': '权重占显存阈值',
+    'kind.classifier': '分类器', 'kind.symptom': '入口症状', 'kind.fact': '判别', 'kind.custom': '自定义',
+    'rules.diagCurrent': '当前触发的诊断', 'rules.diagRecent': '最近命中的诊断',
+    'rules.freshHint': '最近 5 分钟去重后', 'rules.staleHint': '当前无触发 · 显示最近一次命中',
+    'rules.allGood': '一切看起来都不错', 'rules.none': '当前窗口内没有规则被触发',
+    'rules.title': '诊断规则',
+    'rules.hint': '规则名=客观事实(测出来的);根因/处方是推断,供参考、非定论。策展规则只读,自定义规则可增删改。',
+    'rules.newRule': '+ 新建规则', 'rules.newRuleDisabled': '引擎未运行,暂不可建',
+    'rules.precondition': '前置:', 'rules.matchAny': '任一满足', 'rules.matchAll': '全部满足',
+    'rules.onlyRegime': '仅 ',
+    'rules.classifierNote': '引擎按 Roofline 算术强度 vs 脊点判定(无阈值)',
+    'rules.customTitle': '自定义规则',
+    'rules.customHintActive': '命中即在「触发的诊断」里冒,和 S1/D3a 同路径',
+    'rules.customHintInactive': '引擎未运行,暂不可编辑',
+    'rules.customEmpty': '还没有自定义规则。点右上「+ 新建规则」加一条 —— 它会和策展规则一起参与诊断。',
+    'common.close': '关闭', 'common.copy': '复制',
+    'live.tier1': '用户感知指标', 'live.tier1hint': '最近 60 秒 · 每 2s 刷新', 'live.tier2': '效率与诊断',
+    'kpi.ttft': 'TTFT 平均', 'kpi.ttft.sub': '首 token 延迟', 'kpi.reqs': '请求',
+    'kpi.tpot': 'TPOT 平均', 'kpi.tpot.sub': '每 token 间隔',
+    'kpi.tput': 'Output 吞吐', 'kpi.tput.sub': '系统聚合', 'kpi.tput.perreq': '单请求',
+    'kpi.kv': 'KV cache', 'kpi.running': '运行请求', 'kpi.waiting': '等待队列',
+    'kpi.mfu': 'MFU', 'kpi.mfu.sub': '算力利用率',
+    'kpi.gpuutil': 'GPU 利用率', 'kpi.gpuutil.sub': 'SM 忙碌',
+    'kpi.vram': '显存占用', 'kpi.vram.sub': 'VRAM 容量', 'kpi.prefix': 'Prefix cache 命中',
+    'kpi.padding': 'CUDA padding', 'kpi.preempt': '抢占 / 分钟',
+    'tip.ttft': 'TTFT = Time To First Token\n从用户发送请求到收到第一个生成 token 之间的延迟。\n大数字 = 窗口内平均(典型水平);下方分布条 = p50→p95→p99(看尾部恶化,告警颜色按 p99)。\n解读:\n  · 主要由 prefill 阶段决定(要处理整个 prompt)\n  · 长 prompt / 高并发 / 排队都会拉高 TTFT\n  · 用户感觉的「卡了多久才有反应」就是这个\nSLA 常见档:<200ms 即时;<500ms 流畅;<1s 可接受;>2s 用户开始流失。',
+    'tip.dist': '分位分布:每行一条,p99 = 满刻度。p95/p99 行越接近 p50 行 = 尾部越稳;p99 远长于 p50 = 尾延迟恶化。',
+    'tip.tpot': 'TPOT = Time Per Output Token\n生成每个 token 的平均时间(每次 forward pass 的时长)。\n大数字 = 窗口内平均;下方分布条 = p50→p95→p99(尾延迟,告警颜色按 p99)。\n解读:\n  · 主要由 decode 阶段的带宽决定(要读完一遍权重)\n  · 用户感觉的「文字一个个吐出来的快慢」就是这个\n  · 1/TPOT = 单请求 token 速度(50ms TPOT = 20 tok/s)\nSLA 常见档:<30ms 流畅;<50ms 可接受;>100ms 明显卡顿。\nITL fallback:vllm <0.20 不发 TPOT 时,用 iter 间隔近似(语义略不同)。',
+    'tip.tpotItl': '注意:当前 vllm 未发 TPOT,回退到 ITL 近似。',
+    'tip.tput': 'Output 吞吐 = 系统每秒产出的 token 总数\n公式:窗口内 sum(gen_tokens) / 窗口秒数\n解读两个值各看不同的事:\n  · 系统聚合(大字):所有并发请求合起来每秒吐多少 token —— 衡量容量、$/token\n  · 单请求(小字 = 1000/TPOT_p50):单个用户感觉每秒吐多少 token —— 衡量打字速度\n两者关系:系统聚合 ≈ 单请求速度 × 并发数(理想情况下)。\n扩 batch 时系统聚合涨、单请求速度可能微跌 — 用户略卡但总产能高。',
+    'tip.kv': 'KV cache 使用率 = 已分配 KV 块 / 总 KV 块\nvllm 把每个请求的注意力 K/V 缓存切成固定大小的 block 管理。\n解读:\n  · 这是显存里『装请求』的容量水位,跟前面『显存占用』不是一回事\n  · <50%:还能塞更多并发,扩 max_num_seqs 没风险\n  · >80%:接近极限,新请求要么排队要么抢占老请求 (preemption)\n  · >90%:preemption 频率会陡升,吞吐反而下降\n和 --gpu-memory-utilization 互动:那个参数决定 KV cache 总池子多大。',
+    'tip.running': '运行中请求数 = 当前正在 forward pass 的请求数 (batch size)\nvllm 的『continuous batching』每个 iter 都可能改变这个数。\n解读:\n  · 衡量当前并发度,跟 TPS 一起看\n  · 远低于 max_num_seqs:吃不满,扩客户端并发\n  · 等于 max_num_seqs:满载,看是被吞吐限制还是被显存限制\n  · 跟 waiting_reqs 比较:running 上不去 + waiting 排队 = 显存瓶颈',
+    'tip.waiting': '等待队列长度 = 已收到但没排上 running 的请求数\n显存不够或者 max_num_seqs 满了,新请求就堆在这里。\n解读:\n  · 长期 >0:消化速度跟不上进来速度 —— 加 GPU 或限流\n  · 突发 >0 后快速归零:偶发流量尖峰,正常\n  · 持续 >20:用户感觉 TTFT 飙升,是规则告警阈值',
+    'tip.mfu': 'MFU = Model FLOPs Utilization\n实际算力 / GPU 峰值算力,衡量「跑模型时 GPU 算力真正被用了多少」。\n公式:MFU = (6 · params · tokens/sec) / peak_TFLOPS\n解读:\n  · 训练通常 30-55% 算良好(A100/H100 上)\n  · 推理 decode 阶段天然低(~1-5%)—— 受带宽限制,不是 MFU 越高越好\n  · prefill 阶段高(>30%)才是 MFU 真正有意义的时候\n依赖 vllm ≥0.20 的 perf_stats,当前 0.13 不发,这里会显示 —',
+    'tip.gpuutil': 'GPU 利用率 = SM (Streaming Multiprocessor) 忙碌时间占比\nNVML 报的值,反映「过去采样间隔内,至少一个 kernel 在跑」的时间比例。\n注意:不代表算力用满了 —— decode 阶段常见 70-90% 但 MFU 只有 1-5%,\n因为 SM 在「跑 kernel 等数据」也算忙。\n真正衡量算力效率要看 MFU。',
+    'tip.vram': '显存占用率 = 已用 VRAM / 总 VRAM\n权重 + KV cache + 激活值 + CUDA workspace 之和。\nvllm 启动时 --gpu-memory-utilization 决定权重+KV的目标占比(默认 0.9)。\n持续 >95% 容易触发 preemption / OOM。',
+    'tip.prefix': 'Prefix cache 命中率 = 复用前缀的 KV 块 / 总查询块\nvllm 会缓存已经算过的 prompt 前缀的 KV,下次请求命中前缀可以跳过 prefill。\n多轮对话 / system prompt 固定的场景应该 >50%;一次性请求自然为 0。',
+    'tip.padding': 'CUDA padding = (cudagraph 实际批量 - 真实 token) / cudagraph 批量\nvllm 用 CUDA graph 加速时按固定 batch size 跑,少的 token 用 padding 填。\npadding 越高浪费越大。>30% 说明 batch 大小档位选得不合适。',
+    'tip.preempt': '抢占 / 分钟 = 每分钟有多少请求被 swap out\nKV cache 不够时 vllm 会把活跃请求 swap 到内存换其他请求进来。\n>0 说明显存紧张,>5/min 是明显信号 — 应当减小 max_num_seqs 或扩 VRAM。',
+    'common.avg': '平均',
+    'live.latTrends': '用户延迟趋势', 'live.latHint': '最近 5 分钟 · 实线 平均 / 浅线 p99',
+    'lat.ttft': 'TTFT · 首 token 延迟', 'lat.tpot': 'TPOT · 单 token 生成时间', 'lat.e2e': 'E2E · 端到端延迟',
+    'lat.noTtft': '暂无 TTFT 数据', 'lat.noTpot': '暂无 TPOT / ITL 数据',
+    'lat.noE2e': '暂无 E2E 数据', 'lat.noE2eHint': '(跑一次 bench 触发请求完成事件)',
+    'lat.itlSource': '数据源:ITL fallback(当前 vllm 没发 TPOT 字段,用 iter 间隔近似)',
+    'roof.title': 'Roofline 实时诊断',
+    'roof.desc': '点 = 相近 step 聚合(越大 = 步数越多)· 看离上界还有多远,判断 compute-bound 还是 memory-bound',
+    'roof.estimate': '⚠ 估算数据 · 当前 vllm 不发 perf_stats,按 token 计数 + 模型参数推算({b}B 参数)。',
+    'roof.estimateNote': '点形状对,绝对值有误差;升 vllm ≥0.20 自动切回实测。',
+    'roof.sample': '当前样本', 'roof.verdict': '当前结论',
+    'roof.computeUtil': '算力利用', 'roof.bwUtil': '带宽利用',
+    'roof.speedup': '提速方向', 'roof.noSamples': '没有样本可解读 — 跑一次 bench 触发数据。',
+    'roof.foot': '中位 AI={ai} · 拐点={knee} · 样本={n}',
+    'roof.footTip': '样本数={n}  AI 中位={ai}  knee={knee}',
+    'roof.inMemBound': '位于 memory-bound 区', 'roof.inCmpBound': '位于 compute-bound 区',
+    'startup.btn': '启动信息', 'startup.title': 'vLLM 启动信息',
+    'startup.cmdline': '启动命令', 'startup.noCmdline': '未捕获到 cmdline(plugin 早于 sys.argv 设定?)',
+    'startup.env': '环境变量', 'startup.noEnv': '无相关环境变量(仅含 VLLM_/PPING_LANG_/HF_/CUDA_/TORCH_ 等前缀)',
+    'startup.resolved': 'vLLM 解析配置', 'startup.resolvedSub': 'CLI + 默认值合并后的最终生效值',
+    'startup.noConfig': '无 vllm_config(plugin 实例化时未拿到,常见于本地 demo)',
+    'startup.masked': '名称含 TOKEN/KEY/SECRET,值已脱敏',
+    'kern.profileTitle': 'Kernel 级 Profiling',
+    'kern.profileHint': 'PC Sampling 采样实测 · 每个 kernel 占多少 GPU 时间 + 为什么慢（无需 Nsight、按需短窗）',
+    'kern.rooflineTitle': 'Roofline · 宏观定位',
+    'kern.rooflineSubtitle': '整模型在屋脊线的位置（与 Overview 同数据）',
+    'kern.rooflineHint': '点 = 相近 step 聚合（越大 = 步数越多）· 离上界多远 = 还能压多少 · 配合下面 PC Sampling 看具体哪个 kernel、为什么',
+    'kern.howComputed': '屋脊线怎么算的',
+    'kern.rooflineFrom': '全部从 GPU 现读 CUDA 设备属性',
+    'kern.computeRoof': 'Compute roof',
+    'kern.memoryRoof': 'Memory roof',
+    'kern.kneeDesc': '拐点左 = 访存受限,拐点右 = 算力受限;点 y = 实测吞吐 TFLOPs/s,x = FLOPs/字节',
+    'kern.scalingAnalysis': 'Scaling 分析',
+    'kern.scalingDesc': 'decode 阶段权重每 step 全量读取一次,FLOPs 随 batch 线性 → AI ≈ 有效 batch size(图中虚线 envelope)。\n当前 operating point:AI ≈ {ai},实测 {cur} TFLOPs/s,带宽上界利用率 {bwUtil}%。\nbandwidth-bound 外推:{b32}→ {t32} TFLOPs/s(×{gain});B ≥ {knee}(ridge point)进入 compute-bound。\n优化路径:提高并发 / max_num_seqs。\n外推为线性带宽假设,实际受 scheduler / KV cache 容量约束,以压测实测为准。',
+    'kern.scalingSweepBtn': '▶ 实测 scaling 曲线(压测扫并发 1/4/16/64,约 2 分钟)',
+    'kern.scalingSweepRunning': '⏳ {progress}',
+    'kern.scalingSweepInProgress': '压测中…',
+    'kern.scalingSweepNote': '压测流量打到本机 vLLM,期间面板数据会受压测影响',
+    'kern.scalingSweepError': '压测失败:{err}',
+    'kern.scalingVerdict': '📏 实测 scaling 结论',
+    'kern.verdictChart': '图中实心绿线 = 实测;虚线 = 理论 envelope',
+    'kern.kernelTimePct': '每个 Kernel 的 GPU 时间占比',
+    'kern.kernelSampling': 'PC Sampling 采样 · 按占比降序',
+    'kern.kernelHint': '采样命中数 ∝ GPU 活跃时间 → 每个 kernel 吃掉多少 GPU 时间（采样估计,非精确 μs）· 并给出它主导的 stall 原因 ·\n基于最近一次取证（共 {n} 样本）',
+    'kern.recollect': '重新采集',
+    'kern.collecting': '采集中…',
+    'kern.byKernelClass': '按算子类型 · 占 GPU 时间',
+    'kern.gpuUtilDiag': 'GPU 利用诊断',
+    'kern.stallDesc': '{stall}% 的采样周期在等待 (stall),仅 {issued}% 在真正发射指令',
+    'kern.sourceHotspots': '🔬 源码级热点',
+    'kern.sourceDesc': 'PC 样本精确落到 Python 源码行(Triton/自编译 kernel,带 lineinfo)',
+    'kern.sourceTimePct': '这些 kernel 合计占 GPU 时间 {pct}% ——\n本负载主导热点在闭源 cutlass/cuBLAS GEMM(下表,只能到 SASS 偏移);能定位到源码的是下面这些 Triton kernel。',
+    'kern.sourceTimePctHigh': '占比可观,源码级定位直接可行动。',
+    'kern.expandKernelDetail': '点任意行展开 → 看该 kernel 的完整 stall 构成 + 优化建议',
+    'kern.kernelClass': '类',
+    'kern.kernelGpuTime': 'GPU 时间占比',
+    'kern.kernelStallRecoverable': 'stall 时间 可回收',
+    'kern.kernelStallTitle': '这个 kernel 的 stall 构成（占它自己的样本）',
+    'kern.kernelDeepHotspot': '最深热点',
+    'kern.kernelHotspotDesc': 'PC sampling 落到指令地址(stall 样本集中在哪)',
+    'kern.sourceFile': '源文件:{path}',
+    'kern.closedLibKernel': '闭源库 kernel(无 lineinfo)→ 给到 SASS 指令偏移级热点:',
+    'kern.launchOrigin': '↗ 启动来源',
+    'kern.launchStack': 'launch 栈,向外归因到调用它的 host 代码',
+    'kern.preciseMicros': '想要逐 kernel 的精确 μs 耗时?那需要 CUPTI Activity 模式 —— 与 PC Sampling 抢同一套性能计数硬件、二者互斥,需单独部署。下方 Deep Evidence 是同一次采样的全局 stall 分解。',
+    'kern.collectingPcSampling': '正在采集 PC Sampling 证据…(约 5s,稍候自动出表)',
+    'kern.noPcSamplingData': '打开本页会自动采集一次;或点下方 Deep Evidence 的「采集 stall 证据」。',
+    'kern.dataFreshness': '实时',
+    'kern.aggregated': '每 {w}s 聚合一次,当前数据采集于 {when}',
+    'kern.noActivity': '⏸ 当前无 GPU 活动 —— 下面是 {when} 最后一次有 kernel 运行时(最近 {w}s 窗口)的数据,不是当前值',
+    'kern.findings': '诊断结论',
+    'kern.gpuBusy': 'GPU busy',
+    'kern.wallClockShare': '占墙钟',
+    'kern.launchFreq': 'Kernel 启动频率',
+    'kern.meanDuration': '平均 kernel 时长',
+    'kern.inCudaGraph': 'CUDA Graph 内',
+    'kern.memcpy': 'memcpy',
+    'kern.syncWait': '同步等待',
+    'kern.classTrend': 'kernel 类占比 · 实时趋势',
+    'kern.last3Min': '最近 ~3 分钟',
+    'kern.stackedArea': '堆叠面积 = 各类 kernel 占 GPU 计算时间随时间变化',
+    'kern.utilTrend': 'GPU 利用 vs 等待 · 实时趋势',
+    'kern.utilNote': 'GPU busy 高 + 同步等待低 = 健康;等待飙高 = launch-bound',
+    'kern.timeline': '执行时间线',
+    'kern.timelineSpan': '最近 {n} 个 kernel · 跨度 {span} ms',
+    'kern.timelineHint': 'x=时间 · 行=GPU stream · 块=kernel(宽∝耗时) · 空白=GPU 空闲 · 点 ＋ 放大、拖滚动条平移',
+    'kern.exportTrace': '⬇ 导出 trace',
+    'kern.perfettoInst': '拖进 ui.perfetto.dev 看(Nsight / PyTorch 同款格式)· 下方为页内预览',
+    'kern.zoomOut': '缩小',
+    'kern.fitWidth': '适应',
+    'kern.zoomIn': '放大(围绕选中块)',
+    'kern.selected': '▸ 选中 {name}(点 ＋ 放大它)',
+    'kern.selectedDetail': '选中 kernel 详情',
+    'kern.deselect': '取消选中',
+    'kern.duration': '耗时',
+    'kern.startTime': '起始',
+    'kern.stream': 'stream',
+    'kern.inGraph': 'CUDA Graph 内',
+    'kern.yes': '是',
+    'kern.no': '否',
+    'kern.rawKernelDetail': '原始 Kernel 明细',
+    'kern.unique': '去重 {n} 种 kernel',
+    'kern.kernelNameNote': '本窗口出现的不同 kernel 名数量(去重)。模型每步跑同一套 kernel,所以通常稳定;换模型/配置会变。上限 100。',
+    'kern.allValuesWindow': '所有数值均为最近一个聚合窗口（约 {w}s）内的量,每窗刷新',
+    'kern.kernelNameRaw': 'Kernel 名（原始）',
+    'kern.calls': '调用',
+    'kern.totalTime': '总耗时',
+    'kern.average': '平均',
+    'kern.share': '占比',
+    'kern.graphShare': 'Graph',
+    'kern.noKernelDetail': '暂无 per-kernel 明细（需注入式采集器在采,或本窗无 kernel）',
+    'kern.showAll': '展示全部 {n} 个 ▾',
+    'kern.collapse': '收起 ▴',
+    'kern.overhead': '采集开销 {overhead} ms/窗（守 5% 预算）',
+    'kern.dropped': '丢弃 {n} 条（已自动降级）',
+    'kern.deepEvidence': '🔬 Deep Evidence — 为什么慢',
+    'kern.deepEvidenceSub': 'PC Sampling 取证 · 按需短窗',
+    'kern.deepHint': '上面看"哪个 kernel";这里看整体:warp 周期都花哪了、全局卡在什么 stall、以及这些数是怎么测出来的',
+    'kern.collectEvidence': '采集 stall 证据(5s)',
+    'kern.unavailable': 'PC Sampling 取证不可用 — {err}\n需 Linux + libppingcupti.so + 放开 GPU 性能计数器权限;与 torch 同进程需 1b 注入式(见设计文档 §12)。',
+    'kern.warpCycleDirection': 'Warp 周期去向',
+    'kern.allSamples': '占全部 {n} 样本',
+    'kern.issued': '发射指令(干活)',
+    'kern.slack': '就绪未选中(占用率有余量)',
+    'kern.stallWait': '真 stall(在等)',
+    'kern.stallAnalysis': '→ 大量周期在真 stall:延迟瓶颈,看下面卡在什么',
+    'kern.slackAnalysis': '→ 有就绪 warp 没被选中:占用率充足,瓶颈不在并行度',
+    'kern.issuedAnalysis': '→ 发射占比较高:GPU 比较忙碌',
+    'kern.stallBreakdown': 'stall 分解',
+    'kern.stallBreakdownSub': '占 stall 样本(= 全部 − issued)· 点行看原始硬件指标名',
+    'kern.howMeasured': '怎么测的',
+    'kern.samplingPeriod': '采样周期 每 {period} cycle 一次(2^{log}) ·\n本窗 {w}s 采到 {samples} 样本 ·\n GetData 累计开销 {getdata}ms ·\n丢样 {dropped} · HW 缓冲满 {hwfull} 次 ·\nGPU 硬件采样,无需 Nsight、不停服务',
+    'kern.noInitialData': '点上面的按钮开一个短窗 PC Sampling,看这些 kernel 内部卡在哪(访存依赖 / 计算管线 / 同步 …)。',
+    'custom.editTitle.new': '新建自定义规则',
+    'custom.editTitle.edit': '编辑自定义规则',
+    'custom.closeBtn': '关闭',
+    'custom.name': '规则名',
+    'custom.nameHint': '(客观事实,如「GPU 利用率偏低」)',
+    'custom.metric': '指标',
+    'custom.operator': '操作符',
+    'custom.threshold': '阈值',
+    'custom.windowSeconds': '窗口秒',
+    'custom.aggregation': '聚合',
+    'custom.severity': 'Severity',
+    'custom.hypothesis': '推断',
+    'custom.hypothesisHint': '(可选,根因猜测 — 会标进诊断卡)',
+    'custom.suggestion': '建议',
+    'custom.suggestionHint': '(可选)',
+    'custom.cancelBtn': '取消',
+    'custom.saveBtn': '保存',
+    'bench.createTitle': '新建压测',
+    'bench.createHint': '提交后异步执行，结果落库后出现在下方历史',
+    'bench.name': '名称（可选）',
+    'bench.namePlaceholder': 'adhoc-时间戳',
+    'bench.api': 'API',
+    'bench.endpoint': 'Endpoint',
+    'bench.endpointHint': 'vLLM 服务的 base URL，自动追加 /v1/...',
+    'bench.modelName': '调用名',
+    'bench.modelNameSub': '(served-model-name)',
+    'bench.modelNameHint': '写进 OpenAI 请求 {"model": "..."} 的字符串，必须匹配 vLLM 启动时的 --served-model-name。与磁盘上权重路径无关。',
+    'bench.promptSource': 'Prompt 数据源',
+    'bench.promptTokens': 'Prompt tokens',
+    'bench.outputTokens': 'Output tokens',
+    'bench.concurrency': 'Concurrency',
+    'bench.measureMode': '测量模式',
+    'bench.measureByDuration': '按时长',
+    'bench.measureByRequests': '按请求数',
+    'bench.duration': 'Duration（秒）',
+    'bench.numRequests': 'Num requests',
+    'bench.warmup': 'Warmup（秒）',
+    'bench.timeout': 'Timeout（秒）',
+    'bench.sloConstraint': 'SLO 约束（可选）',
+    'bench.addSloBtn': '+ 添加约束',
+    'bench.sloEmpty': '未设约束 · 提交后 SLO 状态会标记为 n/a',
+    'bench.sloMetricTtft': 'TTFT · 首 token',
+    'bench.sloMetricTpot': 'TPOT · token 间',
+    'bench.sloMetricE2e': 'E2E · 端到端',
+    'bench.sloMetricErrorRate': '错误率',
+    'bench.removeSloBtn': '删除这条约束',
+    'bench.sloPreviewLabel': '提交时生成：',
+    'bench.sloPreviewEmpty': '(空)',
+    'bench.submitBtn': '开始运行',
+    'bench.submitting': '提交中…',
+    'bench.running': '正在运行',
+    'bench.historyTitle': '历史记录',
+    'bench.historyHint': '最近 50 条',
+    'bench.emptyTitle': '暂无压测记录',
+    'bench.emptyHint': '填上方表单点「开始运行」即可',
+    'bench.compareTitle': '结果对比',
+    'bench.compareHint': 'Δ = B 相对 A(基准);绿 = 更好,红 = 更差,|Δ|<2% 视为持平',
+    'bench.clearCompare': '清除对比',
+    'bench.metricTtftAvg': 'TTFT 平均',
+    'bench.metricTpotAvg': 'TPOT 平均',
+    'bench.metricTokPerSec': 'tok/s',
+    'bench.metricOkErr': 'ok / err',
+    'bench.resultError': '错误：',
+    'bench.clientMetrics': '客户端指标',
+    'bench.scenario': '场景',
+    'chart.currentSamples': '当前样本',
+    'chart.measuredScaling': '实测 scaling',
+    'chart.samplesAgg': '合并 {n} 个 step',
+    'chart.measuredConcurrency': '实测 并发{b}: {y} TFLOPs/s',
+    'chart.theoreticalEnvelope': '理论 envelope: {e} TFLOPs/s',
+    'chart.gap': '缺口: {g}%',
+    'chart.kclassComm': '通信',
+    'chart.kclassOther': '其它',
+    'chart.syncWait': '同步等待 (launch-bound)',
+    'bench.agoSeconds': '{s} 秒前',
+    'bench.agoMinutes': '{m} 分钟前',
+    'bench.agoHours': '{h} 小时前',
+    'bench.agoDays': '{d} 天前',
+    'bench.ttftAvg': 'TTFT 平均',
+    'bench.tpotAvg': 'TPOT 平均',
+    'bench.e2eAvg': 'E2E 平均',
+    'bench.outputThroughput': 'Output 吞吐',
+    'bench.completionErrors': '完成 / 错误',
+    'bench.submitError': '提交失败: {e}',
+    'bench.submitException': '错误: {e}',
+    'bench.concurrencyLabel': '并发 {c} · {p}/{o} tok · {l}',
+    'bench.promptSourceSynthetic': '合成填充 (synthetic)',
+    'bench.promptSourceDesc': '按 prompt_tokens 长度循环 the quick brown fox 句模板',
+    'toast.saveFailed': '保存失败: {e}',
+    'toast.updated': '已更新',
+    'toast.created': '已创建(立即参与诊断)',
+    'toast.error': '错误: {e}',
+    'toast.deleteConfirm': '删除自定义规则「{n}」？',
+    'toast.deleteFailed': '删除失败: {s}',
+    'toast.deleted': '已删除',
+    'toast.saveApplied': '已保存,热生效',
+    'toast.savePending': '已保存(引擎未运行,重启后生效)',
+    'rules.kindClassifier': '分类器',
+    'rules.kindSymptom': '入口症状',
+    'rules.kindFact': '判别',
+    'rules.kindCustom': '自定义',
+    'kernel.fresh': '刚刚',
+    'kernel.agoSeconds': '{s} 秒前',
+    'kernel.agoMinutes': '{m} 分钟前',
+    'kernel.scaling.progress': '启动中…',
+    'kernel.scaling.testing': '压测中…',
+    'kernel.pcSamplingUnavailable': 'PC Sampling 不可用',
+    'kernel.requestFailed': '请求失败: {e}',
+    'kernel.traceUnavailable': '暂无 trace 数据(需 CUPTI 采集器在采集)',
+    'roofline.memoryBound': 'Memory-bound（LLM decode 阶段的常态）',
+    'roofline.memSugg1': '增大 batch 直到 KV cache 接近 80% — 摊薄权重 re-read',
+    'roofline.memSugg2': '启用 speculative decoding — 减少 decode 步数',
+    'roofline.memSugg3': '权重量化 (AWQ / GPTQ) — 直接减小要读的字节数',
+    'roofline.memSugg4': '升级带宽更高的卡（你当前 {bw} GB/s；H100 3.4 TB/s，H200 4.8 TB/s）',
+    'roofline.computeBound': 'Compute-bound（prefill 或大 batch 状态）',
+    'roofline.compSugg1': '继续增大 batch 收益递减 — 算力已接近上限',
+    'roofline.compSugg2': '升级算力更高的 GPU 或上 tensor parallel',
+    'roofline.compSugg3': 'Chunked prefill — 拆开长 prompt 让 decode 喘息',
+    'kernel.bottleneck.memDep': '访存瓶颈',
+    'kernel.bottleneck.memDepAction': '数据在等内存加载。可试 fp8/int8 量化减少访存、算子融合减少往返、确认 KV cache 复用。',
+    'kernel.bottleneck.memThrottle': '访存带宽瓶颈',
+    'kernel.bottleneck.memThrottleAction': '内存子系统被打满。降低精度 / 融合算子减少访存流量。',
+    'kernel.bottleneck.mathPipe': '算力瓶颈',
+    'kernel.bottleneck.mathPipeAction': '计算单元接近饱和(好事,已高效)。再压只能靠更低精度或更优 kernel。',
+    'kernel.bottleneck.execDep': '指令延迟瓶颈',
+    'kernel.bottleneck.execDepAction': '指令间数据依赖等待,多由 kernel 内部结构决定,优化空间有限。',
+    'kernel.bottleneck.sharedDep': '共享内存瓶颈',
+    'kernel.bottleneck.sharedDepAction': '等共享内存 / L1。检查 tile 大小与 bank conflict。',
+    'kernel.bottleneck.sync': '同步瓶颈',
+    'kernel.bottleneck.syncAction': '线程在 barrier 等待。检查同步频率与负载均衡。',
+    'kernel.bottleneck.fetchCtrl': '前端取指瓶颈',
+    'kernel.bottleneck.fetchCtrlAction': '指令获取 / 分支,一般非主因。',
+    'kernel.bottleneck.dispatch': '发射瓶颈',
+    'kernel.bottleneck.dispatchAction': '发射端口受限。',
+    'kernel.meaning.memDep': '等全局/本地内存的数据返回(long scoreboard)',
+    'kernel.meaning.sharedDep': '等共享内存 / L1(short scoreboard)',
+    'kernel.meaning.memThrottle': '访存指令排队、内存子系统被打满',
+    'kernel.meaning.mathPipe': '计算管线忙(Tensor / ALU / FMA),接近算力上限',
+    'kernel.meaning.execDep': '等前一条指令的结果(指令间依赖)',
+    'kernel.meaning.sync': '在 barrier / membar 等其他线程',
+    'kernel.meaning.fetchCtrl': '等取指 / 分支决议',
+    'kernel.meaning.dispatch': '发射端口受限',
+    'kernel.meaning.schedulerSlack': '有就绪 warp 但本周期没被选中(占用率有余量,非瓶颈)',
+    'kernel.meaning.other': '其它 / 杂项',
+    'kernel.label.memDep': '访存依赖',
+    'kernel.label.sharedDep': 'shared/MIO 依赖',
+    'kernel.label.memThrottle': '访存子系统压力',
+    'kernel.label.mathPipe': '计算管线',
+    'kernel.label.execDep': '执行依赖',
+    'kernel.label.sync': '同步',
+    'kernel.label.fetchCtrl': '取指/控制流',
+    'kernel.label.dispatch': '调度分发',
+    'kernel.label.schedulerSlack': '调度余量(非瓶颈)',
+    'kernel.label.other': '其它',
+    'kernel.suggestion.gemmMem': '访存瓶颈的矩阵乘:fp8/int8 量化、增大 batch 提升计算密度、检查权重是否反复从显存读取。',
+    'kernel.suggestion.gemmMath': '矩阵乘已算力饱和(接近峰值),难再压;考虑更低精度。',
+    'kernel.suggestion.attnMem': '注意力访存瓶颈:确认 FlashAttention / PagedAttention 生效、KV cache 命中率。',
+    'kernel.suggestion.elementwise': '逐元素 / 拷贝:看能否算子融合,减少 kernel 数与显存往返。',
+    'kernel.suggestion.sampling': '采样 / 解码开销:批量解码、减少不必要的 host-device 往返。',
+    'kernel.suggestion.index': '索引 / 查表:确认访问模式连续,避免随机 gather 打散访存。',
+    'kernel.suggestion.execDep': '指令延迟为主,通常由 kernel 内部结构决定,优化空间有限。',
+    'ui.copy': '复制',
+    'ui.copied': '已复制 ✓',
+    'ui.copyFailed': '复制失败',
+    'cleanup.computeRoofFormula': 'TFLOPS（= SM数 × SM时钟 × 架构 bf16 Tensor 吞吐）',
+    'cleanup.memoryRoofFormula': 'GB/s（= 显存时钟 × 位宽 × 2）',
+    'cleanup.knee': '拐点',
+    'cleanup.scalingEff': '（扩展效率 {pct}%）',
+    'cleanup.issuedTitle': '发射指令 {pct}%',
+    'cleanup.stallTitle': 'stall {pct}%',
+    'cleanup.mainCause': '主因',
+    'cleanup.ofStall': '（占 stall 的 {pct}%）',
+    'cleanup.topRecoverablePre': '🎯 最大可回收点:',
+    'cleanup.topRecoverableMid': '—— 全局约',
+    'cleanup.topRecoverablePost': '的 GPU 时间是它在等待,优先优化它。',
+    'cleanup.dominantStall': '主导 stall',
+    'cleanup.lineinfoPre': '想到源码行需 kernel 带',
+    'cleanup.lineinfoPost': '(Triton/自编译默认带);cutlass/cuBLAS 闭源到此为止 —— 偏移 + kernel 名(tile/dtype)已足够定位是哪段在卡。',
+    'cleanup.collapse': '收起 ▴',
+    'cleanup.showAllKernels': '展示全部 {n} 个 ▾',
+    'cleanup.pcSamplingUnavailable': 'PC Sampling 取证不可用 —— {err}',
+    'cleanup.frozen': '⏸ 已冻结',
+    'cleanup.liveTl': '🔴 实时',
+    'cleanup.fit': '适应',
+    'cleanup.cuptiTimelineEmpty': 'CUPTI 执行时间线暂无数据(需采集器在采集 kernel)。',
+    'cleanup.rawKernelPre': '真实 mangled 名 + GPU 硬件实测耗时',
+    'cleanup.rawKernelPost': ',按占比降序',
+    'cleanup.warpIssuedTitle': '发射指令 {pct}%',
+    'cleanup.warpSlackTitle': '就绪未选中 {pct}%',
+    'cleanup.warpStallTitle': '真 stall {pct}%',
+    'cleanup.samplesCount': '{n} 样本',
+    'cleanup.aBaseline': 'A(基准)',
+    'cleanup.deltaBetter': ' ↑优',
+    'cleanup.deltaWorse': ' ↓劣',
+    'cleanup.deltaEven': ' ≈持平',
+    'cleanup.statusRunning': '运行中',
+    'cleanup.statusDone': '已完成',
+    'cleanup.statusFailed': '失败',
+    'cleanup.sloPass': 'SLO 通过',
+    'cleanup.sloFail': 'SLO 失败',
+    'cleanup.compareSlot': '对比 {slot}',
+    'cleanup.compare': '对比',
+    'cleanup.autoRefresh': '每 2s 自动刷新',
+    'cleanup.envelopeLabel': 'B={b}: bandwidth-bound 上界 {y} TFLOPs/s',
+    'cleanup.measured': '实测',
+    'cleanup.dominatedBy': '{label} 为主',
+    'rule.regime-classify.name': '算术强度 vs 脊点(Roofline 定位)',
+    'rule.regime-classify.hypothesis': 'AI < 脊点 → 访存受限;否则计算受限(定义性派生)。memory-bound 且 SM util 高时:util 虚高是物理极限,非优化空间。',
+    'rule.S1.name': 'TTFT p99 超 SLA', 'rule.S1.hypothesis': '首 Token 慢(相对该业务 SLA)。',
+    'rule.S2.name': 'TPOT p99 超 SLA', 'rule.S2.hypothesis': '出字慢(相对该业务 SLA)。',
+    'rule.S4.name': 'KV 用量高或发生抢占', 'rule.S4.hypothesis': '显存吃紧 / 已在抢占。',
+    'rule.S5.name': 'TTFT p99/p50 偏大', 'rule.S5.hypothesis': '首 Token 时延尾部发散(多数快、少数奇慢)。',
+    'rule.D1a.name': '平均 prompt 偏长', 'rule.D1a.hypothesis': '长输入 → prefill 重 / 长请求占 token budget,即便分块预填充也会拖尾。', 'rule.D1a.suggestion': 'PD 分离 / 优先级调度 / 调 max_num_batched_tokens / 限 max_output_tokens。',
+    'rule.D1b.name': '等待队列偏长', 'rule.D1b.hypothesis': '请求在排队。', 'rule.D1b.suggestion': '扩 prefill 容量 / 降 max_num_seqs / 检查上游限流。',
+    'rule.D1c.name': 'MFU 偏低', 'rule.D1c.hypothesis': '处于计算受限区但算力没打满(prefill 算力不足)。', 'rule.D1c.suggestion': '升级算力卡 / FP8→FP4 / 启用 FlashAttention-3。',
+    'rule.D2a.name': 'MBU 接近峰值', 'rule.D2a.hypothesis': '贴近带宽屋顶(访存受限)。', 'rule.D2a.suggestion': '投机解码 / KV 量化(FP8) / 换更高带宽 GPU。',
+    'rule.D2b.name': '并发(running)偏小', 'rule.D2b.hypothesis': '并发太低,没摊薄权重搬运。', 'rule.D2b.suggestion': '提高客户端并发 / 调 max_num_seqs。',
+    'rule.D3a.name': 'MFU、MBU 双低', 'rule.D3a.hypothesis': '两个屋顶都没贴近 —— 算力、带宽都有富余,瓶颈不在硬件(可能是 batch 没拼起来 / launch 开销 / 小算子未融合)。', 'rule.D3a.suggestion': '检查 batch 是否拼起来 / Continuous Batching / CUDA Graph / 算子融合。',
+    'rule.D3c.name': '前缀缓存命中率低', 'rule.D3c.hypothesis': '前缀缓存命中低(若 workload 有公共前缀,则有复用空间;否则正常)。', 'rule.D3c.suggestion': '检查 prompt 模板公共前缀 / 开 enable_prefix_caching / RadixAttention。',
+    'rule.D4a.name': 'KV 用量高且发生抢占', 'rule.D4a.hypothesis': 'KV 池将满并已触发抢占。', 'rule.D4a.suggestion': 'KV 量化(FP8) / 降 max_model_len / KV offload。',
+    'decode.vllmFusedRms': 'vLLM 自定义 · fused add + RMSNorm', 'decode.vllmRms': 'vLLM 自定义 · RMSNorm',
+    'decode.vllmRope': 'vLLM 自定义 · RoPE', 'decode.vllmSilu': 'vLLM 自定义 · SiLU/激活',
+    'decode.vllmCuda': 'vLLM 自定义 CUDA kernel', 'decode.flashinferSample': 'FlashInfer · 采样 kernel',
+    'decode.cublasGemv': 'cuBLAS GEMV(矩阵×向量,小 batch 典型)',
+    'decode.torchNative': 'PyTorch · 原生 elementwise/reduce kernel',
+    'decode.cppCompiled': 'C++ 编译 kernel(闭源/无 lineinfo)',
+    'lang.label': '语言 / Language',
+  },
+  en: {
+    'nav.live': 'Live', 'nav.kernel': 'Kernel', 'nav.rules': 'Rules', 'nav.bench': 'Bench',
+    'brand.sub': 'vLLM perf diagnostics',
+    'btn.issue': 'Issue', 'btn.star': 'Star',
+    'hero.info': 'View vLLM launch command, env vars, resolved config',
+    'common.save': 'Save', 'common.saving': 'Saving…', 'common.reset': 'Reset',
+    'common.suggestion': 'Suggestion', 'common.inference': 'Inference', 'common.edit': 'Edit', 'common.delete': 'Delete',
+    'cfg.form': 'Workload', 'cfg.advanced': 'Advanced',
+    'cfg.hintActive': 'Edit once — every curated rule referencing it follows; saved changes hot-reload, no restart.',
+    'cfg.hintInactive': 'Engine not running; saving only validates, takes effect after restart.',
+    'cfg.sla_ttft': 'TTFT p99 SLA', 'cfg.sla_tpot': 'TPOT p99 SLA',
+    'cfg.long_prompt': 'Long-prompt threshold', 'cfg.waiting': 'Waiting-queue threshold',
+    'cfg.mbu_high': 'MBU near-roof threshold', 'cfg.mbu_low': 'MBU low threshold',
+    'cfg.batch_small': 'Small-batch threshold', 'cfg.mfu_low': 'MFU low threshold',
+    'cfg.tail': 'Tail latency p99/p50', 'cfg.kv': 'KV pressure threshold',
+    'cfg.prefix': 'Prefix-hit low threshold', 'cfg.weights': 'Weights/HBM threshold',
+    'kind.classifier': 'Classifier', 'kind.symptom': 'Symptom', 'kind.fact': 'Fact rule', 'kind.custom': 'Custom',
+    'rules.diagCurrent': 'Active diagnoses', 'rules.diagRecent': 'Recent diagnoses',
+    'rules.freshHint': 'Last 5 min, deduped', 'rules.staleHint': 'None active — showing the latest hit',
+    'rules.allGood': 'All looks good', 'rules.none': 'No rules fired in the current window',
+    'rules.title': 'Diagnosis rules',
+    'rules.hint': 'Rule name = objective fact (measured); root cause / fix is inference — for reference, not a verdict. Curated rules are read-only; custom rules are editable.',
+    'rules.newRule': '+ New rule', 'rules.newRuleDisabled': 'Engine not running — can’t create',
+    'rules.precondition': 'Precondition:', 'rules.matchAny': 'any matches', 'rules.matchAll': 'all match',
+    'rules.onlyRegime': 'only ',
+    'rules.classifierNote': 'Engine classifies by Roofline arithmetic intensity vs ridge (no threshold)',
+    'rules.customTitle': 'Custom rules',
+    'rules.customHintActive': 'Fires into “Active diagnoses” just like S1/D3a',
+    'rules.customHintInactive': 'Engine not running — read-only',
+    'rules.customEmpty': 'No custom rules yet. Click “+ New rule” (top-right) to add one — it joins the curated rules in diagnosis.',
+    'common.close': 'Close', 'common.copy': 'Copy',
+    'live.tier1': 'User-facing metrics', 'live.tier1hint': 'Last 60s · refreshed every 2s', 'live.tier2': 'Efficiency & diagnostics',
+    'kpi.ttft': 'TTFT avg', 'kpi.ttft.sub': 'first-token latency', 'kpi.reqs': 'reqs',
+    'kpi.tpot': 'TPOT avg', 'kpi.tpot.sub': 'per-token interval',
+    'kpi.tput': 'Output throughput', 'kpi.tput.sub': 'system aggregate', 'kpi.tput.perreq': 'per-request',
+    'kpi.kv': 'KV cache', 'kpi.running': 'Running reqs', 'kpi.waiting': 'Waiting queue',
+    'kpi.mfu': 'MFU', 'kpi.mfu.sub': 'compute utilization',
+    'kpi.gpuutil': 'GPU utilization', 'kpi.gpuutil.sub': 'SM busy',
+    'kpi.vram': 'VRAM used', 'kpi.vram.sub': 'VRAM capacity', 'kpi.prefix': 'Prefix cache hit',
+    'kpi.padding': 'CUDA padding', 'kpi.preempt': 'Preempt / min',
+    'tip.ttft': 'TTFT = Time To First Token\nLatency from sending the request to receiving the first generated token.\nBig number = window average (typical); the bars below = p50→p95→p99 (watch tail blow-up; alert color follows p99).\nReading it:\n  · Dominated by the prefill stage (the whole prompt must be processed)\n  · Long prompts / high concurrency / queueing all raise TTFT\n  · This is the "how long until anything happens" the user feels\nCommon SLA tiers: <200ms instant; <500ms smooth; <1s acceptable; >2s users start to churn.',
+    'tip.dist': 'Percentile distribution: one bar each, p99 = full scale. p95/p99 close to p50 = stable tail; p99 far above p50 = tail-latency blow-up.',
+    'tip.tpot': 'TPOT = Time Per Output Token\nAverage time to generate each token (one forward pass).\nBig number = window average; the bars below = p50→p95→p99 (tail latency; alert color follows p99).\nReading it:\n  · Dominated by decode-stage bandwidth (the weights are read once per token)\n  · This is the "how fast tokens stream out" the user feels\n  · 1/TPOT = per-request token speed (50ms TPOT = 20 tok/s)\nCommon SLA tiers: <30ms smooth; <50ms acceptable; >100ms clearly laggy.\nITL fallback: when vllm <0.20 does not emit TPOT, the iter interval is used as an approximation (slightly different semantics).',
+    'tip.tpotItl': 'Note: this vllm build does not emit TPOT — falling back to the ITL approximation.',
+    'tip.tput': 'Output throughput = total tokens the system produces per second\nFormula: sum(gen_tokens) in window / window seconds\nThe two numbers measure different things:\n  · System aggregate (big): tokens/s across all concurrent requests — measures capacity, $/token\n  · Per-request (small = 1000/TPOT_p50): tokens/s a single user feels — measures typing speed\nRelationship: system aggregate ≈ per-request speed × concurrency (ideally).\nGrowing the batch raises the aggregate but may slightly lower per-request speed — a bit laggier per user, higher total capacity.',
+    'tip.kv': 'KV cache usage = allocated KV blocks / total KV blocks\nvllm manages each request\'s attention K/V cache in fixed-size blocks.\nReading it:\n  · This is the "how full of requests" water level in VRAM — not the same as "VRAM used" above\n  · <50%: room for more concurrency, raising max_num_seqs is safe\n  · >80%: near the limit, new requests queue or preempt older ones\n  · >90%: preemption frequency spikes, throughput actually drops\nInteracts with --gpu-memory-utilization: that flag sets the total KV-cache pool size.',
+    'tip.running': 'Running requests = requests currently in a forward pass (batch size)\nvllm\'s continuous batching can change this every iter.\nReading it:\n  · Measures current concurrency — read alongside TPS\n  · Far below max_num_seqs: under-utilized, raise client concurrency\n  · Equal to max_num_seqs: saturated — check whether throughput- or memory-bound\n  · Compare with waiting_reqs: running stuck + waiting queueing = memory bottleneck',
+    'tip.waiting': 'Waiting queue = requests received but not yet scheduled to running\nWhen VRAM is short or max_num_seqs is full, new requests pile up here.\nReading it:\n  · Persistently >0: intake outpaces drain — add GPUs or rate-limit\n  · Spikes >0 then quickly to zero: occasional traffic burst, normal\n  · Sustained >20: users feel TTFT spike — this is a rule alert threshold',
+    'tip.mfu': 'MFU = Model FLOPs Utilization\nActual compute / GPU peak compute — "how much of the GPU\'s compute is really used while running the model".\nFormula: MFU = (6 · params · tokens/sec) / peak_TFLOPS\nReading it:\n  · Training is typically 30-55% (good, on A100/H100)\n  · Inference decode is naturally low (~1-5%) — bandwidth-bound, higher MFU isn\'t the goal\n  · The prefill stage being high (>30%) is when MFU truly matters\nNeeds vllm ≥0.20 perf_stats; vllm 0.13 doesn\'t emit it, so this shows —',
+    'tip.gpuutil': 'GPU utilization = fraction of time the SMs (Streaming Multiprocessors) are busy\nThe NVML value: fraction of the last sampling interval where at least one kernel was running.\nNote: it does NOT mean compute is saturated — decode often sits at 70-90% while MFU is only 1-5%,\nbecause an SM "running a kernel waiting on data" still counts as busy.\nFor real compute efficiency, look at MFU.',
+    'tip.vram': 'VRAM usage = used VRAM / total VRAM\nWeights + KV cache + activations + CUDA workspace.\nAt startup --gpu-memory-utilization sets the target share for weights+KV (default 0.9).\nSustained >95% easily triggers preemption / OOM.',
+    'tip.prefix': 'Prefix cache hit rate = reused-prefix KV blocks / total queried blocks\nvllm caches KV for already-computed prompt prefixes; a later request hitting the prefix can skip prefill.\nMulti-turn chat / fixed system prompts should be >50%; one-off requests are naturally 0.',
+    'tip.padding': 'CUDA padding = (cudagraph actual batch - real tokens) / cudagraph batch\nWith CUDA-graph acceleration vllm runs fixed batch sizes; short batches are filled with padding.\nMore padding = more waste. >30% means the batch-size buckets are poorly chosen.',
+    'tip.preempt': 'Preempt / min = how many requests get swapped out per minute\nWhen KV cache runs short, vllm swaps active requests to host memory to admit others.\n>0 means VRAM is tight; >5/min is a clear signal — lower max_num_seqs or add VRAM.',
+    'common.avg': 'avg',
+    'live.latTrends': 'User-latency trends', 'live.latHint': 'Last 5 min · solid = avg / faint = p99',
+    'lat.ttft': 'TTFT · first-token latency', 'lat.tpot': 'TPOT · per-token time', 'lat.e2e': 'E2E · end-to-end latency',
+    'lat.noTtft': 'No TTFT data yet', 'lat.noTpot': 'No TPOT / ITL data yet',
+    'lat.noE2e': 'No E2E data yet', 'lat.noE2eHint': '(run a bench to trigger request-completion events)',
+    'lat.itlSource': 'Source: ITL fallback (this vllm doesn’t emit TPOT; iter interval used as approximation)',
+    'roof.title': 'Roofline live diagnosis',
+    'roof.desc': 'Dots = nearby steps aggregated (bigger = more steps) · distance below the roof tells compute- vs memory-bound',
+    'roof.estimate': '⚠ Estimated · this vllm doesn’t emit perf_stats; derived from token counts + model params ({b}B params).',
+    'roof.estimateNote': 'Shape is right, absolute values approximate; upgrade to vllm ≥0.20 to switch back to measured.',
+    'roof.sample': 'Current samples', 'roof.verdict': 'Verdict',
+    'roof.computeUtil': 'Compute used', 'roof.bwUtil': 'Bandwidth used',
+    'roof.speedup': 'Speed-up directions', 'roof.noSamples': 'No samples to interpret — run a bench to generate data.',
+    'roof.foot': 'median AI={ai} · ridge={knee} · samples={n}',
+    'roof.footTip': 'samples={n}  median AI={ai}  knee={knee}',
+    'roof.inMemBound': 'in the memory-bound region', 'roof.inCmpBound': 'in the compute-bound region',
+    'startup.btn': 'Startup info', 'startup.title': 'vLLM startup info',
+    'startup.cmdline': 'Launch command', 'startup.noCmdline': 'cmdline not captured (plugin ran before sys.argv?)',
+    'startup.env': 'Environment variables', 'startup.noEnv': 'No relevant env vars (only VLLM_/PPING_LANG_/HF_/CUDA_/TORCH_ prefixes)',
+    'startup.resolved': 'vLLM resolved config', 'startup.resolvedSub': 'final values after merging CLI + defaults',
+    'startup.noConfig': 'No vllm_config (not available at plugin init; common in local demo)',
+    'startup.masked': 'name contains TOKEN/KEY/SECRET — value masked',
+    'kern.profileTitle': 'Kernel-level profiling',
+    'kern.profileHint': 'PC sampling measurements · how much GPU time each kernel takes + why it\'s slow (no Nsight needed, on-demand short window)',
+    'kern.rooflineTitle': 'Roofline · whole-model scope',
+    'kern.rooflineSubtitle': 'Where the whole model sits on the roofline (same data as Overview)',
+    'kern.rooflineHint': 'Dots = nearby steps aggregated (bigger = more steps) · distance from ceiling = headroom left · pair with PC Sampling below to see which kernel and why',
+    'kern.howComputed': 'How the roofline is computed',
+    'kern.rooflineFrom': 'All read live from GPU CUDA device properties',
+    'kern.computeRoof': 'Compute roof',
+    'kern.memoryRoof': 'Memory roof',
+    'kern.kneeDesc': 'Left of knee = memory-bound, right of knee = compute-bound; point y = measured throughput TFLOPs/s, x = FLOPs/byte',
+    'kern.scalingAnalysis': 'Scaling analysis',
+    'kern.scalingDesc': 'In decode, weights are read in full once per step, FLOPs scale linearly with batch → AI ≈ effective batch size (dashed envelope in chart).\nCurrent operating point: AI ≈ {ai}, measured {cur} TFLOPs/s, bandwidth ceiling utilization {bwUtil}%.\nBandwidth-bound extrapolation: {b32} → {t32} TFLOPs/s (×{gain}); B ≥ {knee} (ridge point) enters compute-bound.\nOptimization path: increase concurrency / max_num_seqs.\nExtrapolation assumes linear bandwidth; actual results limited by scheduler / KV cache capacity — verify with measured testing.',
+    'kern.scalingSweepBtn': '▶ Measured scaling curve (bench sweep concurrency 1/4/16/64, ~2 min)',
+    'kern.scalingSweepRunning': '⏳ {progress}',
+    'kern.scalingSweepInProgress': 'benching…',
+    'kern.scalingSweepNote': 'Benchmark traffic targets this vLLM; panel data will be affected during the sweep',
+    'kern.scalingSweepError': 'Bench failed: {err}',
+    'kern.scalingVerdict': '📏 Measured scaling verdict',
+    'kern.verdictChart': 'Solid green line in chart = measured; dashed = theoretical envelope',
+    'kern.kernelTimePct': 'Per-kernel GPU time share',
+    'kern.kernelSampling': 'PC sampling · sorted by share',
+    'kern.kernelHint': 'Sample hits ∝ GPU active time → how much GPU time each kernel consumes (sampling estimate, not exact µs) · plus the stall reason it dominates ·\nbased on the latest collection ({n} samples total)',
+    'kern.recollect': 'Re-collect',
+    'kern.collecting': 'Collecting…',
+    'kern.byKernelClass': 'By operator class · GPU time share',
+    'kern.gpuUtilDiag': 'GPU utilization diagnosis',
+    'kern.stallDesc': '{stall}% of sampled cycles are stalled (waiting), only {issued}% actually issuing instructions',
+    'kern.sourceHotspots': '🔬 Source-level hotspots',
+    'kern.sourceDesc': 'PC samples map precisely to Python source lines (Triton/custom kernels with lineinfo)',
+    'kern.sourceTimePct': 'These kernels account for {pct}% of GPU time ——\nthis workload\'s dominant hotspot is in closed-source cutlass/cuBLAS GEMM (table below, only SASS offset available); the source-addressable ones are the Triton kernels below.',
+    'kern.sourceTimePctHigh': 'Share is significant; source-level targeting is directly actionable.',
+    'kern.expandKernelDetail': 'Click any row to expand → see the kernel\'s full stall breakdown + optimization hints',
+    'kern.kernelClass': 'Class',
+    'kern.kernelGpuTime': 'GPU time %',
+    'kern.kernelStallRecoverable': 'Recoverable stall time',
+    'kern.kernelStallTitle': 'This kernel\'s stall breakdown (% of its samples)',
+    'kern.kernelDeepHotspot': 'Deepest hotspot',
+    'kern.kernelHotspotDesc': 'PC sampling mapped to instruction address (where stall samples cluster)',
+    'kern.sourceFile': 'Source file: {path}',
+    'kern.closedLibKernel': 'Closed-source kernel (no lineinfo) → SASS instruction offset-level hotspots:',
+    'kern.launchOrigin': '↗ Launch origin',
+    'kern.launchStack': 'launch stack, tracing back to host code that called it',
+    'kern.preciseMicros': 'Want exact µs per-kernel timing? That requires CUPTI Activity mode — it contends with PC Sampling for the same performance counter hardware (mutually exclusive, needs separate deployment). Deep Evidence below shows the same sample\'s global stall breakdown.',
+    'kern.collectingPcSampling': 'Collecting PC Sampling evidence… (~5s, will auto-populate)',
+    'kern.noPcSamplingData': 'Opening this tab auto-collects once; or click \'Collect stall evidence\' in Deep Evidence below.',
+    'kern.dataFreshness': 'Live',
+    'kern.aggregated': 'aggregated every {w}s, current data collected at {when}',
+    'kern.noActivity': '⏸ No GPU activity currently — below is data from {when} when kernels last ran (latest {w}s window), not current',
+    'kern.findings': 'Diagnosis findings',
+    'kern.gpuBusy': 'GPU busy',
+    'kern.wallClockShare': 'wall-clock share',
+    'kern.launchFreq': 'Kernel launch frequency',
+    'kern.meanDuration': 'Mean kernel duration',
+    'kern.inCudaGraph': 'In CUDA Graph',
+    'kern.memcpy': 'memcpy',
+    'kern.syncWait': 'Sync wait',
+    'kern.classTrend': 'Kernel class share · real-time trend',
+    'kern.last3Min': 'Last ~3 min',
+    'kern.stackedArea': 'Stacked area = share of GPU compute time by kernel class over time',
+    'kern.utilTrend': 'GPU utilization vs wait · real-time trend',
+    'kern.utilNote': 'High GPU busy + low sync wait = healthy; wait spike = launch-bound',
+    'kern.timeline': 'Execution timeline',
+    'kern.timelineSpan': 'Last {n} kernels · span {span} ms',
+    'kern.timelineHint': 'x=time · row=GPU stream · block=kernel (width ∝ duration) · blank=idle · click+zoom, drag scrollbar to pan',
+    'kern.exportTrace': '⬇ Export trace',
+    'kern.perfettoInst': 'Drag into ui.perfetto.dev (Nsight / PyTorch format) · inline preview below',
+    'kern.zoomOut': 'Zoom out',
+    'kern.fitWidth': 'Fit',
+    'kern.zoomIn': 'Zoom (around selection)',
+    'kern.selected': '▸ Selected {name} (click+zoom it)',
+    'kern.selectedDetail': 'Selected kernel details',
+    'kern.deselect': 'Deselect',
+    'kern.duration': 'Duration',
+    'kern.startTime': 'Start',
+    'kern.stream': 'stream',
+    'kern.inGraph': 'In Graph',
+    'kern.yes': 'Yes',
+    'kern.no': 'No',
+    'kern.rawKernelDetail': 'Raw kernel details',
+    'kern.unique': '{n} unique kernels',
+    'kern.kernelNameNote': 'Count of unique kernel names in this window (deduped). Models typically run the same kernel set per step (stable); changes with model/config. Max 100.',
+    'kern.allValuesWindow': 'All values are from the latest aggregation window (~{w}s), refreshed each window',
+    'kern.kernelNameRaw': 'Kernel name (raw)',
+    'kern.calls': 'Calls',
+    'kern.totalTime': 'Total time',
+    'kern.average': 'Avg',
+    'kern.share': 'Share',
+    'kern.graphShare': 'Graph',
+    'kern.noKernelDetail': 'No per-kernel details (requires instrumented collector, or no kernels in this window)',
+    'kern.showAll': 'Show all {n} ▾',
+    'kern.collapse': 'Collapse ▴',
+    'kern.overhead': 'Collection overhead {overhead} ms/window (5% budget)',
+    'kern.dropped': '{n} dropped (auto-downgraded)',
+    'kern.deepEvidence': '🔬 Deep Evidence — why it\'s slow',
+    'kern.deepEvidenceSub': 'PC Sampling evidence · on-demand short window',
+    'kern.deepHint': 'Above shows "which kernel"; here we see the whole picture: where warp cycles go, what global stalls are, and how these are measured',
+    'kern.collectEvidence': 'Collect stall evidence (5s)',
+    'kern.unavailable': 'PC Sampling evidence unavailable — {err}\nRequires Linux + libppingcupti.so + GPU perf counter permissions; same-process with torch needs instrumentation (see design doc §12).',
+    'kern.warpCycleDirection': 'Warp cycle destinations',
+    'kern.allSamples': 'of {n} total samples',
+    'kern.issued': 'Issued (working)',
+    'kern.slack': 'Ready but not selected (occupancy headroom)',
+    'kern.stallWait': 'True stall (waiting)',
+    'kern.stallAnalysis': '→ Many cycles in true stall: latency bottleneck, see what it\'s stuck on below',
+    'kern.slackAnalysis': '→ Ready warps not selected: occupancy sufficient, bottleneck not in parallelism',
+    'kern.issuedAnalysis': '→ Issue rate high: GPU is busy',
+    'kern.stallBreakdown': 'Stall breakdown',
+    'kern.stallBreakdownSub': '% of stall samples (= total − issued) · click row for raw hardware metric names',
+    'kern.howMeasured': 'How measured',
+    'kern.samplingPeriod': 'Sample every {period} cycles (2^{log}) ·\nThis window {w}s collected {samples} samples ·\nGetData cumulative overhead {getdata}ms ·\nDropped {dropped} · HW buffer full {hwfull} times ·\nGPU hardware sampling, no Nsight, no service interruption',
+    'kern.noInitialData': 'Click the button above to open a short-window PC Sampling — see what\'s stalling inside these kernels (memory deps / compute pipeline / sync …).',
+    'custom.editTitle.new': 'Create Custom Rule',
+    'custom.editTitle.edit': 'Edit Custom Rule',
+    'custom.closeBtn': 'Close',
+    'custom.name': 'Rule Name',
+    'custom.nameHint': '(objective fact, e.g., "GPU utilization low")',
+    'custom.metric': 'Metric',
+    'custom.operator': 'Operator',
+    'custom.threshold': 'Threshold',
+    'custom.windowSeconds': 'Window (seconds)',
+    'custom.aggregation': 'Aggregation',
+    'custom.severity': 'Severity',
+    'custom.hypothesis': 'Root Cause Hypothesis',
+    'custom.hypothesisHint': '(optional, root cause guess — will be tagged in diagnosis)',
+    'custom.suggestion': 'Suggestion',
+    'custom.suggestionHint': '(optional)',
+    'custom.cancelBtn': 'Cancel',
+    'custom.saveBtn': 'Save',
+    'bench.createTitle': 'Create New Benchmark',
+    'bench.createHint': 'Runs asynchronously after submission; results appear in history below',
+    'bench.name': 'Name (optional)',
+    'bench.namePlaceholder': 'adhoc-timestamp',
+    'bench.api': 'API',
+    'bench.endpoint': 'Endpoint',
+    'bench.endpointHint': 'vLLM service base URL; automatically appends /v1/...',
+    'bench.modelName': 'Model Name',
+    'bench.modelNameSub': '(served-model-name)',
+    'bench.modelNameHint': 'String in OpenAI request {"model": "..."}; must match vLLM startup --served-model-name. Not the disk weight path.',
+    'bench.promptSource': 'Prompt Data Source',
+    'bench.promptTokens': 'Prompt tokens',
+    'bench.outputTokens': 'Output tokens',
+    'bench.concurrency': 'Concurrency',
+    'bench.measureMode': 'Measurement Mode',
+    'bench.measureByDuration': 'By Duration',
+    'bench.measureByRequests': 'By Request Count',
+    'bench.duration': 'Duration (seconds)',
+    'bench.numRequests': 'Num requests',
+    'bench.warmup': 'Warmup (seconds)',
+    'bench.timeout': 'Timeout (seconds)',
+    'bench.sloConstraint': 'SLO Constraints (optional)',
+    'bench.addSloBtn': '+ Add Constraint',
+    'bench.sloEmpty': 'No constraints set · SLO status will be marked n/a after submission',
+    'bench.sloMetricTtft': 'TTFT · First Token',
+    'bench.sloMetricTpot': 'TPOT · Token-to-Token',
+    'bench.sloMetricE2e': 'E2E · End-to-End',
+    'bench.sloMetricErrorRate': 'Error Rate',
+    'bench.removeSloBtn': 'Delete this constraint',
+    'bench.sloPreviewLabel': 'Generated on submit:',
+    'bench.sloPreviewEmpty': '(empty)',
+    'bench.submitBtn': 'Start Run',
+    'bench.submitting': 'Submitting...',
+    'bench.running': 'Currently Running',
+    'bench.historyTitle': 'History',
+    'bench.historyHint': 'Last 50 runs',
+    'bench.emptyTitle': 'No benchmark runs yet',
+    'bench.emptyHint': 'Fill the form above and click "Start Run"',
+    'bench.compareTitle': 'Compare Results',
+    'bench.compareHint': 'Δ = B relative to A (baseline); green = better, red = worse, |Δ|<2% is neutral',
+    'bench.clearCompare': 'Clear Comparison',
+    'bench.metricTtftAvg': 'TTFT Mean',
+    'bench.metricTpotAvg': 'TPOT Mean',
+    'bench.metricTokPerSec': 'tok/s',
+    'bench.metricOkErr': 'ok / err',
+    'bench.resultError': 'Error:',
+    'bench.clientMetrics': 'Client Metrics',
+    'bench.scenario': 'Scenario',
+    'chart.currentSamples': 'Current samples',
+    'chart.measuredScaling': 'Measured scaling',
+    'chart.samplesAgg': 'Aggregated {n} steps',
+    'chart.measuredConcurrency': 'Measured concurrency {b}: {y} TFLOPs/s',
+    'chart.theoreticalEnvelope': 'Theoretical envelope: {e} TFLOPs/s',
+    'chart.gap': 'Gap: {g}%',
+    'chart.kclassComm': 'Comm (NCCL)',
+    'chart.kclassOther': 'Other',
+    'chart.syncWait': 'Sync wait (launch-bound)',
+    'bench.agoSeconds': '{s} seconds ago',
+    'bench.agoMinutes': '{m} minutes ago',
+    'bench.agoHours': '{h} hours ago',
+    'bench.agoDays': '{d} days ago',
+    'bench.ttftAvg': 'TTFT avg',
+    'bench.tpotAvg': 'TPOT avg',
+    'bench.e2eAvg': 'E2E avg',
+    'bench.outputThroughput': 'Output throughput',
+    'bench.completionErrors': 'Completion / errors',
+    'bench.submitError': 'Submission failed: {e}',
+    'bench.submitException': 'Error: {e}',
+    'bench.concurrencyLabel': 'Concurrency {c} · {p}/{o} tok · {l}',
+    'bench.promptSourceSynthetic': 'Synthetic padding (synthetic)',
+    'bench.promptSourceDesc': 'Cycle the quick brown fox template by prompt_tokens length',
+    'toast.saveFailed': 'Save failed: {e}',
+    'toast.updated': 'Updated',
+    'toast.created': 'Created (now active in diagnosis)',
+    'toast.error': 'Error: {e}',
+    'toast.deleteConfirm': 'Delete custom rule "{n}"?',
+    'toast.deleteFailed': 'Delete failed: {s}',
+    'toast.deleted': 'Deleted',
+    'toast.saveApplied': 'Saved (hot-loaded)',
+    'toast.savePending': 'Saved (engine not running, takes effect on restart)',
+    'rules.kindClassifier': 'Classifier',
+    'rules.kindSymptom': 'Symptom',
+    'rules.kindFact': 'Fact rule',
+    'rules.kindCustom': 'Custom',
+    'kernel.fresh': 'just now',
+    'kernel.agoSeconds': '{s}s ago',
+    'kernel.agoMinutes': '{m}m ago',
+    'kernel.scaling.progress': 'Starting…',
+    'kernel.scaling.testing': 'Testing…',
+    'kernel.pcSamplingUnavailable': 'PC Sampling unavailable',
+    'kernel.requestFailed': 'Request failed: {e}',
+    'kernel.traceUnavailable': 'No trace data available (requires CUPTI collector active)',
+    'roofline.memoryBound': 'Memory-bound (typical for LLM decode phase)',
+    'roofline.memSugg1': 'Increase batch until KV cache approaches 80% — amortize weight re-reads',
+    'roofline.memSugg2': 'Enable speculative decoding — reduce decode steps',
+    'roofline.memSugg3': 'Weight quantization (AWQ / GPTQ) — reduce bytes to read',
+    'roofline.memSugg4': 'Upgrade to higher-bandwidth GPU (current {bw} GB/s; H100 3.4 TB/s, H200 4.8 TB/s)',
+    'roofline.computeBound': 'Compute-bound (prefill or large-batch state)',
+    'roofline.compSugg1': 'Increasing batch shows diminishing returns — compute near saturation',
+    'roofline.compSugg2': 'Upgrade to higher-compute GPU or add tensor parallelism',
+    'roofline.compSugg3': 'Chunked prefill — split long prompts to let decode breathe',
+    'kernel.bottleneck.memDep': 'Memory dependency',
+    'kernel.bottleneck.memDepAction': 'Data waiting for memory loads. Try fp8/int8 quantization to reduce memory traffic, fuse operators to reduce round-trips, verify KV-cache reuse.',
+    'kernel.bottleneck.memThrottle': 'Memory bandwidth throttle',
+    'kernel.bottleneck.memThrottleAction': 'Memory subsystem saturated. Lower precision or fuse operators to reduce memory traffic.',
+    'kernel.bottleneck.mathPipe': 'Math pipeline',
+    'kernel.bottleneck.mathPipeAction': 'Compute units near saturation (good, already efficient). Further gains require lower precision or better kernels.',
+    'kernel.bottleneck.execDep': 'Instruction dependency',
+    'kernel.bottleneck.execDepAction': 'Data dependency between instructions; limited by kernel structure, little room to optimize.',
+    'kernel.bottleneck.sharedDep': 'Shared memory dependency',
+    'kernel.bottleneck.sharedDepAction': 'Waiting for shared memory / L1. Check tile size and bank conflicts.',
+    'kernel.bottleneck.sync': 'Synchronization',
+    'kernel.bottleneck.syncAction': 'Threads waiting at barriers. Check sync frequency and load balance.',
+    'kernel.bottleneck.fetchCtrl': 'Fetch control',
+    'kernel.bottleneck.fetchCtrlAction': 'Instruction fetch / branch decisions; usually not a primary bottleneck.',
+    'kernel.bottleneck.dispatch': 'Dispatch',
+    'kernel.bottleneck.dispatchAction': 'Issue port limited.',
+    'kernel.meaning.memDep': 'Waiting for data from global/local memory (long scoreboard)',
+    'kernel.meaning.sharedDep': 'Waiting for shared memory / L1 (short scoreboard)',
+    'kernel.meaning.memThrottle': 'Memory instruction queueing, memory subsystem saturated',
+    'kernel.meaning.mathPipe': 'Compute pipeline busy (Tensor / ALU / FMA), approaching compute limit',
+    'kernel.meaning.execDep': 'Waiting for previous instruction result (data dependency)',
+    'kernel.meaning.sync': 'Waiting at barrier / membar for other threads',
+    'kernel.meaning.fetchCtrl': 'Waiting for instruction fetch / branch decision',
+    'kernel.meaning.dispatch': 'Issue port limited',
+    'kernel.meaning.schedulerSlack': 'Ready warps not selected this cycle (occupancy margin, not a bottleneck)',
+    'kernel.meaning.other': 'Other / miscellaneous',
+    'kernel.label.memDep': 'Memory dependency',
+    'kernel.label.sharedDep': 'Shared/MIO dependency',
+    'kernel.label.memThrottle': 'Memory pressure',
+    'kernel.label.mathPipe': 'Compute pipeline',
+    'kernel.label.execDep': 'Execution dependency',
+    'kernel.label.sync': 'Sync',
+    'kernel.label.fetchCtrl': 'Fetch/control',
+    'kernel.label.dispatch': 'Dispatch',
+    'kernel.label.schedulerSlack': 'Scheduler slack (not a bottleneck)',
+    'kernel.label.other': 'Other',
+    'kernel.suggestion.gemmMem': 'Memory-bound GEMM: try fp8/int8 quantization, increase batch for better compute density, verify weights aren\'t repeatedly read from VRAM.',
+    'kernel.suggestion.gemmMath': 'GEMM compute-saturated (near peak); further gains hard. Consider lower precision.',
+    'kernel.suggestion.attnMem': 'Attention memory-bound: verify FlashAttention / PagedAttention active, check KV-cache hit rate.',
+    'kernel.suggestion.elementwise': 'Elementwise / copy: explore operator fusion to reduce kernels and VRAM round-trips.',
+    'kernel.suggestion.sampling': 'Sampling / decode overhead: batch decode, reduce unnecessary host-device trips.',
+    'kernel.suggestion.index': 'Index / lookup: verify contiguous access patterns, avoid random gather breaking memory coalescing.',
+    'kernel.suggestion.execDep': 'Instruction latency dominant; limited by kernel structure, little room to improve.',
+    'ui.copy': 'Copy',
+    'ui.copied': 'Copied ✓',
+    'ui.copyFailed': 'Copy failed',
+    'cleanup.computeRoofFormula': 'TFLOPS (= SM count × SM clock × architectural bf16 Tensor throughput)',
+    'cleanup.memoryRoofFormula': 'GB/s (= memory clock × bus width × 2)',
+    'cleanup.knee': 'Knee',
+    'cleanup.scalingEff': ' (scaling efficiency {pct}%)',
+    'cleanup.issuedTitle': 'Issued {pct}%',
+    'cleanup.stallTitle': 'stall {pct}%',
+    'cleanup.mainCause': 'Main cause',
+    'cleanup.ofStall': ' ({pct}% of stall)',
+    'cleanup.topRecoverablePre': '🎯 Top recoverable hotspot: ',
+    'cleanup.topRecoverableMid': '—— roughly',
+    'cleanup.topRecoverablePost': 'of global GPU time is spent waiting on it; optimize it first.',
+    'cleanup.dominantStall': 'Dominant stall',
+    'cleanup.lineinfoPre': 'Resolving to source lines needs the kernel built with',
+    'cleanup.lineinfoPost': ' (Triton / self-compiled enable it by default); cutlass / cuBLAS are closed-source and stop here — offset + kernel name (tile/dtype) is already enough to pinpoint which part is stalling.',
+    'cleanup.collapse': 'Collapse ▴',
+    'cleanup.showAllKernels': 'Show all {n} ▾',
+    'cleanup.pcSamplingUnavailable': 'PC Sampling evidence unavailable —— {err}',
+    'cleanup.frozen': '⏸ Frozen',
+    'cleanup.liveTl': '🔴 Live',
+    'cleanup.fit': 'Fit',
+    'cleanup.cuptiTimelineEmpty': 'No CUPTI execution timeline data yet (the collector must be capturing kernels).',
+    'cleanup.rawKernelPre': 'Real mangled name + GPU hardware-measured duration',
+    'cleanup.rawKernelPost': ', sorted by share descending',
+    'cleanup.warpIssuedTitle': 'Issued {pct}%',
+    'cleanup.warpSlackTitle': 'Ready, not selected {pct}%',
+    'cleanup.warpStallTitle': 'True stall {pct}%',
+    'cleanup.samplesCount': '{n} samples',
+    'cleanup.aBaseline': 'A (baseline)',
+    'cleanup.deltaBetter': ' ↑ better',
+    'cleanup.deltaWorse': ' ↓ worse',
+    'cleanup.deltaEven': ' ≈ even',
+    'cleanup.statusRunning': 'Running',
+    'cleanup.statusDone': 'Done',
+    'cleanup.statusFailed': 'Failed',
+    'cleanup.sloPass': 'SLO pass',
+    'cleanup.sloFail': 'SLO fail',
+    'cleanup.compareSlot': 'Compare {slot}',
+    'cleanup.compare': 'Compare',
+    'cleanup.autoRefresh': 'Auto-refresh every 2s',
+    'cleanup.envelopeLabel': 'B={b}: bandwidth-bound ceiling {y} TFLOPs/s',
+    'cleanup.measured': 'Measured',
+    'cleanup.dominatedBy': '{label} dominant',
+    'rule.regime-classify.name': 'Arithmetic intensity vs ridge (Roofline locate)',
+    'rule.regime-classify.hypothesis': 'AI < ridge → memory-bound; otherwise compute-bound (definitional). When memory-bound with high SM util: the high util is a physical ceiling, not headroom.',
+    'rule.S1.name': 'TTFT p99 over SLA', 'rule.S1.hypothesis': 'First token is slow (relative to this workload’s SLA).',
+    'rule.S2.name': 'TPOT p99 over SLA', 'rule.S2.hypothesis': 'Token output is slow (relative to this workload’s SLA).',
+    'rule.S4.name': 'KV usage high or preemption occurring', 'rule.S4.hypothesis': 'VRAM is tight / already preempting.',
+    'rule.S5.name': 'TTFT p99/p50 too large', 'rule.S5.hypothesis': 'First-token latency tail diverges (most fast, a few oddly slow).',
+    'rule.D1a.name': 'Average prompt is long', 'rule.D1a.hypothesis': 'Long inputs → heavy prefill / long requests eat the token budget; even chunked prefill drags the tail.', 'rule.D1a.suggestion': 'PD disaggregation / priority scheduling / tune max_num_batched_tokens / cap max_output_tokens.',
+    'rule.D1b.name': 'Waiting queue is long', 'rule.D1b.hypothesis': 'Requests are queueing.', 'rule.D1b.suggestion': 'Add prefill capacity / lower max_num_seqs / check upstream rate-limiting.',
+    'rule.D1c.name': 'MFU is low', 'rule.D1c.hypothesis': 'In the compute-bound region but compute isn’t saturated (prefill under-utilizes compute).', 'rule.D1c.suggestion': 'Upgrade to a higher-compute GPU / FP8→FP4 / enable FlashAttention-3.',
+    'rule.D2a.name': 'MBU near peak', 'rule.D2a.hypothesis': 'Hugging the bandwidth roof (memory-bound).', 'rule.D2a.suggestion': 'Speculative decoding / KV quantization (FP8) / move to a higher-bandwidth GPU.',
+    'rule.D2b.name': 'Concurrency (running) is small', 'rule.D2b.hypothesis': 'Concurrency too low — weight movement isn’t amortized.', 'rule.D2b.suggestion': 'Raise client concurrency / tune max_num_seqs.',
+    'rule.D3a.name': 'MFU and MBU both low', 'rule.D3a.hypothesis': 'Neither roof is close — both compute and bandwidth have headroom, so the bottleneck isn’t hardware (likely: batch not assembled / launch overhead / small ops not fused).', 'rule.D3a.suggestion': 'Check whether the batch is assembled / Continuous Batching / CUDA Graph / operator fusion.',
+    'rule.D3c.name': 'Prefix-cache hit rate is low', 'rule.D3c.hypothesis': 'Low prefix-cache hits (if the workload shares a common prefix there’s reuse to gain; otherwise this is normal).', 'rule.D3c.suggestion': 'Check the prompt template’s common prefix / enable_prefix_caching / RadixAttention.',
+    'rule.D4a.name': 'KV usage high and preemption occurring', 'rule.D4a.hypothesis': 'The KV pool is nearly full and preemption has triggered.', 'rule.D4a.suggestion': 'KV quantization (FP8) / lower max_model_len / KV offload.',
+    'decode.vllmFusedRms': 'vLLM custom · fused add + RMSNorm', 'decode.vllmRms': 'vLLM custom · RMSNorm',
+    'decode.vllmRope': 'vLLM custom · RoPE', 'decode.vllmSilu': 'vLLM custom · SiLU/activation',
+    'decode.vllmCuda': 'vLLM custom CUDA kernel', 'decode.flashinferSample': 'FlashInfer · sampling kernel',
+    'decode.cublasGemv': 'cuBLAS GEMV (matrix×vector, typical for small batch)',
+    'decode.torchNative': 'PyTorch · native elementwise/reduce kernel',
+    'decode.cppCompiled': 'C++ compiled kernel (closed-source / no lineinfo)',
+    'lang.label': 'Language / 语言',
+  },
+};
+function _uiLang() {
+  try { const s = window.Alpine && Alpine.store('i18n'); if (s && s.lang) return s.lang; } catch (e) { /* pre-init */ }
+  return localStorage.getItem('pping_lang_ui')
+    || ((navigator.language || '').toLowerCase().startsWith('zh') ? 'zh' : 'en');
+}
+window.t = function (key, params) {
+  const lang = _uiLang();
+  let s = (I18N[lang] && I18N[lang][key]) || I18N.en[key] || key;
+  // 占位符插值:t('k', {ai: 3.0}) 把 '… {ai} …' 里的 {ai} 换成 3.0(中英语序不同时用)
+  if (params) for (const k in params) s = s.split('{' + k + '}').join(params[k]);
+  return s;
+};
+document.addEventListener('alpine:init', () => {
+  Alpine.store('i18n', {
+    lang: localStorage.getItem('pping_lang_ui')
+      || ((navigator.language || '').toLowerCase().startsWith('zh') ? 'zh' : 'en'),
+  });
+});
+
 let _chart = null;
 let _ttftChart = null;
 let _tpotChart = null;
@@ -37,7 +891,7 @@ function _makeRooflineChart(ctx) {
     data: {
       datasets: [
         {
-          label: '当前样本', data: [],
+          label: t('chart.currentSamples'), data: [],
           backgroundColor: 'rgba(13, 139, 128, 0.55)', borderColor: '#0d8b80', borderWidth: 1,
           pointRadius: 4, pointHoverRadius: 7, pointHoverBackgroundColor: '#0d8b80',
           pointHoverBorderColor: '#fff', pointHoverBorderWidth: 2, showLine: false, order: 3,
@@ -58,7 +912,7 @@ function _makeRooflineChart(ctx) {
         },
         {
           // P0-C:实测 scaling 曲线(压测扫并发档)—— 缺口从哪个 B 张开 = 真实瓶颈位置
-          label: '实测 scaling', data: [], showLine: true, borderColor: '#0d8b80',
+          label: t('chart.measuredScaling'), data: [], showLine: true, borderColor: '#0d8b80',
           borderWidth: 2, pointRadius: 5, pointHoverRadius: 8, pointStyle: 'circle',
           backgroundColor: '#0d8b80', fill: false, order: 5,
         },
@@ -78,17 +932,17 @@ function _makeRooflineChart(ctx) {
             title: () => '',
             label: (ctx) => {
               const ds = ctx.dataset.label;
-              if (ds === '当前样本') {
-                const n = ctx.raw && ctx.raw.n > 1 ? [`合并 ${ctx.raw.n} 个 step`] : [];
+              if (ds === t('chart.currentSamples')) {
+                const n = ctx.raw && ctx.raw.n > 1 ? [t('chart.samplesAgg', {n: ctx.raw.n})] : [];
                 return [`AI:  ${ctx.parsed.x.toFixed(2)} FLOPs/byte`, `TPut: ${ctx.parsed.y.toFixed(1)} TFLOPs/s`, ...n];
               }
               if (ds === 'batch scaling envelope') {
-                return `B=${ctx.raw.b}: bandwidth-bound 上界 ${ctx.parsed.y.toFixed(1)} TFLOPs/s`;
+                return t('cleanup.envelopeLabel', {b: ctx.raw.b, y: ctx.parsed.y.toFixed(1)});
               }
-              if (ds === '实测 scaling') {
-                return [`实测 并发${ctx.raw.b}: ${ctx.parsed.y.toFixed(2)} TFLOPs/s`,
-                        `理论 envelope: ${(ctx.raw.env || 0).toFixed(2)} TFLOPs/s`,
-                        `缺口: ${(ctx.raw.gap || 0).toFixed(0)}%`];
+              if (ds === t('chart.measuredScaling')) {
+                return [t('chart.measuredConcurrency', {b: ctx.raw.b, y: ctx.parsed.y.toFixed(2)}),
+                        t('chart.theoreticalEnvelope', {e: (ctx.raw.env || 0).toFixed(2)}),
+                        t('chart.gap', {g: (ctx.raw.gap || 0).toFixed(0)})];
               }
               return `${ds}: ${ctx.parsed.y.toFixed(1)} TFLOPs/s`;
             },
@@ -177,7 +1031,7 @@ function _applyRooflineData(chart, data) {
   const rows = (data.scaling && data.scaling.verdict && data.scaling.verdict.rows) || [];
   chart.data.datasets[4].data = rows.map((r, i) => ({
     x: r.b, y: r.tflops, b: r.b, env: r.envelope_tflops, gap: r.gap_pct,
-    label: i === rows.length - 1 ? '实测' : '', labelDy: 14, labelColor: '#0d8b80', labelBold: true,
+    label: i === rows.length - 1 ? t('cleanup.measured') : '', labelDy: 14, labelColor: '#0d8b80', labelBold: true,
   }));
   chart.update('none');
 }
@@ -202,7 +1056,7 @@ function _createMiniLatencyChart(canvasId, color) {
           pointRadius: 0,
         },
         {
-          label: '平均',
+          label: t('common.avg'),
           data: [],
           borderColor: color,
           backgroundColor: color + '1a',
@@ -266,9 +1120,9 @@ function _updateMiniLatencyChart(chart, buckets) {
 // kernel 类(堆叠面积)— 顺序 = 画的层序
 const _KCLASSES = [
   ['gemm', '#5b5bd6', 'GEMM'], ['attention', '#0d8b80', 'Attention'],
-  ['comm', '#d8483f', '通信'], ['norm', '#b7791f', 'Norm'],
+  ['comm', '#d8483f', t('chart.kclassComm')], ['norm', '#b7791f', 'Norm'],
   ['activation', '#3f9a63', 'Activation'], ['rotary', '#c2334f', 'Rotary'],
-  ['other', '#9a9aa4', '其它'],
+  ['other', '#9a9aa4', t('chart.kclassOther')],
 ];
 const _kTip = {backgroundColor:'#1c1c22',titleColor:'#fff',bodyColor:'#f4f4f7',padding:9,cornerRadius:6,borderWidth:0,titleFont:{weight:'600',size:11},bodyFont:{size:11}};
 function _createKClassChart() {
@@ -297,7 +1151,7 @@ function _createKUtilChart() {
     type: 'line',
     data: {labels: [], datasets: [
       {label: 'GPU busy', data: [], borderColor: '#0d8b80', backgroundColor: '#0d8b801a', borderWidth: 2, fill: true, pointRadius: 0, tension: 0.3},
-      {label: '同步等待 (launch-bound)', data: [], borderColor: '#b7791f', backgroundColor: 'transparent', borderWidth: 2, fill: false, pointRadius: 0, tension: 0.3},
+      {label: t('chart.syncWait'), data: [], borderColor: '#b7791f', backgroundColor: 'transparent', borderWidth: 2, fill: false, pointRadius: 0, tension: 0.3},
     ]},
     options: {
       responsive: true, maintainAspectRatio: false, animation: false,
@@ -351,8 +1205,8 @@ function benchTab() {
       prompt_source: 'synthetic',
     },
     promptSources: [
-      { value: 'synthetic', label: '合成填充 (synthetic)', uses_prompt_tokens: true,
-        description: '按 prompt_tokens 长度循环 the quick brown fox 句模板' },
+      { value: 'synthetic', label: t('bench.promptSourceSynthetic'), uses_prompt_tokens: true,
+        description: t('bench.promptSourceDesc') },
     ],
     runs: [],
     status: { running: [] },
@@ -389,7 +1243,7 @@ function benchTab() {
       // Discover builtin prompt datasets — populates the dropdown below
       // the synthetic default. Fails open: dropdown still has 'synthetic'.
       try {
-        const r = await fetch('/api/bench/prompt-sources').then(r => r.json());
+        const r = await fetch('/api/bench/prompt-sources?lang=' + _uiLang()).then(r => r.json());
         if (r.sources && r.sources.length) {
           this.promptSources = r.sources;
         }
@@ -398,6 +1252,13 @@ function benchTab() {
       }
       await this.refresh();
       this._timer = setInterval(() => this.refresh(), 3000);
+      // 切语言时重取 prompt-source 标签/描述(后端按 ?lang= 出双语)
+      this.$watch('$store.i18n.lang', async () => {
+        try {
+          const r = await fetch('/api/bench/prompt-sources?lang=' + _uiLang()).then(x => x.json());
+          if (r.sources && r.sources.length) this.promptSources = r.sources;
+        } catch (e) { /* fail-open */ }
+      });
     },
 
     onPromptSourceChange() {
@@ -432,10 +1293,10 @@ function benchTab() {
     agoText(ns) {
       if (!ns || !this.nowNs) return '—';
       const sec = Math.max(0, (this.nowNs - ns) / 1e9);
-      if (sec < 60) return `${sec.toFixed(0)} 秒前`;
-      if (sec < 3600) return `${(sec / 60).toFixed(0)} 分钟前`;
-      if (sec < 86400) return `${(sec / 3600).toFixed(1)} 小时前`;
-      return `${(sec / 86400).toFixed(1)} 天前`;
+      if (sec < 60) return t('bench.agoSeconds', {s: sec.toFixed(0)});
+      if (sec < 3600) return t('bench.agoMinutes', {m: (sec / 60).toFixed(0)});
+      if (sec < 86400) return t('bench.agoHours', {h: (sec / 3600).toFixed(1)});
+      return t('bench.agoDays', {d: (sec / 86400).toFixed(1)});
     },
 
     fmtMs(v) {
@@ -468,7 +1329,7 @@ function benchTab() {
     cmpScenario(r) {
       const s = (r && r.scenario) || {};
       const len = s.duration_s ? `${s.duration_s}s` : `${s.num_requests} req`;
-      return `并发 ${s.concurrency} · ${s.prompt_tokens}/${s.output_tokens} tok · ${len}`;
+      return t('bench.concurrencyLabel', {c: s.concurrency, p: s.prompt_tokens, o: s.output_tokens, l: len});
     },
     // 对比卡数据:逐指标 A/B 双横条(按本指标 max 归一,免得 ms 与 tok/s 挤同轴)+ Δ%。
     // 延迟类越低越好,吞吐越高越好;|Δ|<2% 视为持平(压测运行间噪声)
@@ -478,14 +1339,14 @@ function benchTab() {
       const [A, B] = pair;
       const g = (r, p) => p.split('.').reduce((o, k) => (o == null ? null : o[k]), r);
       const defs = [
-        { label: 'TTFT 平均', path: 'client_metrics.ttft_ms.mean', lower: true, unit: 'ms' },
+        { label: t('bench.ttftAvg'), path: 'client_metrics.ttft_ms.mean', lower: true, unit: 'ms' },
         { label: 'TTFT p99',  path: 'client_metrics.ttft_ms.p99',  lower: true, unit: 'ms' },
-        { label: 'TPOT 平均', path: 'client_metrics.tpot_ms.mean', lower: true, unit: 'ms' },
+        { label: t('bench.tpotAvg'), path: 'client_metrics.tpot_ms.mean', lower: true, unit: 'ms' },
         { label: 'TPOT p99',  path: 'client_metrics.tpot_ms.p99',  lower: true, unit: 'ms' },
-        { label: 'E2E 平均',  path: 'client_metrics.e2e_ms.mean',  lower: true, unit: 'ms' },
+        { label: t('bench.e2eAvg'),  path: 'client_metrics.e2e_ms.mean',  lower: true, unit: 'ms' },
         { label: 'E2E p99',   path: 'client_metrics.e2e_ms.p99',   lower: true, unit: 'ms' },
-        { label: 'Output 吞吐', path: 'client_metrics.output_throughput_tps', lower: false, unit: 'tok/s' },
-        { label: '完成 / 错误', path: 'client_metrics.ok', path2: 'client_metrics.errors', lower: false, unit: '' },
+        { label: t('bench.outputThroughput'), path: 'client_metrics.output_throughput_tps', lower: false, unit: 'tok/s' },
+        { label: t('bench.completionErrors'), path: 'client_metrics.ok', path2: 'client_metrics.errors', lower: false, unit: '' },
       ];
       return defs.map(d => {
         const a = g(A, d.path), b = g(B, d.path);
@@ -568,12 +1429,12 @@ function benchTab() {
         });
         if (!r.ok) {
           const err = await r.json().catch(() => ({ detail: r.statusText }));
-          alert(`提交失败: ${err.detail || r.status}`);
+          alert(t('bench.submitError', {e: err.detail || r.status}));
           return;
         }
         await this.refresh();
       } catch (e) {
-        alert(`错误: ${e}`);
+        alert(t('bench.submitException', {e: e}));
       } finally {
         this.submitting = false;
       }
@@ -588,21 +1449,22 @@ function rulesTab() {
     reasoning: [1000, 30], code: [100, 20], custom: [2000, 50],
   };
   // 配置项 → [中文标签, 单位]。决定哪些字段在表单里出现 + 顺序
+  // [i18n key, 单位] —— 标签走 t(),决定哪些字段在高级网格里出现 + 顺序
   const CFG_LABELS = {
-    sla_ttft_p99_ms: ['TTFT p99 SLA', 'ms'],
-    sla_tpot_p99_ms: ['TPOT p99 SLA', 'ms'],
-    long_prompt_tokens: ['长 prompt 阈值', 'tokens'],
-    waiting_reqs: ['等待队列阈值', 'reqs'],
-    mbu_high_pct: ['MBU 贴顶阈值', '%'],
-    mbu_low_pct: ['MBU 偏低阈值', '%'],
-    batch_small_reqs: ['并发偏小阈值', 'reqs'],
-    mfu_low_ratio: ['MFU 偏低阈值', '0–1'],
-    tail_ratio: ['尾延迟比 p99/p50', '×'],
-    kv_pressure_ratio: ['KV 压力阈值', '0–1'],
-    prefix_hit_low: ['前缀命中低阈值', '0–1'],
-    weights_hbm_ratio: ['权重占显存阈值', '0–1'],
+    sla_ttft_p99_ms: ['cfg.sla_ttft', 'ms'],
+    sla_tpot_p99_ms: ['cfg.sla_tpot', 'ms'],
+    long_prompt_tokens: ['cfg.long_prompt', 'tokens'],
+    waiting_reqs: ['cfg.waiting', 'reqs'],
+    mbu_high_pct: ['cfg.mbu_high', '%'],
+    mbu_low_pct: ['cfg.mbu_low', '%'],
+    batch_small_reqs: ['cfg.batch_small', 'reqs'],
+    mfu_low_ratio: ['cfg.mfu_low', '0–1'],
+    tail_ratio: ['cfg.tail', '×'],
+    kv_pressure_ratio: ['cfg.kv', '0–1'],
+    prefix_hit_low: ['cfg.prefix', '0–1'],
+    weights_hbm_ratio: ['cfg.weights', '0–1'],
   };
-  const KIND_LABEL = { classifier: '分类器', symptom: '入口症状', fact: '判别' };
+  const KIND_LABEL = { classifier: t('rules.kindClassifier'), symptom: t('rules.kindSymptom'), fact: t('rules.kindFact') };
   return {
     rules: [], customRules: [], customEditable: false,
     config: {}, cfgDraft: {}, workloadForms: [], active: false,
@@ -615,11 +1477,29 @@ function rulesTab() {
     async init() { await Promise.all([this.load(), this.loadMetrics()]); },
     // 触发的诊断卡片用这俩 helper 把 rule_id → 人话(策展 + 自定义都查)
     allRules() { return [...this.rules, ...this.customRules]; },
-    ruleName(rule_id) { const r = this.allRules().find(x => x.id === rule_id); return r ? r.name : rule_id; },
+    // 后端规则内容(名/推断/建议)按 rule_id 从字典取译文;无键(自定义规则)回退后端原值。
+    ruleI18n(id, field, fallback) {
+      const k = 'rule.' + id + '.' + field;
+      const v = t(k);
+      return v === k ? (fallback || '') : v;
+    },
+    ruleName(rule_id) {
+      const r = this.allRules().find(x => x.id === rule_id);
+      return this.ruleI18n(rule_id, 'name', r ? r.name : rule_id);
+    },
+    // 命中诊断卡的 suggestion = [推断]+[建议],按 rule_id 重建译文(回退后端 d.suggestion)。
+    diagSuggestion(d) {
+      const hyp = this.ruleI18n(d.rule_id, 'hypothesis', '');
+      const sug = this.ruleI18n(d.rule_id, 'suggestion', '');
+      if (!hyp && !sug) return d.suggestion || '';
+      let s = '[' + t('common.inference') + '] ' + hyp;
+      if (sug) s += '  [' + t('common.suggestion') + '] ' + sug;
+      return s;
+    },
     ruleCategory(rule_id) {
       const r = this.allRules().find(x => x.id === rule_id);
       if (!r) return '';
-      return r.custom ? '自定义' : (KIND_LABEL[r.kind] || r.kind || '');
+      return r.custom ? t('kind.custom') : (t('kind.' + r.kind) || r.kind || '');
     },
 
     async load() {
@@ -659,17 +1539,17 @@ function rulesTab() {
           headers: {'Content-Type': 'application/json'}, body: JSON.stringify(this.editing),
         });
         const body = await r.json().catch(() => ({}));
-        if (!r.ok) { this.showToast(`保存失败: ${body.detail || r.status}`, true); return; }
-        this.showToast(this.editingExisting ? '已更新' : '已创建(立即参与诊断)');
+        if (!r.ok) { this.showToast(t('toast.saveFailed', {e: body.detail || r.status}), true); return; }
+        this.showToast(this.editingExisting ? t('toast.updated') : t('toast.created'));
         this.editing = null;
         await this.load();
-      } catch (e) { this.showToast(`错误: ${e}`, true); }
+      } catch (e) { this.showToast(t('toast.error', {e: e}), true); }
     },
     async deleteRule(r) {
-      if (!confirm(`删除自定义规则「${r.name}」？`)) return;
+      if (!confirm(t('toast.deleteConfirm', {n: r.name}))) return;
       const resp = await fetch(`/api/diagnosis_rules/custom/${r.id}`, {method: 'DELETE'});
-      if (!resp.ok) { this.showToast(`删除失败: ${resp.status}`, true); return; }
-      this.showToast('已删除');
+      if (!resp.ok) { this.showToast(t('toast.deleteFailed', {s: resp.status}), true); return; }
+      this.showToast(t('toast.deleted'));
       await this.load();
     },
     cfgKeys() { return Object.keys(CFG_LABELS).filter(k => k in this.cfgDraft); },
@@ -691,12 +1571,12 @@ function rulesTab() {
           body: JSON.stringify(this.cfgDraft),
         });
         const body = await r.json().catch(() => ({}));
-        if (!r.ok) { this.showToast(`保存失败: ${body.detail || r.status}`, true); return; }
+        if (!r.ok) { this.showToast(t('toast.saveFailed', {e: body.detail || r.status}), true); return; }
         this.rules = body.rules || this.rules;
         this.config = body.config || this.config;
         this.cfgDraft = JSON.parse(JSON.stringify(this.config));
-        this.showToast(body.applied ? '已保存,热生效' : '已保存(引擎未运行,重启后生效)');
-      } catch (e) { this.showToast(`错误: ${e}`, true); }
+        this.showToast(body.applied ? t('toast.saveApplied') : t('toast.savePending'));
+      } catch (e) { this.showToast(t('toast.error', {e: e}), true); }
       finally { this.saving = false; }
     },
     showToast(msg, error = false) {
@@ -761,7 +1641,7 @@ function dashboard() {
     diagnosesStale: false,   // true = 当前无触发,面板显示的是最近一次命中(history 回退)
     benchRunning: 0,
     showStartupInfo: false,
-    cmdlineCopyLabel: '复制',
+    cmdlineCopyLabel: t('ui.copy'),
 
     fmt(v, digits) {
       if (v == null || isNaN(v)) return '—';
@@ -838,6 +1718,23 @@ function dashboard() {
       if (cls === 'comm') return 'Comm (NCCL)';
       return this.kernelLabel(cls);
     },
+    // 后端 decode_kernel_name 的中文标签 → 按短语客户端翻译(保留中文,en 出英文;PC sampling 出数据时才显示)
+    kernelDecodeI18n(s) {
+      if (!s) return s;
+      const M = {
+        'vLLM 自定义 · fused add + RMSNorm': 'decode.vllmFusedRms',
+        'vLLM 自定义 · RMSNorm': 'decode.vllmRms',
+        'vLLM 自定义 · RoPE': 'decode.vllmRope',
+        'vLLM 自定义 · SiLU/激活': 'decode.vllmSilu',
+        'vLLM 自定义 CUDA kernel': 'decode.vllmCuda',
+        'FlashInfer · 采样 kernel': 'decode.flashinferSample',
+        'cuBLAS GEMV(矩阵×向量,小 batch 典型)': 'decode.cublasGemv',
+        'PyTorch · 原生 elementwise/reduce kernel': 'decode.torchNative',
+        'C++ 编译 kernel(闭源/无 lineinfo)': 'decode.cppCompiled',
+      };
+      const k = M[s];
+      return k ? t(k) : s;
+    },
     // #3 这个 kernel 浪费的"全局 GPU 时间"= 时间占比 × 它内部 stall 比例
     kernelStallTimePct(k) {
       if (!k || !k.samples) return 0;
@@ -859,16 +1756,16 @@ function dashboard() {
                     .slice().sort((a, b) => b.pct - a.pct)[0];
       if (!top) return null;
       const map = {
-        memory_dependency: { t: '访存瓶颈', a: '数据在等内存加载。可试 fp8/int8 量化减少访存、算子融合减少往返、确认 KV cache 复用。' },
-        memory_throttle: { t: '访存带宽瓶颈', a: '内存子系统被打满。降低精度 / 融合算子减少访存流量。' },
-        math_pipe: { t: '算力瓶颈', a: '计算单元接近饱和(好事,已高效)。再压只能靠更低精度或更优 kernel。' },
-        exec_dependency: { t: '指令延迟瓶颈', a: '指令间数据依赖等待,多由 kernel 内部结构决定,优化空间有限。' },
-        shared_dependency: { t: '共享内存瓶颈', a: '等共享内存 / L1。检查 tile 大小与 bank conflict。' },
-        sync: { t: '同步瓶颈', a: '线程在 barrier 等待。检查同步频率与负载均衡。' },
-        fetch_control: { t: '前端取指瓶颈', a: '指令获取 / 分支,一般非主因。' },
-        dispatch: { t: '发射瓶颈', a: '发射端口受限。' },
+        memory_dependency: { t: t('kernel.bottleneck.memDep'), a: t('kernel.bottleneck.memDepAction') },
+        memory_throttle: { t: t('kernel.bottleneck.memThrottle'), a: t('kernel.bottleneck.memThrottleAction') },
+        math_pipe: { t: t('kernel.bottleneck.mathPipe'), a: t('kernel.bottleneck.mathPipeAction') },
+        exec_dependency: { t: t('kernel.bottleneck.execDep'), a: t('kernel.bottleneck.execDepAction') },
+        shared_dependency: { t: t('kernel.bottleneck.sharedDep'), a: t('kernel.bottleneck.sharedDepAction') },
+        sync: { t: t('kernel.bottleneck.sync'), a: t('kernel.bottleneck.syncAction') },
+        fetch_control: { t: t('kernel.bottleneck.fetchCtrl'), a: t('kernel.bottleneck.fetchCtrlAction') },
+        dispatch: { t: t('kernel.bottleneck.dispatch'), a: t('kernel.bottleneck.dispatchAction') },
       };
-      const m = map[top.cls] || { t: this.stallLabel(top.cls) + ' 为主', a: '' };
+      const m = map[top.cls] || { t: t('cleanup.dominatedBy', {label: this.stallLabel(top.cls)}), a: '' };
       return { cls: top.cls, pct: top.pct, type: m.t, action: m.a };
     },
     // #3 全局最大可回收点:stall 时间占比最高的 kernel
@@ -886,19 +1783,19 @@ function dashboard() {
       if (!k) return '';
       const ds = k.dominant_stall, c = k.cls;
       if (c === 'gemm' && (ds === 'memory_dependency' || ds === 'memory_throttle'))
-        return '访存瓶颈的矩阵乘:fp8/int8 量化、增大 batch 提升计算密度、检查权重是否反复从显存读取。';
+        return t('kernel.suggestion.gemmMem');
       if (c === 'gemm' && ds === 'math_pipe')
-        return '矩阵乘已算力饱和(接近峰值),难再压;考虑更低精度。';
+        return t('kernel.suggestion.gemmMath');
       if (c === 'attention' && (ds === 'memory_dependency' || ds === 'memory_throttle'))
-        return '注意力访存瓶颈:确认 FlashAttention / PagedAttention 生效、KV cache 命中率。';
+        return t('kernel.suggestion.attnMem');
       if (c === 'elementwise')
-        return '逐元素 / 拷贝:看能否算子融合,减少 kernel 数与显存往返。';
+        return t('kernel.suggestion.elementwise');
       if (c === 'sampling')
-        return '采样 / 解码开销:批量解码、减少不必要的 host-device 往返。';
+        return t('kernel.suggestion.sampling');
       if (c === 'index')
-        return '索引 / 查表:确认访问模式连续,避免随机 gather 打散访存。';
+        return t('kernel.suggestion.index');
       if (ds === 'exec_dependency')
-        return '指令延迟为主,通常由 kernel 内部结构决定,优化空间有限。';
+        return t('kernel.suggestion.execDep');
       return '';
     },
     // P3 行级归因:取该 kernel 的"最深热点"(源码行 / SASS 偏移)。按 .so 原始 functionName 精确匹配
@@ -956,16 +1853,16 @@ function dashboard() {
     // 每个 stall 语义类一句话含义
     stallMeaning(cls) {
       return {
-        memory_dependency: '等全局/本地内存的数据返回(long scoreboard)',
-        shared_dependency: '等共享内存 / L1(short scoreboard)',
-        memory_throttle: '访存指令排队、内存子系统被打满',
-        math_pipe: '计算管线忙(Tensor / ALU / FMA),接近算力上限',
-        exec_dependency: '等前一条指令的结果(指令间依赖)',
-        sync: '在 barrier / membar 等其他线程',
-        fetch_control: '等取指 / 分支决议',
-        dispatch: '发射端口受限',
-        scheduler_slack: '有就绪 warp 但本周期没被选中(占用率有余量,非瓶颈)',
-        other: '其它 / 杂项',
+        memory_dependency: t('kernel.meaning.memDep'),
+        shared_dependency: t('kernel.meaning.sharedDep'),
+        memory_throttle: t('kernel.meaning.memThrottle'),
+        math_pipe: t('kernel.meaning.mathPipe'),
+        exec_dependency: t('kernel.meaning.execDep'),
+        sync: t('kernel.meaning.sync'),
+        fetch_control: t('kernel.meaning.fetchCtrl'),
+        dispatch: t('kernel.meaning.dispatch'),
+        scheduler_slack: t('kernel.meaning.schedulerSlack'),
+        other: t('kernel.meaning.other'),
       }[cls] || '';
     },
     // 原始 PerfWorks reason 名:去掉公共前缀,留语义后缀(给专家看真实指标名)
@@ -981,10 +1878,10 @@ function dashboard() {
     // stall 语义类 → 中文标签 / 颜色(Deep Evidence 分解条)
     stallLabel(cls) {
       return {
-        memory_dependency: '访存依赖', shared_dependency: 'shared/MIO 依赖',
-        memory_throttle: '访存子系统压力', math_pipe: '计算管线',
-        exec_dependency: '执行依赖', sync: '同步', fetch_control: '取指/控制流',
-        dispatch: '调度分发', scheduler_slack: '调度余量(非瓶颈)', other: '其它',
+        memory_dependency: t('kernel.label.memDep'), shared_dependency: t('kernel.label.sharedDep'),
+        memory_throttle: t('kernel.label.memThrottle'), math_pipe: t('kernel.label.mathPipe'),
+        exec_dependency: t('kernel.label.execDep'), sync: t('kernel.label.sync'), fetch_control: t('kernel.label.fetchCtrl'),
+        dispatch: t('kernel.label.dispatch'), scheduler_slack: t('kernel.label.schedulerSlack'), other: t('kernel.label.other'),
       }[cls] || cls;
     },
     stallColor(cls) {
@@ -1019,7 +1916,7 @@ function dashboard() {
       if (this.scalingSweep.running) return;
       this.scalingSweep.running = true;
       this.scalingSweep.error = null;
-      this.scalingSweep.progress = '启动中…';
+      this.scalingSweep.progress = t('kernel.scaling.progress');
       try {
         const r = await fetch('/api/roofline/scaling_sweep', { method: 'POST' });
         if (!r.ok) {
@@ -1032,7 +1929,7 @@ function dashboard() {
           const s = await fetch('/api/roofline/scaling').then(x => x.json());
           if (s.error) throw new Error(s.error);
           if (!s.running) break;
-          this.scalingSweep.progress = s.progress || '压测中…';
+          this.scalingSweep.progress = s.progress || t('kernel.scaling.testing');
         }
         const data = await fetch('/api/roofline?seconds=60').then(x => x.json());
         this.updateRoofline(data);
@@ -1046,7 +1943,7 @@ function dashboard() {
     // 读最近一次取证结果(开 Kernel tab 时调,不触发新采集)
     async loadDeepEvidence() {
       try {
-        const r = await fetch('/api/kernels/deep_evidence').then(x => x.json());
+        const r = await fetch('/api/kernels/deep_evidence?lang=' + _uiLang()).then(x => x.json());
         this.deep.available_now = !!r.available_now;
         if (r.last) { this.deep.result = r.last; this.deep.findings = r.findings || []; }
       } catch (e) { /* fail-closed:静默 */ }
@@ -1056,15 +1953,15 @@ function dashboard() {
       if (this.deep.running) return;
       this.deep.running = true; this.deep.error = null;
       try {
-        const r = await fetch(`/api/kernels/deep_evidence?window=${window || 5}`,
+        const r = await fetch(`/api/kernels/deep_evidence?window=${window || 5}&lang=${_uiLang()}`,
           { method: 'POST' }).then(x => x.json());
         if (r.available) {
           this.deep.result = r; this.deep.findings = r.findings || []; this.deep.available_now = true;
         } else {
-          this.deep.error = r.error || 'PC Sampling 不可用'; this.deep.available_now = false;
+          this.deep.error = r.error || t('kernel.pcSamplingUnavailable'); this.deep.available_now = false;
         }
       } catch (e) {
-        this.deep.error = '请求失败:' + e;
+        this.deep.error = t('kernel.requestFailed', {e: e});
       } finally {
         this.deep.running = false;
       }
@@ -1084,9 +1981,9 @@ function dashboard() {
     kernelAgeText() {
       const a = this.kernels.snapshot_age_s;
       if (a == null) return '';
-      if (a < 1.5) return '刚刚';
-      if (a < 90) return Math.round(a) + ' 秒前';
-      return Math.round(a / 60) + ' 分钟前';
+      if (a < 1.5) return t('kernel.fresh');
+      if (a < 90) return t('kernel.agoSeconds', {s: Math.round(a)});
+      return t('kernel.agoMinutes', {m: Math.round(a / 60)});
     },
     // 执行时间线:px-based,横向滚动 + 缩放按钮。放大=每毫秒像素翻倍(内层变宽),
     // 平移=容器原生横向滚动。tlPxPerMs=每毫秒像素;null=适应容器宽度。
@@ -1144,7 +2041,7 @@ function dashboard() {
     async downloadTrace() {
       try {
         const r = await fetch('/api/kernels/trace').then(x => x.json());
-        if (!r.available) { alert('暂无 trace 数据(需 CUPTI 采集器在采集)'); return; }
+        if (!r.available) { alert(t('kernel.traceUnavailable')); return; }
         const blob = new Blob([JSON.stringify(r.trace)], {type: 'application/json'});
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -1178,20 +2075,20 @@ function dashboard() {
       let bound, headline, suggestions;
       if (isMemBound) {
         bound = 'memory';
-        headline = 'Memory-bound（LLM decode 阶段的常态）';
+        headline = t('roofline.memoryBound');
         suggestions = [
-          '增大 batch 直到 KV cache 接近 80% — 摊薄权重 re-read',
-          '启用 speculative decoding — 减少 decode 步数',
-          '权重量化 (AWQ / GPTQ) — 直接减小要读的字节数',
-          `升级带宽更高的卡（你当前 ${(peak.mem_bw_tbs * 1000).toFixed(0)} GB/s；H100 3.4 TB/s，H200 4.8 TB/s）`,
+          t('roofline.memSugg1'),
+          t('roofline.memSugg2'),
+          t('roofline.memSugg3'),
+          t('roofline.memSugg4', {bw: (peak.mem_bw_tbs * 1000).toFixed(0)}),
         ];
       } else {
         bound = 'compute';
-        headline = 'Compute-bound（prefill 或大 batch 状态）';
+        headline = t('roofline.computeBound');
         suggestions = [
-          '继续增大 batch 收益递减 — 算力已接近上限',
-          '升级算力更高的 GPU 或上 tensor parallel',
-          'Chunked prefill — 拆开长 prompt 让 decode 喘息',
+          t('roofline.compSugg1'),
+          t('roofline.compSugg2'),
+          t('roofline.compSugg3'),
         ];
       }
       return {
@@ -1217,6 +2114,9 @@ function dashboard() {
       this.fetchSystem();
       this.refresh();
       setInterval(() => this.refresh(), 2000);
+      // 切语言时立刻重取 kernel findings(后端按 ?lang= 出双语):实时 kernels 走 refresh,
+      // deep evidence 是按需的也一并重取。轮询本身已带 _uiLang(),这里只为即时生效。
+      this.$watch('$store.i18n.lang', () => { this.refresh(); this.loadDeepEvidence(); });
       // 打开 Kernel tab 自动取证(§A):进去就有真数据,不用手点按钮
       this.$watch('tab', (v) => { if (v === 'kernel') this.onKernelTabOpen(); });
     },
@@ -1266,11 +2166,11 @@ function dashboard() {
       if (!text) return;
       try {
         await navigator.clipboard.writeText(text);
-        this.cmdlineCopyLabel = '已复制 ✓';
+        this.cmdlineCopyLabel = t('ui.copied');
       } catch (e) {
-        this.cmdlineCopyLabel = '复制失败';
+        this.cmdlineCopyLabel = t('ui.copyFailed');
       }
-      setTimeout(() => { this.cmdlineCopyLabel = '复制'; }, 1800);
+      setTimeout(() => { this.cmdlineCopyLabel = t('ui.copy'); }, 1800);
     },
 
     async refresh() {
@@ -1283,7 +2183,7 @@ function dashboard() {
           fetch('/api/diagnoses?seconds=300').then(r => r.json()),
           fetch('/api/diagnoses/history?limit=200').then(r => r.json()).catch(() => ({diagnoses: []})),
           fetch('/api/bench/status').then(r => r.json()).catch(() => ({running: []})),
-          fetch('/api/kernels?window=60').then(r => r.json()).catch(() => ({enabled: false, class_shares: []})),
+          fetch('/api/kernels?window=60&lang=' + _uiLang()).then(r => r.json()).catch(() => ({enabled: false, class_shares: []})),
           fetch('/api/kernels/timeline?max_events=800').then(r => r.json()).catch(() => ({timeline: null})),
           fetch('/api/kernels/trends?seconds=180').then(r => r.json()).catch(() => ({series: null})),
         ]);
