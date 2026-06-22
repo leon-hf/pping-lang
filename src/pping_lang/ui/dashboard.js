@@ -395,6 +395,20 @@ const I18N = {
     'cleanup.envelopeLabel': 'B={b}: bandwidth-bound 上界 {y} TFLOPs/s',
     'cleanup.measured': '实测',
     'cleanup.dominatedBy': '{label} 为主',
+    'rule.regime-classify.name': '算术强度 vs 脊点(Roofline 定位)',
+    'rule.regime-classify.hypothesis': 'AI < 脊点 → 访存受限;否则计算受限(定义性派生)。memory-bound 且 SM util 高时:util 虚高是物理极限,非优化空间。',
+    'rule.S1.name': 'TTFT p99 超 SLA', 'rule.S1.hypothesis': '首 Token 慢(相对该业务 SLA)。',
+    'rule.S2.name': 'TPOT p99 超 SLA', 'rule.S2.hypothesis': '出字慢(相对该业务 SLA)。',
+    'rule.S4.name': 'KV 用量高或发生抢占', 'rule.S4.hypothesis': '显存吃紧 / 已在抢占。',
+    'rule.S5.name': 'TTFT p99/p50 偏大', 'rule.S5.hypothesis': '首 Token 时延尾部发散(多数快、少数奇慢)。',
+    'rule.D1a.name': '平均 prompt 偏长', 'rule.D1a.hypothesis': '长输入 → prefill 重 / 长请求占 token budget,即便分块预填充也会拖尾。', 'rule.D1a.suggestion': 'PD 分离 / 优先级调度 / 调 max_num_batched_tokens / 限 max_output_tokens。',
+    'rule.D1b.name': '等待队列偏长', 'rule.D1b.hypothesis': '请求在排队。', 'rule.D1b.suggestion': '扩 prefill 容量 / 降 max_num_seqs / 检查上游限流。',
+    'rule.D1c.name': 'MFU 偏低', 'rule.D1c.hypothesis': '处于计算受限区但算力没打满(prefill 算力不足)。', 'rule.D1c.suggestion': '升级算力卡 / FP8→FP4 / 启用 FlashAttention-3。',
+    'rule.D2a.name': 'MBU 接近峰值', 'rule.D2a.hypothesis': '贴近带宽屋顶(访存受限)。', 'rule.D2a.suggestion': '投机解码 / KV 量化(FP8) / 换更高带宽 GPU。',
+    'rule.D2b.name': '并发(running)偏小', 'rule.D2b.hypothesis': '并发太低,没摊薄权重搬运。', 'rule.D2b.suggestion': '提高客户端并发 / 调 max_num_seqs。',
+    'rule.D3a.name': 'MFU、MBU 双低', 'rule.D3a.hypothesis': '两个屋顶都没贴近 —— 算力、带宽都有富余,瓶颈不在硬件(可能是 batch 没拼起来 / launch 开销 / 小算子未融合)。', 'rule.D3a.suggestion': '检查 batch 是否拼起来 / Continuous Batching / CUDA Graph / 算子融合。',
+    'rule.D3c.name': '前缀缓存命中率低', 'rule.D3c.hypothesis': '前缀缓存命中低(若 workload 有公共前缀,则有复用空间;否则正常)。', 'rule.D3c.suggestion': '检查 prompt 模板公共前缀 / 开 enable_prefix_caching / RadixAttention。',
+    'rule.D4a.name': 'KV 用量高且发生抢占', 'rule.D4a.hypothesis': 'KV 池将满并已触发抢占。', 'rule.D4a.suggestion': 'KV 量化(FP8) / 降 max_model_len / KV offload。',
     'lang.label': '语言 / Language',
   },
   en: {
@@ -790,6 +804,20 @@ const I18N = {
     'cleanup.envelopeLabel': 'B={b}: bandwidth-bound ceiling {y} TFLOPs/s',
     'cleanup.measured': 'Measured',
     'cleanup.dominatedBy': '{label} dominant',
+    'rule.regime-classify.name': 'Arithmetic intensity vs ridge (Roofline locate)',
+    'rule.regime-classify.hypothesis': 'AI < ridge → memory-bound; otherwise compute-bound (definitional). When memory-bound with high SM util: the high util is a physical ceiling, not headroom.',
+    'rule.S1.name': 'TTFT p99 over SLA', 'rule.S1.hypothesis': 'First token is slow (relative to this workload’s SLA).',
+    'rule.S2.name': 'TPOT p99 over SLA', 'rule.S2.hypothesis': 'Token output is slow (relative to this workload’s SLA).',
+    'rule.S4.name': 'KV usage high or preemption occurring', 'rule.S4.hypothesis': 'VRAM is tight / already preempting.',
+    'rule.S5.name': 'TTFT p99/p50 too large', 'rule.S5.hypothesis': 'First-token latency tail diverges (most fast, a few oddly slow).',
+    'rule.D1a.name': 'Average prompt is long', 'rule.D1a.hypothesis': 'Long inputs → heavy prefill / long requests eat the token budget; even chunked prefill drags the tail.', 'rule.D1a.suggestion': 'PD disaggregation / priority scheduling / tune max_num_batched_tokens / cap max_output_tokens.',
+    'rule.D1b.name': 'Waiting queue is long', 'rule.D1b.hypothesis': 'Requests are queueing.', 'rule.D1b.suggestion': 'Add prefill capacity / lower max_num_seqs / check upstream rate-limiting.',
+    'rule.D1c.name': 'MFU is low', 'rule.D1c.hypothesis': 'In the compute-bound region but compute isn’t saturated (prefill under-utilizes compute).', 'rule.D1c.suggestion': 'Upgrade to a higher-compute GPU / FP8→FP4 / enable FlashAttention-3.',
+    'rule.D2a.name': 'MBU near peak', 'rule.D2a.hypothesis': 'Hugging the bandwidth roof (memory-bound).', 'rule.D2a.suggestion': 'Speculative decoding / KV quantization (FP8) / move to a higher-bandwidth GPU.',
+    'rule.D2b.name': 'Concurrency (running) is small', 'rule.D2b.hypothesis': 'Concurrency too low — weight movement isn’t amortized.', 'rule.D2b.suggestion': 'Raise client concurrency / tune max_num_seqs.',
+    'rule.D3a.name': 'MFU and MBU both low', 'rule.D3a.hypothesis': 'Neither roof is close — both compute and bandwidth have headroom, so the bottleneck isn’t hardware (likely: batch not assembled / launch overhead / small ops not fused).', 'rule.D3a.suggestion': 'Check whether the batch is assembled / Continuous Batching / CUDA Graph / operator fusion.',
+    'rule.D3c.name': 'Prefix-cache hit rate is low', 'rule.D3c.hypothesis': 'Low prefix-cache hits (if the workload shares a common prefix there’s reuse to gain; otherwise this is normal).', 'rule.D3c.suggestion': 'Check the prompt template’s common prefix / enable_prefix_caching / RadixAttention.',
+    'rule.D4a.name': 'KV usage high and preemption occurring', 'rule.D4a.hypothesis': 'The KV pool is nearly full and preemption has triggered.', 'rule.D4a.suggestion': 'KV quantization (FP8) / lower max_model_len / KV offload.',
     'lang.label': 'Language / 语言',
   },
 };
@@ -1430,7 +1458,25 @@ function rulesTab() {
     async init() { await Promise.all([this.load(), this.loadMetrics()]); },
     // 触发的诊断卡片用这俩 helper 把 rule_id → 人话(策展 + 自定义都查)
     allRules() { return [...this.rules, ...this.customRules]; },
-    ruleName(rule_id) { const r = this.allRules().find(x => x.id === rule_id); return r ? r.name : rule_id; },
+    // 后端规则内容(名/推断/建议)按 rule_id 从字典取译文;无键(自定义规则)回退后端原值。
+    ruleI18n(id, field, fallback) {
+      const k = 'rule.' + id + '.' + field;
+      const v = t(k);
+      return v === k ? (fallback || '') : v;
+    },
+    ruleName(rule_id) {
+      const r = this.allRules().find(x => x.id === rule_id);
+      return this.ruleI18n(rule_id, 'name', r ? r.name : rule_id);
+    },
+    // 命中诊断卡的 suggestion = [推断]+[建议],按 rule_id 重建译文(回退后端 d.suggestion)。
+    diagSuggestion(d) {
+      const hyp = this.ruleI18n(d.rule_id, 'hypothesis', '');
+      const sug = this.ruleI18n(d.rule_id, 'suggestion', '');
+      if (!hyp && !sug) return d.suggestion || '';
+      let s = '[' + t('common.inference') + '] ' + hyp;
+      if (sug) s += '  [' + t('common.suggestion') + '] ' + sug;
+      return s;
+    },
     ruleCategory(rule_id) {
       const r = this.allRules().find(x => x.id === rule_id);
       if (!r) return '';
