@@ -1936,7 +1936,7 @@ function dashboard() {
     // 读最近一次取证结果(开 Kernel tab 时调,不触发新采集)
     async loadDeepEvidence() {
       try {
-        const r = await fetch('/api/kernels/deep_evidence').then(x => x.json());
+        const r = await fetch('/api/kernels/deep_evidence?lang=' + _uiLang()).then(x => x.json());
         this.deep.available_now = !!r.available_now;
         if (r.last) { this.deep.result = r.last; this.deep.findings = r.findings || []; }
       } catch (e) { /* fail-closed:静默 */ }
@@ -1946,7 +1946,7 @@ function dashboard() {
       if (this.deep.running) return;
       this.deep.running = true; this.deep.error = null;
       try {
-        const r = await fetch(`/api/kernels/deep_evidence?window=${window || 5}`,
+        const r = await fetch(`/api/kernels/deep_evidence?window=${window || 5}&lang=${_uiLang()}`,
           { method: 'POST' }).then(x => x.json());
         if (r.available) {
           this.deep.result = r; this.deep.findings = r.findings || []; this.deep.available_now = true;
@@ -2107,6 +2107,9 @@ function dashboard() {
       this.fetchSystem();
       this.refresh();
       setInterval(() => this.refresh(), 2000);
+      // 切语言时立刻重取 kernel findings(后端按 ?lang= 出双语):实时 kernels 走 refresh,
+      // deep evidence 是按需的也一并重取。轮询本身已带 _uiLang(),这里只为即时生效。
+      this.$watch('$store.i18n.lang', () => { this.refresh(); this.loadDeepEvidence(); });
       // 打开 Kernel tab 自动取证(§A):进去就有真数据,不用手点按钮
       this.$watch('tab', (v) => { if (v === 'kernel') this.onKernelTabOpen(); });
     },
@@ -2173,7 +2176,7 @@ function dashboard() {
           fetch('/api/diagnoses?seconds=300').then(r => r.json()),
           fetch('/api/diagnoses/history?limit=200').then(r => r.json()).catch(() => ({diagnoses: []})),
           fetch('/api/bench/status').then(r => r.json()).catch(() => ({running: []})),
-          fetch('/api/kernels?window=60').then(r => r.json()).catch(() => ({enabled: false, class_shares: []})),
+          fetch('/api/kernels?window=60&lang=' + _uiLang()).then(r => r.json()).catch(() => ({enabled: false, class_shares: []})),
           fetch('/api/kernels/timeline?max_events=800').then(r => r.json()).catch(() => ({timeline: null})),
           fetch('/api/kernels/trends?seconds=180').then(r => r.json()).catch(() => ({series: null})),
         ]);
