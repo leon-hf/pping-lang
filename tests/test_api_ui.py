@@ -123,11 +123,14 @@ def test_rules_tab_references_diagnosis_endpoints(client):
 
 
 def test_rules_tab_config_editor_and_readonly_rules(client):
-    """规则 tab:中心配置可编辑 + 规则只读展示(事实名 / 署名推断 / 处方 / checks 分列)。"""
+    """规则 tab:中心配置(顶部常驻条:业务形态 + SLA 常显,高级阈值折叠)+ 规则只读展示。"""
     body = client.get("/").text
-    # 中心配置编辑器
-    assert "cfgDraft.workload_form" in body
-    assert "cfgKeys()" in body and "cfgLabels" in body
+    # 中心配置编辑器 —— 顶部常驻上下文条
+    assert "cfg-bar" in body                          # 顶部配置条容器
+    assert "cfgDraft.workload_form" in body           # 业务形态选择
+    assert "cfgDraft.sla_ttft_p99_ms" in body         # SLA 常驻显示
+    assert "advancedOpen" in body                     # 高级阈值折叠开关
+    assert "advKeys()" in body and "cfgLabels" in body  # 高级阈值网格
     # 只读规则渲染
     for token in ["r.name", "r.hypothesis", "r.suggestion", "r.checks", "kindLabel"]:
         assert token in body, f"rules tab missing {token}"

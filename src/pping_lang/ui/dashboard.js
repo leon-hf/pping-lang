@@ -608,7 +608,7 @@ function rulesTab() {
     config: {}, cfgDraft: {}, workloadForms: [], active: false,
     availableMetrics: [],
     editing: null, editingExisting: false,   // 自定义规则编辑态
-    showConfig: false,                        // 诊断配置弹框开关
+    advancedOpen: false,                      // 高级阈值折叠面板开关
     saving: false, toast: '', toastError: false,
     cfgLabels: CFG_LABELS, kindLabel: KIND_LABEL,
 
@@ -638,10 +638,6 @@ function rulesTab() {
         this.availableMetrics = r.metrics || [];
       } catch (e) { this.availableMetrics = []; }
     },
-
-    // === 诊断配置弹框 ===
-    openConfig() { this.cfgDraft = JSON.parse(JSON.stringify(this.config)); this.showConfig = true; },
-    closeConfig() { this.showConfig = false; },
 
     // === 自定义规则 CRUD(走 /api/diagnosis_rules/custom,和策展规则同一引擎评)===
     blankRule() {
@@ -677,8 +673,12 @@ function rulesTab() {
       await this.load();
     },
     cfgKeys() { return Object.keys(CFG_LABELS).filter(k => k in this.cfgDraft); },
-    onFormChange() {
-      const sla = WORKLOAD_SLA[this.cfgDraft.workload_form];
+    // 高级面板只放阈值;TTFT/TPOT SLA 已常驻顶部条,不重复
+    advKeys() { return this.cfgKeys().filter(k => k !== 'sla_ttft_p99_ms' && k !== 'sla_tpot_p99_ms'); },
+    onFormChange(form) {
+      // 读下拉框新值,不依赖 x-model 是否已写回 cfgDraft(否则读到切换前的旧形态)
+      form = form || this.cfgDraft.workload_form;
+      const sla = WORKLOAD_SLA[form];
       if (sla) { this.cfgDraft.sla_ttft_p99_ms = sla[0]; this.cfgDraft.sla_tpot_p99_ms = sla[1]; }
     },
     dirty() { return JSON.stringify(this.cfgDraft) !== JSON.stringify(this.config); },
