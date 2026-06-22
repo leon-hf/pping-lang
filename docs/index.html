@@ -1,0 +1,1132 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>pping-lang · vLLM 性能诊断插件</title>
+<meta name="description" content="pping-lang —— 直接消费 vLLM stat_logger_plugins 回调，结合 NVML 物理层采样，通过事实规则引擎把指标变成结构化诊断与优化路径。实时 KPI / Roofline / Kernel 级 PC Sampling / 内置压测。">
+<link rel="preconnect" href="https://rsms.me/">
+<link rel="stylesheet" href="https://rsms.me/inter/inter.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+:root{
+  --bg:#fbfbfd; --surface:#ffffff; --surface-alt:#f7f7fa; --surface-tint:#fafafd;
+  --border:#ececf1; --border-strong:#dcdce3;
+  --text-strong:#1c1c22; --text:#3a3a44; --muted:#6e6e78; --muted-2:#9a9aa4; --muted-3:#c4c4cc;
+  --brand:#5b5bd6; --brand-soft:#eeeefb; --brand-strong:#4a4ac0;
+  --amber:#b7791f; --amber-soft:#fbf0dc;
+  --teal:#0d8b80; --teal-soft:#e0f3f0;
+  --rose:#d8483f; --rose-soft:#fce9e7;
+  --green:#2f9e44; --green-soft:#e5f5e9;
+  --shadow-sm:0 1px 2px rgba(20,20,40,.04);
+  --shadow-md:0 1px 3px rgba(20,20,40,.05),0 6px 16px -4px rgba(20,20,40,.06);
+  --shadow-lg:0 1px 3px rgba(20,20,40,.06),0 12px 32px -8px rgba(20,20,40,.1);
+  --grad:linear-gradient(135deg,#5b5bd6 0%,#7c6cf0 100%);
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Consolas,"Liberation Mono",Menlo,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{
+  font-family:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  background:var(--bg); color:var(--text); line-height:1.6;
+  -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
+}
+a{color:inherit;text-decoration:none}
+.wrap{max-width:1120px;margin:0 auto;padding:0 24px}
+.mono{font-family:var(--mono)}
+
+/* ---------- header ---------- */
+header.site{
+  position:sticky; top:0; z-index:50;
+  background:rgba(251,251,253,.82); backdrop-filter:saturate(180%) blur(12px);
+  border-bottom:1px solid var(--border);
+}
+.site .wrap{display:flex; align-items:center; gap:18px; height:58px}
+.brand{display:flex; align-items:center; gap:10px; font-weight:700; color:var(--text-strong)}
+.brand-mark{
+  width:30px;height:30px;border-radius:8px;background:var(--grad);
+  display:grid;place-items:center;color:#fff;box-shadow:var(--shadow-sm)
+}
+.brand-mark svg{width:18px;height:18px}
+.brand .name{font-size:16px;letter-spacing:-.01em}
+.brand .ver{font-size:11px;color:var(--muted-2);font-family:var(--mono);font-weight:500;margin-left:2px}
+nav.links{display:flex;gap:4px;margin-left:auto}
+nav.links a{
+  font-size:13.5px;color:var(--muted);padding:6px 11px;border-radius:7px;font-weight:500;
+  transition:.15s
+}
+nav.links a:hover{background:var(--surface-alt);color:var(--text-strong)}
+.lang-toggle{display:inline-flex;border:1px solid var(--border-strong);border-radius:7px;overflow:hidden}
+.lang-toggle button{font-family:inherit;font-size:12px;font-weight:600;padding:5px 9px;background:var(--surface);color:var(--muted);border:none;cursor:pointer;transition:.12s}
+.lang-toggle button+button{border-left:1px solid var(--border-strong)}
+.lang-toggle button:hover{color:var(--text)}
+.lang-toggle button.active{background:var(--brand);color:#fff}
+.gh-btn{
+  display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:600;
+  padding:7px 13px;border:1px solid var(--border-strong);border-radius:8px;
+  background:var(--surface);color:var(--text-strong);transition:.15s
+}
+.gh-btn:hover{border-color:var(--brand);color:var(--brand-strong);box-shadow:var(--shadow-sm)}
+.gh-btn svg{width:15px;height:15px}
+@media(max-width:920px){nav.links{display:none}}
+
+/* ---------- hero ---------- */
+.hero{padding:84px 0 56px;text-align:center}
+.eyebrow{
+  display:inline-flex;align-items:center;gap:8px;font-size:12.5px;font-weight:600;
+  color:var(--brand-strong);background:var(--brand-soft);padding:6px 13px;border-radius:999px;
+  margin-bottom:26px;letter-spacing:.01em
+}
+.eyebrow .dot{width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 0 3px var(--green-soft)}
+h1.title{
+  font-size:clamp(38px,6vw,62px);line-height:1.04;font-weight:800;letter-spacing:-.03em;
+  color:var(--text-strong);margin-bottom:20px
+}
+h1.title .accent{background:var(--grad);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.lede{font-size:clamp(16px,2.2vw,19px);color:var(--muted);max-width:680px;margin:0 auto 14px;line-height:1.55}
+.lede strong{color:var(--text);font-weight:600}
+.badges{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin:30px 0 30px}
+.badge{
+  display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;
+  padding:5px 11px;border-radius:7px;border:1px solid var(--border);background:var(--surface);
+  color:var(--muted)
+}
+.badge b{color:var(--text-strong);font-weight:700}
+.badge.ok b{color:var(--green)}
+.cta{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;align-items:center}
+.btn-primary{
+  display:inline-flex;align-items:center;gap:8px;font-size:14.5px;font-weight:600;color:#fff;
+  background:var(--grad);padding:11px 20px;border-radius:9px;box-shadow:var(--shadow-md);transition:.15s
+}
+.btn-primary:hover{transform:translateY(-1px);box-shadow:var(--shadow-lg)}
+.install{
+  display:inline-flex;align-items:center;gap:10px;font-family:var(--mono);font-size:13.5px;
+  background:var(--text-strong);color:#e8e8f0;padding:11px 16px;border-radius:9px;font-weight:500
+}
+.install .pfx{color:#7c6cf0}
+.install .copy{cursor:pointer;color:var(--muted-3);font-size:11px;border:1px solid #44444f;border-radius:5px;padding:2px 7px;transition:.15s}
+.install .copy:hover{color:#fff;border-color:#666}
+
+/* ---------- section ---------- */
+section{padding:60px 0}
+.sec-head{margin-bottom:36px}
+.sec-tag{font-size:12.5px;font-weight:700;color:var(--brand);letter-spacing:.06em;text-transform:uppercase;margin-bottom:10px}
+h2.sec{font-size:clamp(26px,3.5vw,34px);font-weight:800;letter-spacing:-.02em;color:var(--text-strong);line-height:1.15;margin-bottom:12px}
+.sec-sub{font-size:16px;color:var(--muted);max-width:720px;line-height:1.55}
+.divider{height:1px;background:var(--border);margin:0}
+
+/* ---------- problem ---------- */
+.prob-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+@media(max-width:760px){.prob-grid{grid-template-columns:1fr}}
+.prob-card{
+  background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:26px;box-shadow:var(--shadow-sm)
+}
+.prob-card .ic{width:38px;height:38px;border-radius:10px;display:grid;place-items:center;margin-bottom:16px}
+.prob-card .ic svg{width:20px;height:20px}
+.prob-card h3{font-size:17px;font-weight:700;color:var(--text-strong);margin-bottom:8px}
+.prob-card p{font-size:14.5px;color:var(--muted);line-height:1.6}
+.prob-card code{font-family:var(--mono);font-size:12.5px;background:var(--surface-alt);padding:1px 5px;border-radius:4px;color:var(--text)}
+.thesis{
+  margin-top:28px;background:var(--surface);border:1px solid var(--border-strong);border-radius:14px;
+  padding:28px 30px;display:flex;align-items:center;gap:28px;flex-wrap:wrap;box-shadow:var(--shadow-sm)
+}
+.thesis .flow{display:flex;align-items:center;gap:16px;flex-wrap:wrap;font-weight:700;font-size:17px}
+.thesis .step{display:flex;align-items:center;gap:9px;color:var(--text-strong)}
+.thesis .step .em{width:9px;height:9px;border-radius:50%}
+.thesis .arr{color:var(--muted-3)}
+.thesis p{font-size:14px;color:var(--muted);flex:1;min-width:240px;border-left:2px solid var(--brand-soft);padding-left:18px}
+
+/* ---------- dashboard demo ---------- */
+.demo-frame{
+  background:var(--surface);border:1px solid var(--border-strong);border-radius:16px;overflow:hidden;
+  box-shadow:var(--shadow-lg)
+}
+.demo-topbar{
+  display:flex;align-items:center;gap:10px;padding:13px 18px;border-bottom:1px solid var(--border);
+  background:var(--surface-tint)
+}
+.dots{display:flex;gap:6px}.dots i{width:11px;height:11px;border-radius:50%;display:block}
+.dots i:nth-child(1){background:#ff5f57}.dots i:nth-child(2){background:#febc2e}.dots i:nth-child(3){background:#28c840}
+.demo-url{
+  font-family:var(--mono);font-size:12px;color:var(--muted);background:var(--surface);
+  border:1px solid var(--border);border-radius:7px;padding:4px 12px;margin-left:6px
+}
+.demo-url .lock{color:var(--green)}
+.live-stamp{margin-left:auto;display:flex;align-items:center;gap:7px;font-size:11.5px;font-weight:600;color:var(--teal)}
+.live-stamp .pulse{width:7px;height:7px;border-radius:50%;background:var(--teal);box-shadow:0 0 0 0 rgba(13,139,128,.5);animation:pulse 2s infinite}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(13,139,128,.45)}70%{box-shadow:0 0 0 7px rgba(13,139,128,0)}100%{box-shadow:0 0 0 0 rgba(13,139,128,0)}}
+
+/* serving hero strip */
+.serving{display:flex;align-items:center;gap:18px;padding:20px 24px;border-bottom:1px solid var(--border);flex-wrap:wrap}
+.serving .ic{width:46px;height:46px;border-radius:12px;background:var(--brand-soft);display:grid;place-items:center;color:var(--brand)}
+.serving .ic svg{width:24px;height:24px}
+.serving .body .ey{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted-2);font-weight:600}
+.serving .body h3{font-size:19px;font-weight:700;color:var(--text-strong);letter-spacing:-.01em}
+.chips{display:flex;gap:7px;flex-wrap:wrap;margin-left:auto}
+.chip{display:inline-flex;flex-direction:column;gap:1px;border:1px solid var(--border);border-radius:8px;padding:5px 11px;background:var(--surface)}
+.chip .k{font-size:9.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted-2);font-weight:600}
+.chip .v{font-size:13px;font-weight:700;color:var(--text-strong);font-family:var(--mono)}
+.chip.brand{background:var(--brand-soft);border-color:rgba(91,91,214,.18)}.chip.brand .v{color:var(--brand-strong)}
+.chip.teal{background:var(--teal-soft);border-color:rgba(13,139,128,.18)}.chip.teal .v{color:var(--teal)}
+.chip.amber{background:var(--amber-soft);border-color:rgba(183,121,31,.2)}.chip.amber .v{color:var(--amber)}
+
+/* tabs */
+.demo-tabs{display:flex;gap:2px;padding:0 18px;border-bottom:1px solid var(--border);background:var(--surface);overflow-x:auto}
+.demo-tabs button{
+  font-family:inherit;font-size:14px;font-weight:600;color:var(--muted);background:none;border:none;
+  padding:13px 16px;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;display:flex;align-items:center;gap:7px;transition:.15s;white-space:nowrap
+}
+.demo-tabs button:hover{color:var(--text)}
+.demo-tabs button.active{color:var(--brand-strong);border-bottom-color:var(--brand)}
+.tab-badge{font-size:10px;font-weight:700;padding:1px 6px;border-radius:999px;background:var(--surface-alt);color:var(--muted)}
+.tab-badge.cupti{background:var(--teal-soft);color:var(--teal)}
+.tab-badge.warn{background:var(--amber-soft);color:var(--amber)}
+.tab-badge.crit{background:var(--rose-soft);color:var(--rose)}
+.tab-pane{padding:24px;display:none}
+.tab-pane.active{display:block;animation:fade .25s ease}
+@keyframes fade{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+
+/* KPI grid */
+.kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+@media(max-width:880px){.kpi-grid{grid-template-columns:repeat(2,1fr)}}
+.kpi{background:var(--surface);border:1px solid var(--border);border-radius:11px;padding:14px 16px;position:relative}
+.kpi .lab{font-size:11.5px;color:var(--muted);font-weight:600;display:flex;align-items:center;gap:5px}
+.kpi .num{font-size:25px;font-weight:800;color:var(--text-strong);letter-spacing:-.02em;margin-top:5px;font-family:var(--mono)}
+.kpi .num small{font-size:13px;color:var(--muted-2);font-weight:600;margin-left:2px}
+.kpi .sub{font-size:11px;color:var(--muted-2);margin-top:2px}
+.kpi.good{border-color:rgba(47,158,68,.25);background:linear-gradient(180deg,#fff,var(--green-soft) 360%)}
+.kpi.good .num{color:var(--green)}
+
+/* two-col charts */
+.chart-row{display:grid;grid-template-columns:1.1fr .9fr;gap:18px;margin-top:18px}
+@media(max-width:880px){.chart-row{grid-template-columns:1fr}}
+.panel{background:var(--surface);border:1px solid var(--border);border-radius:13px;padding:18px}
+.panel h4{font-size:14px;font-weight:700;color:var(--text-strong);margin-bottom:3px;display:flex;align-items:center;gap:8px}
+.panel .ph-sub{font-size:12px;color:var(--muted-2);margin-bottom:14px}
+.canvas-box{position:relative;height:230px}
+.conclusion{
+  margin-top:16px;border:1px solid var(--brand-soft);background:linear-gradient(180deg,var(--brand-soft),#fff);
+  border-radius:11px;padding:16px 18px
+}
+.conclusion .verdict{display:flex;align-items:center;gap:9px;font-size:15px;font-weight:800;color:var(--brand-strong);margin-bottom:10px}
+.conclusion .verdict .pill{font-size:10px;font-weight:700;background:var(--brand);color:#fff;padding:2px 8px;border-radius:999px;letter-spacing:.03em;flex:none}
+.bars{display:flex;flex-direction:column;gap:9px;margin-bottom:14px}
+.bar-row{display:flex;align-items:center;gap:10px;font-size:12.5px}
+.bar-row .bl{width:78px;color:var(--muted);font-weight:600}
+.bar-track{flex:1;height:7px;background:var(--surface-alt);border-radius:99px;overflow:hidden}
+.bar-fill{height:100%;border-radius:99px}
+.bar-row .bv{width:126px;text-align:right;font-family:var(--mono);font-size:11.5px;color:var(--text);font-weight:600}
+.paths{font-size:12.5px;color:var(--muted)}
+.paths .ph{font-weight:700;color:var(--text);margin-bottom:6px;font-size:12px}
+.paths ul{list-style:none;display:flex;flex-direction:column;gap:5px}
+.paths li{display:flex;gap:8px;align-items:flex-start}
+.paths li::before{content:"→";color:var(--brand);font-weight:700;flex:none}
+
+/* diagnoses list */
+.diag-list{display:flex;flex-direction:column;gap:10px;margin-top:18px}
+.diag{display:flex;gap:14px;border:1px solid var(--border);border-radius:11px;padding:15px 17px;background:var(--surface)}
+.diag .sev{flex:none;width:4px;border-radius:99px}
+.diag.warning .sev{background:var(--amber)}.diag.critical .sev{background:var(--rose)}.diag.info .sev{background:var(--brand)}
+.diag .body{flex:1;min-width:0}
+.diag .top{display:flex;align-items:center;gap:9px;margin-bottom:3px;flex-wrap:wrap}
+.diag .ttl{font-size:14.5px;font-weight:700;color:var(--text-strong)}
+.diag .lvl{font-size:10px;font-weight:700;text-transform:uppercase;padding:2px 7px;border-radius:5px;letter-spacing:.03em}
+.diag.warning .lvl{background:var(--amber-soft);color:var(--amber)}
+.diag.critical .lvl{background:var(--rose-soft);color:var(--rose)}
+.diag.info .lvl{background:var(--brand-soft);color:var(--brand-strong)}
+.diag .fact{font-size:13px;color:var(--text);margin-bottom:7px}
+.diag .fact code{font-family:var(--mono);font-size:11.5px;background:var(--surface-alt);padding:1px 5px;border-radius:4px}
+.diag .rx{font-size:12.5px;color:var(--muted);border-top:1px dashed var(--border-strong);padding-top:7px;margin-top:3px}
+.diag .rx b{color:var(--teal);font-weight:700}
+
+/* table */
+.tbl{width:100%;border-collapse:collapse;font-size:13px}
+.tbl th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted-2);font-weight:700;padding:9px 12px;border-bottom:1px solid var(--border)}
+.tbl td{padding:10px 12px;border-bottom:1px solid var(--border);color:var(--text)}
+.tbl tr:last-child td{border-bottom:none}
+.tbl td.mono{font-family:var(--mono);font-size:12px}
+.tbl .kname{font-family:var(--mono);font-size:12px;color:var(--text-strong);font-weight:600}
+.kcls{font-size:10px;font-weight:700;padding:1px 7px;border-radius:5px;text-transform:uppercase;letter-spacing:.03em}
+.kcls.gemm{background:var(--brand-soft);color:var(--brand-strong)}
+.kcls.attn{background:var(--teal-soft);color:var(--teal)}
+.kcls.tri{background:var(--green-soft);color:var(--green)}
+.kcls.norm{background:var(--amber-soft);color:var(--amber)}
+.track{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:600}
+.track.sass{color:var(--rose)} .track.src{color:var(--green)}
+
+/* notice */
+.notice{display:flex;gap:11px;font-size:12.5px;color:var(--muted);background:var(--surface-alt);border:1px solid var(--border);border-radius:10px;padding:12px 15px;margin-top:16px;line-height:1.55}
+.notice svg{width:16px;height:16px;flex:none;color:var(--amber);margin-top:1px}
+.notice b{color:var(--text);font-weight:700}
+
+/* deep evidence / launch attribution */
+.evtwo{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:18px}
+@media(max-width:760px){.evtwo{grid-template-columns:1fr}}
+.attr-chain{display:flex;flex-direction:column;gap:0;font-family:var(--mono);font-size:12.5px}
+.attr-chain .node{display:flex;align-items:center;gap:10px;padding:7px 0}
+.attr-chain .node .box{background:var(--surface-alt);border:1px solid var(--border);border-radius:7px;padding:5px 11px;color:var(--text-strong);font-weight:600}
+.attr-chain .node .pct{color:var(--muted-2);font-size:11px}
+.attr-chain .down{color:var(--muted-3);padding-left:14px;font-size:13px}
+.attr-chain .leaf .box{background:var(--brand-soft);border-color:rgba(91,91,214,.2);color:var(--brand-strong)}
+.stall-bars .bar-row .bl{width:130px;font-family:var(--mono);font-size:11px}
+
+/* bench */
+.bench-summary{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px}
+@media(max-width:760px){.bench-summary{grid-template-columns:repeat(2,1fr)}}
+.bstat{border:1px solid var(--border);border-radius:11px;padding:14px 16px;background:var(--surface)}
+.bstat .k{font-size:11.5px;color:var(--muted);font-weight:600}
+.bstat .v{font-size:24px;font-weight:800;color:var(--text-strong);font-family:var(--mono);margin-top:3px}
+.bstat .v small{font-size:12px;color:var(--muted-2);font-weight:600}
+.slo-row{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px}
+.slo{display:inline-flex;align-items:center;gap:9px;border:1px solid;border-radius:10px;padding:10px 15px;font-size:13px;font-weight:600}
+.slo.pass{border-color:rgba(47,158,68,.3);background:var(--green-soft);color:var(--green)}
+.slo .ck{width:18px;height:18px;flex:none}
+.slo .det{font-family:var(--mono);font-size:11.5px;color:var(--muted);font-weight:500}
+
+/* generic content grid */
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:24px}
+@media(max-width:820px){.grid2{grid-template-columns:1fr}}
+.feature{display:flex;gap:14px}
+.feature .fi{width:40px;height:40px;border-radius:11px;flex:none;display:grid;place-items:center}
+.feature .fi svg{width:21px;height:21px}
+.feature h3{font-size:16px;font-weight:700;color:var(--text-strong);margin-bottom:4px}
+.feature p{font-size:14px;color:var(--muted);line-height:1.55}
+.feature code{font-family:var(--mono);font-size:12.5px;background:var(--surface-alt);padding:1px 5px;border-radius:4px;color:var(--text)}
+
+/* arch */
+.arch-box{background:var(--text-strong);border-radius:14px;padding:26px 28px;overflow-x:auto;box-shadow:var(--shadow-md)}
+.arch-box pre{font-family:var(--mono);font-size:12.5px;line-height:1.7;color:#c8c8d4;white-space:pre}
+.arch-box .c-brand{color:#9d9df0}.arch-box .c-teal{color:#5bd6c4}.arch-box .c-amber{color:#e0b463}.arch-box .c-muted{color:#6e6e82}
+.perf-tbl{margin-top:20px}
+
+/* steps / install paths */
+.paths-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+@media(max-width:880px){.paths-grid{grid-template-columns:1fr}}
+.path-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:22px;box-shadow:var(--shadow-sm);display:flex;flex-direction:column}
+.path-card.feat{border-color:var(--brand);box-shadow:0 0 0 1px var(--brand-soft),var(--shadow-md)}
+.path-card .pnum{font-size:11px;font-weight:700;color:var(--brand);letter-spacing:.05em}
+.path-card h3{font-size:17px;font-weight:700;color:var(--text-strong);margin:5px 0 4px}
+.path-card .pd{font-size:13px;color:var(--muted);margin-bottom:14px;min-height:38px}
+.code{background:var(--text-strong);border-radius:9px;padding:13px 15px;font-family:var(--mono);font-size:12.5px;line-height:1.7;color:#e8e8f0;overflow-x:auto}
+.code .cmt{color:#6e6e82}.code .pfx{color:#7c6cf0}.code .cmd{color:#fff}
+.path-card .pfoot{font-size:12px;color:var(--muted-2);margin-top:13px;line-height:1.5}
+
+/* compat tables */
+.ctbl{width:100%;border-collapse:collapse;font-size:13.5px;background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden}
+.ctbl th{background:var(--surface-tint);text-align:left;font-size:12px;color:var(--muted);font-weight:700;padding:11px 14px;border-bottom:1px solid var(--border)}
+.ctbl td{padding:11px 14px;border-bottom:1px solid var(--border)}
+.ctbl tr:last-child td{border-bottom:none}
+.ctbl .yes{color:var(--green);font-weight:700}.ctbl .no{color:var(--muted-3)}
+.tag-pill{font-size:11px;font-weight:700;padding:2px 9px;border-radius:6px}
+.tag-pill.rec{background:var(--green-soft);color:var(--green)}
+.tag-pill.sup{background:var(--brand-soft);color:var(--brand-strong)}
+.tag-pill.no{background:var(--surface-alt);color:var(--muted-2)}
+
+/* roadmap */
+.road{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+@media(max-width:820px){.road{grid-template-columns:1fr}}
+.rcard{border:1px solid var(--border);border-radius:14px;padding:22px;background:var(--surface)}
+.rcard.now{border-color:var(--brand);background:linear-gradient(180deg,var(--brand-soft),#fff)}
+.rcard .rv{font-family:var(--mono);font-size:13px;font-weight:700;color:var(--brand-strong)}
+.rcard .rmode{font-size:11px;color:var(--muted-2);font-weight:600;text-transform:uppercase;letter-spacing:.04em;margin-top:2px}
+.rcard h3{font-size:15px;color:var(--text-strong);font-weight:700;margin:12px 0 6px}
+.rcard p{font-size:13px;color:var(--muted);line-height:1.55}
+.rcard .badge-now{display:inline-block;font-size:10px;font-weight:700;background:var(--brand);color:#fff;padding:2px 8px;border-radius:999px;margin-bottom:8px}
+
+/* footer */
+footer{border-top:1px solid var(--border);padding:48px 0 60px;margin-top:40px}
+.foot-grid{display:flex;justify-content:space-between;gap:30px;flex-wrap:wrap;align-items:flex-start}
+.foot-brand{max-width:330px}
+.foot-brand p{font-size:13px;color:var(--muted);margin-top:12px;line-height:1.6}
+.foot-links{display:flex;gap:56px;flex-wrap:wrap}
+.foot-col h5{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted-2);font-weight:700;margin-bottom:12px}
+.foot-col a{display:block;font-size:13.5px;color:var(--muted);padding:4px 0;transition:.15s}
+.foot-col a:hover{color:var(--brand-strong)}
+.foot-bottom{margin-top:40px;padding-top:22px;border-top:1px solid var(--border);font-size:12.5px;color:var(--muted-2);display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+.cite{margin-top:18px;font-family:var(--mono);font-size:11px;color:var(--muted-2);background:var(--surface-alt);border:1px solid var(--border);border-radius:9px;padding:13px 15px;line-height:1.7;white-space:pre-wrap}
+
+.sec-alt{background:var(--surface-tint)}
+</style>
+</head>
+<body>
+
+<!-- ===================== HEADER ===================== -->
+<header class="site">
+  <div class="wrap">
+    <a href="#top" class="brand">
+      <span class="brand-mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></span>
+      <span class="name">pping-lang</span><span class="ver">v0.1.0a1</span>
+    </a>
+    <nav class="links">
+      <a href="#problem" data-i18n="nav.why">为什么</a>
+      <a href="#demo" data-i18n="nav.demo">实时演示</a>
+      <a href="#how" data-i18n="nav.how">工作原理</a>
+      <a href="#start" data-i18n="nav.start">快速上手</a>
+      <a href="#compat" data-i18n="nav.compat">兼容性</a>
+      <a href="#roadmap" data-i18n="nav.roadmap">路线图</a>
+    </nav>
+    <div class="lang-toggle">
+      <button data-lang="zh" class="active" onclick="applyLang('zh')">中</button>
+      <button data-lang="en" onclick="applyLang('en')">EN</button>
+    </div>
+    <a class="gh-btn" href="https://github.com/leon-hf/pping-lang" target="_blank" rel="noopener">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 .3a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2c-3.3.7-4-1.6-4-1.6-.6-1.4-1.4-1.8-1.4-1.8-1-.7.1-.7.1-.7 1.2 0 1.9 1.2 1.9 1.2 1 1.8 2.8 1.3 3.5 1 0-.8.4-1.3.7-1.6-2.7-.3-5.5-1.3-5.5-6 0-1.2.5-2.3 1.3-3.1-.2-.4-.6-1.6 0-3.2 0 0 1-.3 3.4 1.2a11.5 11.5 0 0 1 6 0C17 4.6 18 5 18 5c.7 1.6.2 2.8 0 3.2.9.8 1.3 1.9 1.3 3.1 0 4.6-2.8 5.6-5.5 5.9.5.4.9 1 .9 2.2v3.3c0 .3.1.7.8.6A12 12 0 0 0 12 .3"/></svg>
+      GitHub
+    </a>
+  </div>
+</header>
+
+<a id="top"></a>
+
+<!-- ===================== HERO ===================== -->
+<div class="hero">
+  <div class="wrap">
+    <span class="eyebrow"><span class="dot"></span><span data-i18n="hero.eyebrow">本页所有数据来自 runw 真机实跑 · RTX 5060 Ti · vLLM 0.21</span></span>
+    <h1 class="title" data-i18n="hero.title">把 vLLM 的指标<br>变成<span class="accent">能照着做的结论</span></h1>
+    <p class="lede" data-i18n="hero.lede">
+      <strong>pping-lang</strong> 直接消费 vLLM 的 <code style="font-family:var(--mono);font-size:.9em">stat_logger_plugins</code> 回调，
+      结合 NVML 物理层采样，通过<strong>事实规则引擎</strong>输出结构化诊断与优化路径 ——
+      不只是画指标，而是告诉你瓶颈在哪、该调哪个旋钮。
+    </p>
+    <div class="badges">
+      <span class="badge">PyPI <b>v0.1.0a1</b></span>
+      <span class="badge">Python <b>3.10–3.12</b></span>
+      <span class="badge">License <b>Apache 2.0</b></span>
+      <span class="badge ok">Tests <b data-i18n="hero.tests">444 通过</b></span>
+    </div>
+    <div class="cta">
+      <span class="install"><span class="pfx">$</span> pip install pping-lang <span class="copy" data-i18n="hero.copy" onclick="navigator.clipboard?.writeText('pip install pping-lang');this.textContent='✓'">复制</span></span>
+      <a class="btn-primary" href="#demo" data-i18n="hero.cta">看实时演示 ↓</a>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== PROBLEM ===================== -->
+<section id="problem">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="sec-tag" data-i18n="prob.tag">问题</div>
+      <h2 class="sec" data-i18n="prob.h2">指标能看，但不会下结论</h2>
+      <p class="sec-sub" data-i18n="prob.sub">Prometheus + Grafana 那套能把 vLLM 的指标全画出来，但落到「现在到底是什么瓶颈、该动哪个参数」时，要靠人脑补。这里有两个具体的坑：</p>
+    </div>
+    <div class="prob-grid">
+      <div class="prob-card">
+        <div class="ic" style="background:var(--amber-soft);color:var(--amber)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 9v4M12 17h.01"/><circle cx="12" cy="12" r="9"/></svg></div>
+        <h3 data-i18n="prob.c1.h">指标语义模糊</h3>
+        <p data-i18n="prob.c1.p"><code>GPU utilization</code> 反映的是 SM duty cycle，不是吞吐量。LLM decode 阶段它常稳定在 <b>70–90%</b>，而 MFU 不足 <b>5%</b> —— 因为 memory-bound。只盯 utilization 数字，识别不出这类瓶颈。</p>
+      </div>
+      <div class="prob-card">
+        <div class="ic" style="background:var(--rose-soft);color:var(--rose)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3 8-8"/><path d="M21 12a9 9 0 1 1-6.2-8.5"/></svg></div>
+        <h3 data-i18n="prob.c2.h">缺乏可操作性</h3>
+        <p data-i18n="prob.c2.p">规则触发、阈值告警、根因关联 —— 全要使用方自己实现。看到一堆曲线，离「该把 <code>max_num_seqs</code> 调大还是开 prefix caching」还隔着一整套领域知识。</p>
+      </div>
+    </div>
+    <div class="thesis">
+      <div class="flow">
+        <span class="step"><span class="em" style="background:var(--teal)"></span><span data-i18n="thesis.s1">采集</span></span>
+        <span class="arr">→</span>
+        <span class="step"><span class="em" style="background:var(--amber)"></span><span data-i18n="thesis.s2">事实</span></span>
+        <span class="arr">→</span>
+        <span class="step"><span class="em" style="background:var(--brand)"></span><span data-i18n="thesis.s3">署名推断</span></span>
+        <span class="arr">→</span>
+        <span class="step"><span class="em" style="background:var(--green)"></span><span data-i18n="thesis.s4">处方</span></span>
+      </div>
+      <p data-i18n="thesis.p">pping-lang 把诊断拆成两层：<b>规则名 = 测出来的客观事实</b>（如「TPOT p99 超 SLA」），根因与优化建议作为<b>署名推断</b>单列。事实和猜测分开摆，你能判断该不该信。</p>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ===================== LIVE DEMO ===================== -->
+<section id="demo" class="sec-alt">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="sec-tag" data-i18n="demo.tag">实时演示</div>
+      <h2 class="sec" data-i18n="demo.h2">仪表盘 · 一次真实压测的全貌</h2>
+      <p class="sec-sub" data-i18n="demo.sub">下面是把 <b>502 个请求</b>（并发 8、内置 mixed-short 数据集）打到 runw 上一台 RTX 5060 Ti 的 vLLM 0.21（Qwen2.5-0.5B）后，仪表盘四个标签页采到的真实数据。点标签切换。</p>
+    </div>
+
+    <div class="demo-frame">
+      <div class="demo-topbar">
+        <span class="dots"><i></i><i></i><i></i></span>
+        <span class="demo-url"><span class="lock">●</span> 100.107.244.84:8765</span>
+        <span class="live-stamp"><span class="pulse"></span>captured from live runw</span>
+      </div>
+
+      <div class="serving">
+        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M9 9h6v6H9z"/><path d="M9 1v2M15 1v2M9 21v2M15 21v2M1 9h2M1 15h2M21 9h2M21 15h2"/></svg></div>
+        <div class="body">
+          <div class="ey">currently serving</div>
+          <h3>Qwen/Qwen2.5-0.5B-Instruct</h3>
+        </div>
+        <div class="chips">
+          <span class="chip brand"><span class="k">vLLM</span><span class="v">0.21.0</span></span>
+          <span class="chip amber"><span class="k">GPU</span><span class="v">RTX 5060 Ti</span></span>
+          <span class="chip teal"><span class="k">BF16 Peak</span><span class="v">95 TFLOPS</span></span>
+          <span class="chip teal"><span class="k">Mem BW</span><span class="v">0.45 TB/s</span></span>
+        </div>
+      </div>
+
+      <div class="demo-tabs">
+        <button class="active" data-tab="live" data-i18n="tab.live">实时</button>
+        <button data-tab="kernel">Kernel <span class="tab-badge cupti">CUPTI</span></button>
+        <button data-tab="rules"><span data-i18n="tab.rules">规则</span> <span class="tab-badge">13</span></button>
+        <button data-tab="bench"><span data-i18n="tab.bench">压测</span> <span class="tab-badge">SLO ✓</span></button>
+      </div>
+
+      <!-- ===== LIVE TAB ===== -->
+      <div class="tab-pane active" data-pane="live">
+        <div class="kpi-grid">
+          <div class="kpi good"><div class="lab">TTFT p99</div><div class="num">19.7<small>ms</small></div><div class="sub" data-i18n="kpi.ttft.s">p50 18.5 · 远低于 SLA</div></div>
+          <div class="kpi good"><div class="lab">TPOT p99</div><div class="num">5.0<small>ms</small></div><div class="sub" data-i18n="kpi.tpot.s">p50 4.89 · 稳定</div></div>
+          <div class="kpi"><div class="lab" data-i18n="kpi.tput.l">Output 吞吐</div><div class="num">1,579<small>tok/s</small></div><div class="sub" data-i18n="kpi.tput.s">聚合 · 8 并发</div></div>
+          <div class="kpi"><div class="lab" data-i18n="kpi.decode.l">单请求 decode</div><div class="num">205<small>tok/s</small></div><div class="sub">per-request</div></div>
+
+          <div class="kpi"><div class="lab" data-i18n="kpi.util.l">GPU 利用率</div><div class="num">73<small>%</small></div><div class="sub">SM duty cycle</div></div>
+          <div class="kpi"><div class="lab" data-i18n="kpi.bw.l">显存带宽</div><div class="num">60<small>%</small></div><div class="sub">269 / 448 GB/s</div></div>
+          <div class="kpi"><div class="lab" data-i18n="kpi.mem.l">显存占用</div><div class="num">54<small>%</small></div><div class="sub">gpu-mem-util 0.5</div></div>
+          <div class="kpi"><div class="lab">KV cache</div><div class="num">0.2<small>%</small></div><div class="sub" data-i18n="kpi.kv.s">充裕</div></div>
+
+          <div class="kpi"><div class="lab">Running reqs</div><div class="num">8</div><div class="sub" data-i18n="kpi.run.s">满并发</div></div>
+          <div class="kpi"><div class="lab">Waiting reqs</div><div class="num">0</div><div class="sub" data-i18n="kpi.wait.s">无排队</div></div>
+          <div class="kpi"><div class="lab" data-i18n="kpi.prefix.l">Prefix 命中</div><div class="num">78<small>%</small></div><div class="sub" data-i18n="kpi.prefix.s">mixed-short 复用</div></div>
+          <div class="kpi"><div class="lab" data-i18n="kpi.preempt.l">抢占率</div><div class="num">0<small>/min</small></div><div class="sub" data-i18n="kpi.preempt.s">无 preemption</div></div>
+        </div>
+
+        <div class="chart-row">
+          <div class="panel">
+            <h4 data-i18n="roof.h">Roofline · 算术强度 vs 实测吞吐</h4>
+            <div class="ph-sub" data-i18n="roof.sub">每点 = 一次迭代 · 实测自 iter-level token 计数与模型参数量推算（analytical）</div>
+            <div class="canvas-box"><canvas id="roofline"></canvas></div>
+            <div class="conclusion">
+              <div class="verdict"><span class="pill" data-i18n="roof.auto">自动结论</span><span data-i18n="roof.verdict">Memory-bound（decode 阶段的典型状态）</span></div>
+              <div class="bars">
+                <div class="bar-row"><span class="bl" data-i18n="roof.compute">算力利用</span><div class="bar-track"><div class="bar-fill" style="width:2%;background:var(--rose)"></div></div><span class="bv">1.7% · 1.6/95 TFLOPS</span></div>
+                <div class="bar-row"><span class="bl" data-i18n="roof.bandwidth">带宽利用</span><div class="bar-track"><div class="bar-fill" style="width:60%;background:var(--brand)"></div></div><span class="bv">60% · 269/448 GB/s</span></div>
+              </div>
+              <div class="paths">
+                <div class="ph" data-i18n="roof.paths">优化路径</div>
+                <ul>
+                  <li data-i18n="roof.p1">增大 batch 直至 KV cache 占用接近 80%</li>
+                  <li data-i18n="roof.p2">启用 speculative decoding</li>
+                  <li data-i18n="roof.p3">权重量化（AWQ / GPTQ）</li>
+                  <li data-i18n="roof.p4">升级带宽更高的 GPU</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+          <div class="panel">
+            <h4 data-i18n="lat.h">延迟时序 · TTFT / TPOT</h4>
+            <div class="ph-sub" data-i18n="lat.sub">压测窗口内分桶（4s/桶）的 p50 / p99 走势</div>
+            <div class="canvas-box"><canvas id="latency"></canvas></div>
+            <div class="notice" style="margin-top:24px">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01" stroke-linecap="round"/></svg>
+              <span data-i18n="lat.note">本机 <b>--enforce-eager</b> 运行，vLLM 未导出 <code style="font-family:var(--mono)">perf_stats</code>，故 MFU / padding ratio 显示为空，Roofline 自动切换 analytical 模式（绝对值约 ±20% 误差）。其余 KPI 不受影响。</span>
+            </div>
+          </div>
+        </div>
+
+        <h4 style="font-size:14px;font-weight:700;color:var(--text-strong);margin:28px 0 4px" data-i18n="diag.h">诊断结论 · 事实 + 署名推断</h4>
+        <div class="ph-sub" style="font-size:12px;color:var(--muted-2);margin-bottom:6px" data-i18n="diag.sub">规则引擎默认每 1s 评估一次。下例展示规则被触发时的输出形态（本次压测系统健康，无告警）。</div>
+        <div class="diag-list">
+          <div class="diag warning">
+            <div class="sev"></div>
+            <div class="body">
+              <div class="top"><span class="ttl" data-i18n="diag.e1.t">GPU 利用率偏低</span><span class="lvl">warning</span></div>
+              <div class="fact" data-i18n="diag.e1.f">GPU 平均利用率 <code>3%</code> 持续低于 50% 已 30s</div>
+              <div class="rx"><b data-i18n="diag.infer">署名推断 →</b> <span data-i18n="diag.e1.r">检查 batch 是否退化为 1，或开启连续 batching</span></div>
+            </div>
+          </div>
+          <div class="diag warning">
+            <div class="sev"></div>
+            <div class="body">
+              <div class="top"><span class="ttl" data-i18n="diag.e2.t">batch 退化</span><span class="lvl">warning</span></div>
+              <div class="fact" data-i18n="diag.e2.f">并发请求数 <code>1.0</code> ≤ 1.0 已 30s</div>
+              <div class="rx"><b data-i18n="diag.infer">署名推断 →</b> <span data-i18n="diag.e2.r">增加客户端并发，或检查上游路由是否串行化</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== KERNEL TAB ===== -->
+      <div class="tab-pane" data-pane="kernel">
+        <div class="notice" style="margin-top:0;margin-bottom:20px">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01" stroke-linecap="round"/></svg>
+          <span data-i18n="ker.note">Kernel 级采集需<b>完整接入</b>（<code style="font-family:var(--mono)">pping-vllm serve</code>，经 CUPTI 注入做 PC Sampling）。下方为一次代表性 cudagraph 运行采到的真实热点 —— 演示「为什么慢」能下钻到什么粒度。</span>
+        </div>
+
+        <div class="panel">
+          <h4 data-i18n="ker.h">GPU Kernel 时间占比 · Top 热点 + 算子分类</h4>
+          <div class="ph-sub" data-i18n="ker.sub">按 GPU 时间降序 · 每个 kernel 展开后给「最深热点」双轨（源码行 / SASS 偏移）</div>
+          <table class="tbl" style="margin-top:10px">
+            <thead><tr><th>Kernel</th><th data-i18n="ker.cls">分类</th><th data-i18n="ker.samples">样本</th><th data-i18n="ker.hotspot">最深热点</th></tr></thead>
+            <tbody>
+              <tr><td class="kname">wmma_bf16_16x16_128x1</td><td><span class="kcls gemm">GEMM</span></td><td class="mono">51.17 M</td><td><span class="track sass">◆ SASS 0x35c0 · long_scoreboard 80%</span></td></tr>
+              <tr><td class="kname">cutlass 16x16_128x2</td><td><span class="kcls gemm">GEMM</span></td><td class="mono">7.68 M</td><td><span class="track sass" data-i18n="ker.sassrow">◆ SASS 偏移级（闭源 cutlass）</span></td></tr>
+              <tr><td class="kname">cutlass 32x32_128x2</td><td><span class="kcls gemm">GEMM</span></td><td class="mono">4.62 M</td><td><span class="track sass" data-i18n="ker.sassrow2">◆ SASS 偏移级（闭源 cutlass）</span></td></tr>
+              <tr><td class="kname">_compute_slot_mapping_kernel</td><td><span class="kcls tri">Triton</span></td><td class="mono" data-i18n="ker.tiny">微量</td><td><span class="track src" data-i18n="ker.srcrow">● block_table.py:326（源码行）</span></td></tr>
+              <tr><td class="kname">_topk_topp_kernel</td><td><span class="kcls tri">Triton</span></td><td class="mono" data-i18n="ker.tiny2">微量</td><td><span class="track src" data-i18n="ker.srcrow2">● topk_topp_triton.py:136（源码行）</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="evtwo">
+          <div class="panel">
+            <h4 data-i18n="ker.attr.h">启动来源 · 即便闭源 GEMM 也能归因</h4>
+            <div class="ph-sub" data-i18n="ker.attr.sub">CUPTI 钩 cuLaunchKernel 回溯 host 调用栈 —— 84% 的 GPU 时间来自一条 nn.Linear 链</div>
+            <div class="attr-chain" style="margin-top:12px">
+              <div class="node"><span class="box" style="background:var(--rose-soft);border-color:rgba(216,72,63,.2);color:var(--rose)">cutlass GEMM</span><span class="pct" data-i18n="ker.attr.pct">84% GPU 时间</span></div>
+              <div class="down" data-i18n="ker.attr.from">↑ 来自</div>
+              <div class="node"><span class="box">cublasLtMatmul</span></div>
+              <div class="down" data-i18n="ker.attr.from2">↑ 来自</div>
+              <div class="node"><span class="box">at::native::addmm</span></div>
+              <div class="down" data-i18n="ker.attr.from3">↑ 来自</div>
+              <div class="node leaf"><span class="box">at::native::linear · nn.Linear</span></div>
+            </div>
+          </div>
+          <div class="panel">
+            <h4 data-i18n="ker.de.h">Deep Evidence · 为什么慢</h4>
+            <div class="ph-sub" data-i18n="ker.de.sub">最热 SASS 偏移处的主导 stall reason（PerfWorks 下钻）</div>
+            <div class="bars stall-bars" style="margin-top:14px">
+              <div class="bar-row"><span class="bl">long_scoreboard</span><div class="bar-track"><div class="bar-fill" style="width:80%;background:var(--rose)"></div></div><span class="bv">80%</span></div>
+              <div class="bar-row"><span class="bl">wait</span><div class="bar-track"><div class="bar-fill" style="width:11%;background:var(--amber)"></div></div><span class="bv">11%</span></div>
+              <div class="bar-row"><span class="bl">not_selected</span><div class="bar-track"><div class="bar-fill" style="width:5%;background:var(--brand)"></div></div><span class="bv">5%</span></div>
+              <div class="bar-row"><span class="bl" data-i18n="ker.de.other">其它</span><div class="bar-track"><div class="bar-fill" style="width:4%;background:var(--muted-3)"></div></div><span class="bv">4%</span></div>
+            </div>
+            <div class="notice" style="margin-top:16px">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke-linejoin="round"/></svg>
+              <span data-i18n="ker.de.note"><b>kernel 名即诊断：</b><code style="font-family:var(--mono)">wmma_bf16_16x16_128x1</code> → tile 16×16 / bf16 / wmma 指令类。小 tile = 小矩阵、低并发 → 呼应 Roofline 的「增大 batch」结论。<b>long_scoreboard 80%</b> = 在等显存 → 实锤 memory-bound。</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="notice">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01" stroke-linecap="round"/></svg>
+          <span data-i18n="ker.bound"><b>价值边界（诚实披露）：</b>「翻到 .py 源码行」只在 Triton / 自编译 kernel 路径有效。本类负载 <b>98% 时间在闭源 cutlass/flash GEMM</b> 里 → 那里只能到 SASS 偏移级 + stall reason + kernel 名解码。这是物理事实，不是 bug。</span>
+        </div>
+      </div>
+
+      <!-- ===== RULES TAB ===== -->
+      <div class="tab-pane" data-pane="rules">
+        <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin-bottom:18px">
+          <div style="font-size:13px;color:var(--muted)" data-i18n="rules.summary">生效中 <b style="color:var(--text-strong)">13</b> 条策展规则 · 阈值集中在一份 <span class="mono" style="font-size:12px">SLA 配置</span>，仪表盘里改完即热加载，不重启 vLLM。</div>
+          <div style="margin-left:auto;display:flex;gap:7px">
+            <span class="chip"><span class="k">workload</span><span class="v">custom</span></span>
+            <span class="chip"><span class="k">SLA TTFT p99</span><span class="v">2000 ms</span></span>
+            <span class="chip"><span class="k">SLA TPOT p99</span><span class="v">50 ms</span></span>
+          </div>
+        </div>
+        <div class="diag-list" id="rules-list"></div>
+      </div>
+
+      <!-- ===== BENCH TAB ===== -->
+      <div class="tab-pane" data-pane="bench">
+        <div style="font-size:13px;color:var(--muted);margin-bottom:18px" data-i18n="bench.desc">
+          内置 OpenAI 协议静态压测器 · 场景 <span class="mono" style="font-size:12px">showcase-demo</span> ·
+          并发 8 · 时长 35s · 数据集 builtin:mixed-short · output 128 tok
+        </div>
+        <div class="bench-summary">
+          <div class="bstat"><div class="k" data-i18n="bench.total">请求总数</div><div class="v">502</div></div>
+          <div class="bstat"><div class="k" data-i18n="bench.okerr">成功 / 错误</div><div class="v">502<small> / 0</small></div></div>
+          <div class="bstat"><div class="k" data-i18n="bench.tput">Output 吞吐</div><div class="v">1,579<small> tok/s</small></div></div>
+          <div class="bstat"><div class="k" data-i18n="bench.tokens">Output tokens</div><div class="v">56.2<small> K</small></div></div>
+        </div>
+
+        <div class="slo-row">
+          <div class="slo pass">
+            <svg class="ck" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+            <span data-i18n="bench.slo">SLO 达标</span> <span class="det">ttft:p99 19.7ms &lt; 500ms</span>
+          </div>
+          <div class="slo pass">
+            <svg class="ck" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+            <span data-i18n="bench.slo2">SLO 达标</span> <span class="det">tpot:p99 5.0ms &lt; 50ms</span>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h4 data-i18n="bench.dist.h">客户端实测延迟分布</h4>
+          <div class="ph-sub" data-i18n="bench.dist.sub">client-side 测量 · n = 502</div>
+          <table class="tbl" style="margin-top:10px">
+            <thead><tr><th data-i18n="bench.metric">指标</th><th>p50</th><th>p90</th><th>p95</th><th>p99</th><th>mean</th><th>min</th><th>max</th></tr></thead>
+            <tbody>
+              <tr><td><b>TTFT</b> <span style="color:var(--muted-2)">ms</span></td><td class="mono">18.5</td><td class="mono">19.1</td><td class="mono">19.4</td><td class="mono">19.7</td><td class="mono">17.1</td><td class="mono">13.5</td><td class="mono">22.1</td></tr>
+              <tr><td><b>TPOT</b> <span style="color:var(--muted-2)">ms</span></td><td class="mono">4.89</td><td class="mono">4.95</td><td class="mono">4.97</td><td class="mono">5.02</td><td class="mono">4.90</td><td class="mono">4.68</td><td class="mono">5.12</td></tr>
+              <tr><td><b>E2E</b> <span style="color:var(--muted-2)">ms</span></td><td class="mono">636.8</td><td class="mono">644.6</td><td class="mono">648.1</td><td class="mono">654.6</td><td class="mono">560.6</td><td class="mono">47.8</td><td class="mono">659.9</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ===================== HOW IT WORKS ===================== -->
+<section id="how">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="sec-tag" data-i18n="how.tag">工作原理</div>
+      <h2 class="sec" data-i18n="how.h2">双路径架构 · 热路径只做 O(1) 入队</h2>
+      <p class="sec-sub" data-i18n="how.sub">设计前提：插件的任何异常都不得影响 vLLM 推理路径。所以热路径不做 I/O、不序列化、不等锁；实时面板直读内存 ring buffer，持久化是顺序追加 JSONL。</p>
+    </div>
+
+    <div class="arch-box">
+<pre><span class="c-muted">                ┌───</span> <span class="c-teal">live 内存层</span><span class="c-muted">（O(1) 写 / O(1) 读）</span>
+<span class="c-muted">                │       ↑                ↑</span>
+<span class="c-brand">record()</span> <span class="c-muted">──push─┤</span>   /api/kpis        /api/metrics/recent  <span class="c-muted">≤60s</span>
+<span class="c-amber">NVML 100ms</span> <span class="c-muted">─────┤</span>   /api/snapshot    /api/roofline        <span class="c-muted">≤60s</span>
+<span class="c-muted">                │   /api/latency_trends                   ≤900s</span>
+<span class="c-muted">                │</span>
+<span class="c-muted">                │   Sink._latest:  name → (value, ts_ns)</span>
+<span class="c-muted">                │   Sink._recent:  name → 2000-deep ring</span>
+<span class="c-muted">                │</span>
+<span class="c-muted">                └───</span> <span class="c-teal">bg flush</span> <span class="c-muted">───</span> <span class="c-amber">JSONL append-log</span> <span class="c-muted">─── archival 扫描</span>
+<span class="c-muted">                                   metrics / diagnoses</span></pre>
+    </div>
+
+    <table class="ctbl perf-tbl">
+      <thead><tr><th data-i18n="perf.col1">热路径开销项</th><th data-i18n="perf.col2">实测</th><th data-i18n="perf.col3">说明</th></tr></thead>
+      <tbody>
+        <tr><td class="mono"><code style="font-family:var(--mono)">push_metric()</code> <span data-i18n="perf.once">单次</span></td><td><b style="color:var(--green)">&lt; 5 μs</b></td><td data-i18n="perf.r1">纯入队，无 I/O</td></tr>
+        <tr><td class="mono"><code style="font-family:var(--mono)">record()</code> <span data-i18n="perf.once2">单次</span></td><td><b style="color:var(--green)">≈ 100 μs</b></td><td data-i18n="perf.r2">含 collector 解析</td></tr>
+        <tr><td data-i18n="perf.r3l">Sink bg flush 线程 CPU</td><td><b style="color:var(--green)">&lt; 1%</b></td><td data-i18n="perf.r3">独立 daemon 线程</td></tr>
+        <tr><td data-i18n="perf.r4l">常驻内存</td><td><b style="color:var(--green)">≈ 6 MB</b></td><td data-i18n="perf.r4">ring buffer 有界</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ===================== FEATURES ===================== -->
+<section class="sec-alt">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="sec-tag" data-i18n="feat.tag">能力</div>
+      <h2 class="sec" data-i18n="feat.h2">四张能力，一个插件装好</h2>
+    </div>
+    <div class="grid2" style="gap:30px 40px">
+      <div class="feature"><div class="fi" style="background:var(--brand-soft);color:var(--brand)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 14l4-4 3 3 5-6"/></svg></div>
+        <div><h3 data-i18n="feat.1.h">实时 KPI + Roofline</h3><p data-i18n="feat.1.p">12 项 KPI（TTFT/TPOT/吞吐/KV/队列/MFU/利用率/显存/Prefix/Padding/抢占），Roofline 散点带自动结论卡，TTFT/TPOT/E2E 多统计量时序。每项 hover 看公式与解读。</p></div></div>
+      <div class="feature"><div class="fi" style="background:var(--teal-soft);color:var(--teal)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17l6-6-6-6"/><path d="M12 19h8"/></svg></div>
+        <div><h3 data-i18n="feat.2.h">Kernel 级 PC Sampling</h3><p data-i18n="feat.2.p">每个 GPU kernel 的时间占比 + 算子分类 + 主导 stall。Triton kernel 直定位到 <code>.py</code> 源码行；闭源库给 SASS 热点 + kernel 名解码；闭源 GEMM 也能归因到调它的 <code>nn.Linear</code>。</p></div></div>
+      <div class="feature"><div class="fi" style="background:var(--amber-soft);color:var(--amber)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></div>
+        <div><h3 data-i18n="feat.3.h">事实规则诊断引擎</h3><p data-i18n="feat.3.p">13 条策展规则，「事实 + 署名推断 + 处方」三段式。阈值集中在一份 SLA 配置，仪表盘热加载，不重启 vLLM；可增删自定义规则，与策展规则同一引擎评估。</p></div></div>
+      <div class="feature"><div class="fi" style="background:var(--green-soft);color:var(--green)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9z"/></svg></div>
+        <div><h3 data-i18n="feat.4.h">内置压测器</h3><p data-i18n="feat.4.p">仪表盘直接发起 OpenAI 协议静态压测，配置 endpoint / 并发 / 时长 / prompt 来源，输出 client-side TTFT/TPOT/E2E 分布与 SLO 校验。三个内置数据集：短问答 / 长文档 / 代码。</p></div></div>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ===================== GETTING STARTED ===================== -->
+<section id="start">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="sec-tag" data-i18n="start.tag">快速上手</div>
+      <h2 class="sec" data-i18n="start.h2">三种接入，pip 装完即用</h2>
+      <p class="sec-sub" data-i18n="start.sub">不改任何 vLLM 参数，自动加载。需要 Kernel 级证据时，把 <code style="font-family:var(--mono);font-size:.92em">vllm serve</code> 换成 <code style="font-family:var(--mono);font-size:.92em">pping-vllm serve</code> 即可。</p>
+    </div>
+    <div class="paths-grid">
+      <div class="path-card">
+        <div class="pnum" data-i18n="start.1.n">01 · 零依赖试玩</div>
+        <h3 data-i18n="start.1.h">离线 demo</h3>
+        <div class="pd" data-i18n="start.1.d">无需 GPU / vLLM，注入合成指标，约 7s 后终端打印诊断。</div>
+        <div class="code"><span class="pfx">$</span> <span class="cmd">pip install pping-lang</span><br><span class="pfx">$</span> <span class="cmd">python -m examples.embedded.demo</span></div>
+        <div class="pfoot">dashboard → <span class="mono">localhost:8765</span></div>
+      </div>
+      <div class="path-card feat">
+        <div class="pnum" data-i18n="start.2.n">02 · 接入 vLLM</div>
+        <h3 data-i18n="start.2.h">基础接入</h3>
+        <div class="pd" data-i18n="start.2.d">KPI / Roofline / NVML / 诊断，自动加载，不改参数。</div>
+        <div class="code"><span class="pfx">$</span> <span class="cmd">pip install pping-lang</span><br><span class="pfx">$</span> <span class="cmd">vllm serve &lt;model&gt;</span></div>
+        <div class="pfoot" data-i18n="start.2.f">启动日志输出 <span class="mono">[pping-lang] dashboard → …</span></div>
+      </div>
+      <div class="path-card">
+        <div class="pnum" data-i18n="start.3.n">03 · 完整证据</div>
+        <h3 data-i18n="start.3.h">+ Kernel 采集</h3>
+        <div class="pd" data-i18n="start.3.d">额外开 PC Sampling 的「为什么慢」。薄包装，透传所有参数。</div>
+        <div class="code"><span class="pfx">$</span> <span class="cmd">pip install pping-lang</span><br><span class="pfx">$</span> <span class="cmd">pping-vllm serve &lt;model&gt;</span></div>
+        <div class="pfoot" data-i18n="start.3.f">现编 <span class="mono">libppingcupti.so</span>，编不出则自动降级为基础接入</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ===================== COMPATIBILITY ===================== -->
+<section id="compat" class="sec-alt">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="sec-tag" data-i18n="compat.tag">兼容性</div>
+      <h2 class="sec" data-i18n="compat.h2">跑在哪、采到什么</h2>
+    </div>
+    <div class="grid2" style="gap:30px;align-items:start">
+      <div>
+        <h4 style="font-size:14px;font-weight:700;color:var(--text-strong);margin-bottom:12px" data-i18n="compat.vllm.h">vLLM 版本支持</h4>
+        <table class="ctbl">
+          <thead><tr><th>vLLM</th><th data-i18n="compat.status">状态</th><th>Scheduler</th><th>Iteration</th><th>perf_stats</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">0.20+</td><td><span class="tag-pill rec" data-i18n="compat.rec">推荐</span></td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td></tr>
+            <tr><td class="mono">0.13.x</td><td><span class="tag-pill sup" data-i18n="compat.sup">支持</span></td><td class="yes">✓</td><td class="yes">✓</td><td class="no">✗</td></tr>
+            <tr><td class="mono">&lt; 0.13</td><td><span class="tag-pill no" data-i18n="compat.no">不支持</span></td><td class="no">—</td><td class="no">—</td><td class="no">—</td></tr>
+          </tbody>
+        </table>
+        <p style="font-size:12.5px;color:var(--muted);margin-top:12px;line-height:1.55" data-i18n="compat.vllm.note"><code style="font-family:var(--mono)">perf_stats</code> 是 MFU / 显存带宽利用 / 实测 Roofline 的数据源，仅 0.20+ 提供。缺失时 Roofline 切 analytical，其余功能不变。</p>
+      </div>
+      <div>
+        <h4 style="font-size:14px;font-weight:700;color:var(--text-strong);margin-bottom:12px" data-i18n="compat.gpu.h">已识别 GPU（BF16 峰值 / 带宽）</h4>
+        <table class="ctbl">
+          <thead><tr><th data-i18n="compat.gen">代际</th><th data-i18n="compat.dev">设备</th></tr></thead>
+          <tbody>
+            <tr><td><b>Blackwell</b></td><td class="mono" style="font-size:12px">B200 · B100</td></tr>
+            <tr><td><b>Hopper</b></td><td class="mono" style="font-size:12px">H200 · H100 SXM/PCIe/NVL · A100</td></tr>
+            <tr><td><b data-i18n="compat.ada.dc">Ada 数据中心</b></td><td class="mono" style="font-size:12px">L40S · L40 · L4</td></tr>
+            <tr><td><b data-i18n="compat.ada.desk">Ada 桌面/移动</b></td><td class="mono" style="font-size:12px">RTX 4090 … 4060 · 5060 Ti</td></tr>
+            <tr><td><b data-i18n="compat.old">旧代</b></td><td class="mono" style="font-size:12px">A30 · A10G · A10 · V100 · T4 · RTX 3090</td></tr>
+          </tbody>
+        </table>
+        <p style="font-size:12.5px;color:var(--muted);margin-top:12px;line-height:1.55" data-i18n="compat.gpu.note">未识别的 GPU 不影响指标采集，仅跳过依赖峰值的派生量。Linux 原生支持；Windows 经 WSL2 + Ubuntu。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ===================== ROADMAP ===================== -->
+<section id="roadmap">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="sec-tag" data-i18n="road.tag">路线图</div>
+      <h2 class="sec" data-i18n="road.h2">从单机 Embedded 到 K8s 多副本</h2>
+    </div>
+    <div class="road">
+      <div class="rcard now">
+        <span class="badge-now" data-i18n="road.now">当前</span>
+        <div class="rv">v0.1</div><div class="rmode">Embedded</div>
+        <h3 data-i18n="road.1.h">单机本地，pip 装即用</h3>
+        <p data-i18n="road.1.p">dashboard + 规则引擎 + bench。目标场景：单机本地开发、单卡 / 单 Pod 部署。</p>
+      </div>
+      <div class="rcard">
+        <div class="rv">v0.2</div><div class="rmode">Sidecar / Centralized</div>
+        <h3 data-i18n="road.2.h">独立 server 进程</h3>
+        <p data-i18n="road.2.p">Docker 镜像、Helm chart、K8s 多副本指标聚合。面向生产侧部署。</p>
+      </div>
+      <div class="rcard">
+        <div class="rv">v0.3</div><div class="rmode">Stateless</div>
+        <h3 data-i18n="road.3.h">OTel-native</h3>
+        <p data-i18n="road.3.p">基于已有 Prometheus / Tempo 后端的诊断，复用现有可观测栈。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== FOOTER ===================== -->
+<footer>
+  <div class="wrap">
+    <div class="foot-grid">
+      <div class="foot-brand">
+        <a href="#top" class="brand">
+          <span class="brand-mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></span>
+          <span class="name">pping-lang</span>
+        </a>
+        <p data-i18n="foot.tagline">vLLM 性能诊断插件 —— 实时指标采集、规则化分析、结构化建议。Pre-alpha，Apache 2.0。</p>
+        <div class="cite">@software{pping_lang,
+  title  = {pping-lang: A diagnostic plugin for vLLM},
+  author = {Leon},
+  year   = {2026},
+  url    = {https://github.com/leon-hf/pping-lang},
+}</div>
+      </div>
+      <div class="foot-links">
+        <div class="foot-col">
+          <h5 data-i18n="foot.project">项目</h5>
+          <a href="https://github.com/leon-hf/pping-lang" target="_blank" rel="noopener" data-i18n="foot.repo">GitHub 仓库</a>
+          <a href="https://pypi.org/project/pping-lang/" target="_blank" rel="noopener" data-i18n="foot.pypi">PyPI 包</a>
+          <a href="https://github.com/leon-hf/pping-lang/blob/main/CHANGELOG.md" target="_blank" rel="noopener">CHANGELOG</a>
+          <a href="https://github.com/leon-hf/pping-lang/issues/new" target="_blank" rel="noopener" data-i18n="foot.issue">提 Issue</a>
+        </div>
+        <div class="foot-col">
+          <h5 data-i18n="foot.ref">参考</h5>
+          <a href="https://github.com/vllm-project/vllm" target="_blank" rel="noopener">vLLM</a>
+          <a href="https://docs.nvidia.com/deploy/nvml-api/" target="_blank" rel="noopener">NVIDIA NVML</a>
+          <a href="https://github.com/leon-hf/pping-lang/blob/main/README.md" target="_blank" rel="noopener">README (中文)</a>
+        </div>
+      </div>
+    </div>
+    <div class="foot-bottom">
+      <span>© 2026 Leon · Licensed under Apache License 2.0</span>
+      <span data-i18n="foot.stamp">本页数据采集自 runw · RTX 5060 Ti · vLLM 0.21.0 · 2026-06</span>
+    </div>
+  </div>
+</footer>
+
+<script>
+/* ============ embedded real data (captured from live runw) ============ */
+const ROOFLINE = {
+  peak: { compute_tflops: 94.9, mem_bw_tbs: 0.448 },
+  points: [
+    [8,1.64],[8,1.56],[8,1.60],[8,1.78],[8,1.64],[8,1.60],[8,1.67],[8,1.59],[8,1.64],
+    [8,1.61],[8,1.64],[8,1.63],[8,1.60],[8,1.61],[8,1.54],[8,1.70],[8,1.69],[8,1.60],
+    [7,1.45],[7,1.36],[7,1.46],[7,1.41],[7,1.39],[7,1.58],[8,1.66],[8,1.61],[8,1.50],
+    [8,1.69],[8,1.63],[8,1.57],[46,9.93],[48,9.94]
+  ]
+};
+const LATENCY = {
+  t:    [84,88,92,96,100,104,108,112,116],
+  ttft_p50:[17.0,13.2,13.1,17.1,16.6,16.8,17.2,17.3,17.2],
+  ttft_p99:[30.1,18.0,18.1,17.9,17.8,17.8,18.1,18.2,19.1],
+  tpot_p50:[4.93,4.93,4.88,4.88,4.86,4.87,4.90,4.91,4.90],
+  tpot_p99:[5.28,5.00,5.05,4.97,4.91,4.91,5.04,5.03,5.02]
+};
+const RULES = [
+  {id:"regime-classify",sev:"info",
+    zh:{name:"算术强度 vs 脊点（Roofline 定位）",kind:"分类",check:"派生：AI vs 脊点",hyp:"AI < 脊点 → 访存受限；否则计算受限。memory-bound 且 SM util 高时：util 虚高是物理极限，非优化空间。",rx:null},
+    en:{name:"Arithmetic intensity vs ridge point (Roofline)",kind:"classifier",check:"derived: AI vs ridge point",hyp:"AI < ridge → memory-bound; else compute-bound. When memory-bound with high SM util, the util is a physical ceiling, not headroom.",rx:null}},
+  {id:"S1",sev:"warning",pre:null,
+    zh:{name:"TTFT p99 超 SLA",kind:"症状",check:"vllm.req.ttft_ms · p99 > sla_ttft_p99_ms（2000ms / 60s）",hyp:"首 Token 慢（相对该业务 SLA）。",rx:null},
+    en:{name:"TTFT p99 over SLA",kind:"symptom",check:"vllm.req.ttft_ms · p99 > sla_ttft_p99_ms (2000ms / 60s)",hyp:"Slow first token (relative to this workload's SLA).",rx:null}},
+  {id:"S2",sev:"warning",pre:null,
+    zh:{name:"TPOT p99 超 SLA",kind:"症状",check:"vllm.req.tpot_ms · p99 > sla_tpot_p99_ms（50ms / 60s）",hyp:"出字慢（相对该业务 SLA）。",rx:null},
+    en:{name:"TPOT p99 over SLA",kind:"symptom",check:"vllm.req.tpot_ms · p99 > sla_tpot_p99_ms (50ms / 60s)",hyp:"Slow inter-token output (relative to this workload's SLA).",rx:null}},
+  {id:"S4",sev:"warning",pre:null,
+    zh:{name:"KV 用量高或发生抢占",kind:"症状",check:"kv_cache_usage ≥ 0.9（avg/10s） 或 preempted_reqs > 0",hyp:"显存吃紧 / 已在抢占。",rx:null},
+    en:{name:"High KV usage or preemption",kind:"symptom",check:"kv_cache_usage ≥ 0.9 (avg/10s) OR preempted_reqs > 0",hyp:"Memory pressure / already preempting.",rx:null}},
+  {id:"S5",sev:"warning",pre:null,
+    zh:{name:"TTFT p99/p50 偏大",kind:"症状",check:"ttft_ms · p99/p50 > tail_ratio（5 / 60s）",hyp:"首 Token 时延尾部发散（多数快、少数奇慢）。",rx:null},
+    en:{name:"TTFT p99/p50 tail spread",kind:"symptom",check:"ttft_ms · p99/p50 > tail_ratio (5 / 60s)",hyp:"First-token latency tail diverges (most fast, a few oddly slow).",rx:null}},
+  {id:"D1a",sev:"info",pre:"S1,S5",
+    zh:{name:"平均 prompt 偏长",kind:"事实",check:"prompt_tokens · avg > 2048（60s）",hyp:"长输入 → prefill 重 / 长请求占 token budget，即便分块预填充也会拖尾。",rx:"PD 分离 / 优先级调度 / 调 max_num_batched_tokens / 限 max_output_tokens。"},
+    en:{name:"Average prompt is long",kind:"fact",check:"prompt_tokens · avg > 2048 (60s)",hyp:"Long inputs → heavy prefill / long requests eat the token budget; even chunked prefill drags the tail.",rx:"PD disaggregation / priority scheduling / tune max_num_batched_tokens / cap max_output_tokens."}},
+  {id:"D1b",sev:"info",pre:"S1,S5",
+    zh:{name:"等待队列偏长",kind:"事实",check:"waiting_reqs · avg > 50（30s）",hyp:"请求在排队。",rx:"扩 prefill 容量 / 降 max_num_seqs / 检查上游限流。"},
+    en:{name:"Waiting queue is long",kind:"fact",check:"waiting_reqs · avg > 50 (30s)",hyp:"Requests are queuing.",rx:"Expand prefill capacity / lower max_num_seqs / check upstream rate limiting."}},
+  {id:"D1c",sev:"info",pre:"S1",
+    zh:{name:"MFU 偏低",kind:"事实",check:"perf.mfu_ratio · avg < 0.2（60s）· regime=compute_bound",hyp:"处于计算受限区但算力没打满（prefill 算力不足）。",rx:"升级算力卡 / FP8→FP4 / 启用 FlashAttention-3。"},
+    en:{name:"MFU is low",kind:"fact",check:"perf.mfu_ratio · avg < 0.2 (60s) · regime=compute_bound",hyp:"In the compute-bound regime but compute isn't saturated (prefill under-utilizing the GPU).",rx:"Upgrade to a higher-FLOP GPU / FP8→FP4 / enable FlashAttention-3."}},
+  {id:"D2a",sev:"info",pre:"S2",
+    zh:{name:"MBU 接近峰值",kind:"事实",check:"gpu.mem_util_pct · avg > 85（30s）",hyp:"贴近带宽屋顶（访存受限）。",rx:"投机解码 / KV 量化（FP8）/ 换更高带宽 GPU。"},
+    en:{name:"MBU near peak",kind:"fact",check:"gpu.mem_util_pct · avg > 85 (30s)",hyp:"Hugging the bandwidth roof (memory-bound).",rx:"Speculative decoding / KV quantization (FP8) / higher-bandwidth GPU."}},
+  {id:"D2b",sev:"info",pre:"S2",
+    zh:{name:"并发（running）偏小",kind:"事实",check:"running_reqs · avg ≤ 4（30s）",hyp:"并发太低，没摊薄权重搬运。",rx:"提高客户端并发 / 调 max_num_seqs。"},
+    en:{name:"Running batch is small",kind:"fact",check:"running_reqs · avg ≤ 4 (30s)",hyp:"Concurrency too low — weight movement isn't amortized.",rx:"Raise client concurrency / tune max_num_seqs."}},
+  {id:"D3a",sev:"info",pre:null,
+    zh:{name:"MFU、MBU 双低",kind:"事实",check:"mfu_ratio < 0.2 且 mem_util_pct < 50",hyp:"两个屋顶都没贴近 —— 算力、带宽都有富余，瓶颈不在硬件（可能是 batch 没拼起来 / launch 开销 / 小算子未融合）。",rx:"检查 batch 是否拼起来 / Continuous Batching / CUDA Graph / 算子融合。"},
+    en:{name:"Both MFU and MBU low",kind:"fact",check:"mfu_ratio < 0.2 AND mem_util_pct < 50",hyp:"Neither roof is hugged — compute and bandwidth both have headroom; the bottleneck isn't the hardware (batch not formed / launch overhead / unfused small ops).",rx:"Check batch formation / Continuous Batching / CUDA Graph / operator fusion."}},
+  {id:"D3c",sev:"info",pre:null,
+    zh:{name:"前缀缓存命中率低",kind:"事实",check:"prefix_cache_hit_ratio · avg < 0.1（60s）",hyp:"前缀缓存命中低（若 workload 有公共前缀，则有复用空间；否则正常）。",rx:"检查 prompt 模板公共前缀 / 开 enable_prefix_caching / RadixAttention。"},
+    en:{name:"Low prefix cache hit rate",kind:"fact",check:"prefix_cache_hit_ratio · avg < 0.1 (60s)",hyp:"Low prefix cache hits (if the workload shares prefixes there's reuse to gain; otherwise normal).",rx:"Check prompt template shared prefix / enable_prefix_caching / RadixAttention."}},
+  {id:"D4a",sev:"critical",pre:"S4",
+    zh:{name:"KV 用量高且发生抢占",kind:"事实",check:"kv_cache_usage ≥ 0.9 且 preempted_reqs > 0",hyp:"KV 池将满并已触发抢占。",rx:"KV 量化（FP8）/ 降 max_model_len / KV offload。"},
+    en:{name:"High KV usage with preemption",kind:"fact",check:"kv_cache_usage ≥ 0.9 AND preempted_reqs > 0",hyp:"KV pool near full and already triggering preemption.",rx:"KV quantization (FP8) / lower max_model_len / KV offload."}}
+];
+
+/* ============ i18n dictionary (English overrides; Chinese is inline default) ============ */
+const I18N_EN = {
+  "nav.why":"Why","nav.demo":"Live demo","nav.how":"How it works","nav.start":"Get started","nav.compat":"Compatibility","nav.roadmap":"Roadmap",
+  "hero.eyebrow":"Every number on this page was captured live on runw · RTX 5060 Ti · vLLM 0.21",
+  "hero.title":'Turn vLLM\'s metrics<br>into <span class="accent">conclusions you can act on</span>',
+  "hero.lede":'<strong>pping-lang</strong> consumes vLLM\'s <code style="font-family:var(--mono);font-size:.9em">stat_logger_plugins</code> callbacks directly, pairs them with NVML physical-layer sampling, and runs a <strong>fact-rule engine</strong> that emits structured diagnoses and optimization paths — not just charts, but where the bottleneck is and which knob to turn.',
+  "hero.tests":"444 passing","hero.copy":"Copy","hero.cta":"See live demo ↓",
+  "prob.tag":"The problem","prob.h2":"Metrics are visible — but they don't conclude",
+  "prob.sub":"Prometheus + Grafana will chart every vLLM metric, but the moment you ask \"what's the bottleneck right now, which param do I touch\", it's on you. Two concrete gaps:",
+  "prob.c1.h":"Ambiguous metric semantics",
+  "prob.c1.p":'<code>GPU utilization</code> is SM duty cycle, not throughput. During LLM decode it often sits at <b>70–90%</b> while MFU is under <b>5%</b> — because it\'s memory-bound. Staring at the utilization number won\'t surface that.',
+  "prob.c2.h":"No actionability",
+  "prob.c2.p":'Rule firing, threshold alerts, root-cause correlation — all left to you to build. From a wall of curves to \"raise <code>max_num_seqs</code> or turn on prefix caching\" is a whole layer of domain knowledge.',
+  "thesis.s1":"Collect","thesis.s2":"Fact","thesis.s3":"Signed inference","thesis.s4":"Prescription",
+  "thesis.p":'pping-lang splits diagnosis into two layers: <b>the rule name = an objective measured fact</b> (e.g. "TPOT p99 over SLA"); root cause and fix are listed separately as a <b>signed inference</b>. Facts and guesses sit apart, so you can judge what to trust.',
+  "demo.tag":"Live demo","demo.h2":"Dashboard · the full picture of one real benchmark",
+  "demo.sub":"Below is real data from all four dashboard tabs after driving <b>502 requests</b> (concurrency 8, builtin mixed-short dataset) at a vLLM 0.21 (Qwen2.5-0.5B) on an RTX 5060 Ti on runw. Click the tabs.",
+  "tab.live":"Live","tab.rules":"Rules","tab.bench":"Bench",
+  "kpi.ttft.s":"p50 18.5 · well under SLA","kpi.tpot.s":"p50 4.89 · steady",
+  "kpi.tput.l":"Output throughput","kpi.tput.s":"aggregate · 8 concurrent",
+  "kpi.decode.l":"Per-request decode",
+  "kpi.util.l":"GPU utilization","kpi.bw.l":"Mem bandwidth","kpi.mem.l":"Mem used",
+  "kpi.kv.s":"plenty free","kpi.run.s":"full concurrency","kpi.wait.s":"no queue",
+  "kpi.prefix.l":"Prefix hit","kpi.prefix.s":"mixed-short reuse","kpi.preempt.l":"Preemption","kpi.preempt.s":"no preemption",
+  "roof.h":"Roofline · arithmetic intensity vs measured throughput",
+  "roof.sub":"each point = one iteration · derived from iter-level token counts and model param count (analytical)",
+  "roof.auto":"auto verdict","roof.verdict":"Memory-bound (the typical decode state)",
+  "roof.compute":"Compute util","roof.bandwidth":"Bandwidth util","roof.paths":"Optimization paths",
+  "roof.p1":"Grow batch until KV cache usage nears 80%","roof.p2":"Enable speculative decoding","roof.p3":"Weight quantization (AWQ / GPTQ)","roof.p4":"Move to a higher-bandwidth GPU",
+  "lat.h":"Latency over time · TTFT / TPOT","lat.sub":"p50 / p99 trend, bucketed (4s/bucket) over the bench window",
+  "lat.note":'This host runs <b>--enforce-eager</b>, so vLLM exports no <code style="font-family:var(--mono)">perf_stats</code> — MFU / padding ratio show empty and Roofline falls back to analytical mode (≈ ±20% on absolute values). Other KPIs are unaffected.',
+  "diag.h":"Diagnoses · fact + signed inference",
+  "diag.sub":"The rule engine evaluates every 1s by default. The examples below show the output shape when a rule fires (this bench was healthy — no alerts).",
+  "diag.infer":"signed inference →",
+  "diag.e1.t":"GPU utilization low","diag.e1.f":'GPU average utilization <code>3%</code> has stayed below 50% for 30s',"diag.e1.r":"Check whether batch degenerated to 1, or enable continuous batching",
+  "diag.e2.t":"Batch degeneration","diag.e2.f":'Concurrent requests <code>1.0</code> ≤ 1.0 for 30s',"diag.e2.r":"Increase client concurrency, or check whether upstream routing serializes",
+  "ker.note":'Kernel-level capture needs the <b>full integration</b> (<code style="font-family:var(--mono)">pping-vllm serve</code>, PC Sampling via CUPTI injection). Below are real hotspots from a representative cudagraph run — showing how deep "why is it slow" can drill.',
+  "ker.h":"GPU kernel time share · top hotspots + operator class",
+  "ker.sub":"descending by GPU time · each kernel expands to a dual-track \"deepest hotspot\" (source line / SASS offset)",
+  "ker.cls":"Class","ker.samples":"Samples","ker.hotspot":"Deepest hotspot",
+  "ker.sassrow":"◆ SASS offset level (closed-source cutlass)","ker.sassrow2":"◆ SASS offset level (closed-source cutlass)",
+  "ker.tiny":"tiny","ker.tiny2":"tiny",
+  "ker.srcrow":"● block_table.py:326 (source line)","ker.srcrow2":"● topk_topp_triton.py:136 (source line)",
+  "ker.attr.h":"Launch origin · attribute even closed-source GEMM",
+  "ker.attr.sub":"CUPTI hooks cuLaunchKernel to walk the host call stack — 84% of GPU time comes from one nn.Linear chain",
+  "ker.attr.pct":"84% GPU time","ker.attr.from":"↑ from","ker.attr.from2":"↑ from","ker.attr.from3":"↑ from",
+  "ker.de.h":"Deep Evidence · why is it slow","ker.de.sub":"dominant stall reason at the hottest SASS offset (PerfWorks drill-down)","ker.de.other":"other",
+  "ker.de.note":'<b>The kernel name is itself a diagnosis:</b> <code style="font-family:var(--mono)">wmma_bf16_16x16_128x1</code> → tile 16×16 / bf16 / wmma class. Small tile = small matrix, low concurrency → echoes Roofline\'s "grow the batch". <b>long_scoreboard 80%</b> = waiting on memory → hard proof of memory-bound.',
+  "ker.bound":'<b>Value boundary (honest disclosure):</b> "drill to the .py source line" only works on Triton / self-compiled kernel paths. For this workload <b>98% of time is in closed-source cutlass/flash GEMM</b> → there you only get SASS offset + stall reason + kernel-name decode. That\'s a physical fact, not a bug.',
+  "rules.summary":'<b style="color:var(--text-strong)">13</b> curated rules active · thresholds centralized in one <span class="mono" style="font-size:12px">SLA config</span> — edit in the dashboard and it hot-reloads without restarting vLLM.',
+  "bench.desc":'Built-in OpenAI-protocol static load tester · scenario <span class="mono" style="font-size:12px">showcase-demo</span> · concurrency 8 · 35s · dataset builtin:mixed-short · output 128 tok',
+  "bench.total":"Total requests","bench.okerr":"OK / errors","bench.tput":"Output throughput","bench.tokens":"Output tokens",
+  "bench.slo":"SLO met","bench.slo2":"SLO met","bench.dist.h":"Client-side measured latency distribution","bench.dist.sub":"client-side measurement · n = 502","bench.metric":"Metric",
+  "how.tag":"How it works","how.h2":"Dual-path architecture · the hot path only does O(1) enqueue",
+  "how.sub":"Design premise: any plugin exception must never touch the vLLM inference path. So the hot path does no I/O, no serialization, no lock waits; the live panel reads the in-memory ring buffer directly, persistence is append-only JSONL.",
+  "perf.col1":"Hot-path cost","perf.col2":"Measured","perf.col3":"Note","perf.once":"per call","perf.once2":"per call",
+  "perf.r1":"pure enqueue, no I/O","perf.r2":"incl. collector parse","perf.r3l":"Sink bg flush thread CPU","perf.r3":"separate daemon thread","perf.r4l":"Resident memory","perf.r4":"bounded ring buffer",
+  "feat.tag":"Capabilities","feat.h2":"Four capabilities, one pip install",
+  "feat.1.h":"Live KPI + Roofline","feat.1.p":"12 KPIs (TTFT/TPOT/throughput/KV/queue/MFU/utilization/memory/Prefix/Padding/preemption), a Roofline scatter with an auto-verdict card, and multi-statistic TTFT/TPOT/E2E trends. Hover any item for the formula and reading.",
+  "feat.2.h":"Kernel-level PC Sampling","feat.2.p":'Per-GPU-kernel time share + operator class + dominant stall. Triton kernels resolve straight to a <code>.py</code> source line; closed-source libraries get SASS hotspots + kernel-name decode; even closed-source GEMM attributes back to the <code>nn.Linear</code> that launched it.',
+  "feat.3.h":"Fact-rule diagnosis engine","feat.3.p":"13 curated rules in a three-part \"fact + signed inference + prescription\" shape. Thresholds live in one SLA config, hot-reloaded from the dashboard without restarting vLLM; add/remove custom rules, evaluated by the same engine as the curated ones.",
+  "feat.4.h":"Built-in load tester","feat.4.p":"Kick off OpenAI-protocol static load tests from the dashboard — configure endpoint / concurrency / duration / prompt source, get client-side TTFT/TPOT/E2E distributions and SLO checks. Three built-in datasets: short Q&A / long docs / code.",
+  "start.tag":"Get started","start.h2":"Three ways in, usable right after pip install",
+  "start.sub":'No vLLM params changed, auto-loaded. Need kernel-level evidence? Swap <code style="font-family:var(--mono);font-size:.92em">vllm serve</code> for <code style="font-family:var(--mono);font-size:.92em">pping-vllm serve</code>.',
+  "start.1.n":"01 · zero-dependency","start.1.h":"Offline demo","start.1.d":"No GPU / vLLM needed; injects synthetic metrics, prints a diagnosis in the terminal after ~7s.",
+  "start.2.n":"02 · attach to vLLM","start.2.h":"Basic integration","start.2.d":"KPI / Roofline / NVML / diagnoses, auto-loaded, no param changes.","start.2.f":'Startup log prints <span class="mono">[pping-lang] dashboard → …</span>',
+  "start.3.n":"03 · full evidence","start.3.h":"+ Kernel capture","start.3.d":"Adds PC-Sampling's \"why is it slow\". A thin wrapper that passes through all args.","start.3.f":'Compiles <span class="mono">libppingcupti.so</span> on the fly; if it can\'t, falls back to basic integration',
+  "compat.tag":"Compatibility","compat.h2":"Where it runs, what it captures",
+  "compat.vllm.h":"vLLM version support","compat.status":"Status","compat.rec":"recommended","compat.sup":"supported","compat.no":"unsupported",
+  "compat.vllm.note":'<code style="font-family:var(--mono)">perf_stats</code> is the data source for MFU / mem-bandwidth util / measured Roofline, available only on 0.20+. When absent, Roofline switches to analytical; everything else is unchanged.',
+  "compat.gpu.h":"Recognized GPUs (BF16 peak / bandwidth)","compat.gen":"Generation","compat.dev":"Devices",
+  "compat.ada.dc":"Ada data center","compat.ada.desk":"Ada desktop/mobile","compat.old":"Older",
+  "compat.gpu.note":"Unrecognized GPUs don't block metric capture — only peak-dependent derived values are skipped. Native on Linux; Windows via WSL2 + Ubuntu.",
+  "road.tag":"Roadmap","road.h2":"From single-host Embedded to K8s multi-replica","road.now":"current",
+  "road.1.h":"Single host, usable on pip install","road.1.p":"dashboard + rule engine + bench. Target: single-host local dev, single-GPU / single-Pod deployment.",
+  "road.2.h":"Standalone server process","road.2.p":"Docker image, Helm chart, K8s multi-replica metric aggregation. For production-side deployment.",
+  "road.3.h":"OTel-native","road.3.p":"Diagnosis on top of existing Prometheus / Tempo backends, reusing your current observability stack.",
+  "foot.tagline":"A performance-diagnosis plugin for vLLM — live metric capture, rule-based analysis, structured suggestions. Pre-alpha, Apache 2.0.",
+  "foot.project":"Project","foot.repo":"GitHub repo","foot.pypi":"PyPI package","foot.issue":"Open an issue","foot.ref":"References",
+  "foot.stamp":"Data on this page captured on runw · RTX 5060 Ti · vLLM 0.21.0 · 2026-06"
+};
+
+/* ============ rendering ============ */
+let curLang = 'zh';
+let chartRoof = null, chartLat = null;
+
+function renderRules(lang){
+  const box = document.getElementById('rules-list');
+  if(!box) return;
+  const kindColor = {'症状':'var(--amber)','事实':'var(--brand)','分类':'var(--teal)','symptom':'var(--amber)','fact':'var(--brand)','classifier':'var(--teal)'};
+  const inferLabel = lang==='en' ? 'signed inference →' : '署名推断 →';
+  const rxLabel = lang==='en' ? 'prescription →' : '处方 →';
+  const preLabel = lang==='en' ? 'requires' : '前置';
+  const checkLabel = lang==='en' ? 'check' : '判定';
+  box.innerHTML = RULES.map(r=>{
+    const d = r[lang];
+    return `<div class="diag ${r.sev}">
+      <div class="sev"></div>
+      <div class="body">
+        <div class="top">
+          <span class="ttl">${d.name}</span>
+          <span class="lvl">${r.sev}</span>
+          <span class="mono" style="font-size:10px;color:#fff;background:${kindColor[d.kind]||'var(--muted)'};padding:1px 7px;border-radius:5px;font-weight:700">${d.kind}</span>
+          <span class="mono" style="font-size:11px;color:var(--muted-2)">${r.id}</span>
+          ${r.pre?`<span class="mono" style="font-size:10px;color:var(--muted-2)">${preLabel} ${r.pre}</span>`:''}
+        </div>
+        <div class="fact"><span style="color:var(--muted-2);font-size:11px">${checkLabel} </span><code>${d.check}</code></div>
+        <div class="rx"><b style="color:var(--brand-strong)">${inferLabel}</b> ${d.hyp}${d.rx?`<br><b>${rxLabel}</b> ${d.rx}`:''}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+const CHART_LBL = {
+  zh:{ai:'算术强度 (FLOP/byte) · 脊点 ≈ 212',tput:'吞吐 (TFLOPS)',memRoof:'带宽屋顶',compRoof:'算力屋顶',decode:'decode 迭代',prefill:'prefill 迭代'},
+  en:{ai:'Arithmetic intensity (FLOP/byte) · ridge ≈ 212',tput:'Throughput (TFLOPS)',memRoof:'BW roof',compRoof:'Compute roof',decode:'decode iters',prefill:'prefill iters'}
+};
+
+function drawCharts(lang){
+  if(typeof Chart==='undefined') return;
+  Chart.defaults.font.family="Inter, system-ui, sans-serif";
+  Chart.defaults.font.size=11;
+  Chart.defaults.color="#9a9aa4";
+  const L = CHART_LBL[lang];
+  if(chartRoof){chartRoof.destroy();chartRoof=null}
+  if(chartLat){chartLat.destroy();chartLat=null}
+
+  const peakC=ROOFLINE.peak.compute_tflops, bw=ROOFLINE.peak.mem_bw_tbs;
+  const knee=peakC/bw;
+  const memRoof=[{x:0.5,y:0.5*bw},{x:knee,y:peakC}];
+  const compRoof=[{x:knee,y:peakC},{x:2000,y:peakC}];
+  const decode=ROOFLINE.points.filter(p=>p[0]<20).map(p=>({x:p[0],y:p[1]}));
+  const prefill=ROOFLINE.points.filter(p=>p[0]>=20).map(p=>({x:p[0],y:p[1]}));
+  const elR=document.getElementById('roofline');
+  if(elR) chartRoof=new Chart(elR,{
+    type:'scatter',
+    data:{datasets:[
+      {label:L.memRoof,data:memRoof,type:'line',borderColor:'#5b5bd6',borderWidth:1.5,borderDash:[5,4],pointRadius:0,fill:false},
+      {label:L.compRoof,data:compRoof,type:'line',borderColor:'#d8483f',borderWidth:1.5,borderDash:[5,4],pointRadius:0,fill:false},
+      {label:L.decode,data:decode,backgroundColor:'rgba(91,91,214,.6)',borderColor:'#5b5bd6',pointRadius:4,pointHoverRadius:6},
+      {label:L.prefill,data:prefill,backgroundColor:'rgba(13,139,128,.7)',borderColor:'#0d8b80',pointRadius:5,pointHoverRadius:7}
+    ]},
+    options:{maintainAspectRatio:false,
+      plugins:{legend:{labels:{boxWidth:10,boxHeight:10,padding:9,font:{size:10}}},
+        tooltip:{callbacks:{label:c=>`AI ${c.parsed.x.toFixed(0)} FLOP/B · ${c.parsed.y.toFixed(2)} TFLOPS`}}},
+      scales:{
+        x:{type:'logarithmic',title:{display:true,text:L.ai,color:'#6e6e78'},grid:{color:'#f0f0f4'},min:0.5,max:2000},
+        y:{type:'logarithmic',title:{display:true,text:L.tput,color:'#6e6e78'},grid:{color:'#f0f0f4'},min:0.3,max:200}
+      }}
+  });
+
+  const elL=document.getElementById('latency');
+  if(elL) chartLat=new Chart(elL,{
+    type:'line',
+    data:{labels:LATENCY.t.map(t=>t+'s'),datasets:[
+      {label:'TTFT p99',data:LATENCY.ttft_p99,borderColor:'#5b5bd6',backgroundColor:'rgba(91,91,214,.08)',borderWidth:2,tension:.35,pointRadius:2,fill:true,yAxisID:'y'},
+      {label:'TTFT p50',data:LATENCY.ttft_p50,borderColor:'#9d9df0',borderWidth:1.5,borderDash:[4,3],tension:.35,pointRadius:0,yAxisID:'y'},
+      {label:'TPOT p99',data:LATENCY.tpot_p99,borderColor:'#0d8b80',backgroundColor:'rgba(13,139,128,.06)',borderWidth:2,tension:.35,pointRadius:2,yAxisID:'y2'},
+      {label:'TPOT p50',data:LATENCY.tpot_p50,borderColor:'#5bd6c4',borderWidth:1.5,borderDash:[4,3],tension:.35,pointRadius:0,yAxisID:'y2'}
+    ]},
+    options:{maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
+      plugins:{legend:{labels:{boxWidth:10,boxHeight:10,padding:8,font:{size:10}}}},
+      scales:{
+        x:{grid:{display:false}},
+        y:{position:'left',title:{display:true,text:'TTFT ms',color:'#5b5bd6'},grid:{color:'#f0f0f4'},min:0,suggestedMax:34},
+        y2:{position:'right',title:{display:true,text:'TPOT ms',color:'#0d8b80'},grid:{display:false},min:0,suggestedMax:8}
+      }}
+  });
+}
+
+function applyLang(lang){
+  curLang = lang;
+  document.documentElement.lang = lang==='en' ? 'en' : 'zh-CN';
+  document.querySelectorAll('[data-i18n]').forEach(el=>{
+    if(el._zh===undefined) el._zh = el.innerHTML;
+    const k = el.dataset.i18n;
+    el.innerHTML = (lang==='en' && I18N_EN[k]!==undefined) ? I18N_EN[k] : el._zh;
+  });
+  document.querySelectorAll('.lang-toggle button').forEach(b=>b.classList.toggle('active', b.dataset.lang===lang));
+  renderRules(lang);
+  drawCharts(lang);
+  try{localStorage.setItem('pping_site_lang',lang)}catch(e){}
+}
+
+/* ============ tab switching ============ */
+document.querySelectorAll('.demo-tabs button').forEach(b=>{
+  b.addEventListener('click',()=>{
+    document.querySelectorAll('.demo-tabs button').forEach(x=>x.classList.remove('active'));
+    document.querySelectorAll('.tab-pane').forEach(x=>x.classList.remove('active'));
+    b.classList.add('active');
+    document.querySelector(`.tab-pane[data-pane="${b.dataset.tab}"]`).classList.add('active');
+  });
+});
+
+/* ============ init ============ */
+window.addEventListener('load',()=>{
+  let saved='zh';
+  try{ saved = localStorage.getItem('pping_site_lang') || 'zh'; }catch(e){}
+  applyLang(saved);
+});
+</script>
+</body>
+</html>

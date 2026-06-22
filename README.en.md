@@ -11,8 +11,11 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-43a047)](LICENSE)
 [![Status](https://img.shields.io/badge/status-pre--alpha-fb8c00)](#project-status)
 [![Tests](https://img.shields.io/badge/tests-442%20passing-43a047)](tests/)
+[![Live Demo](https://img.shields.io/badge/%F0%9F%8C%90%20Live%20Demo-online-5b5bd6)](https://leon-hf.github.io/pping-lang/)
 
-[Quick Start](#quick-start) · [Dashboard](#dashboard) · [Compatibility](#compatibility) · [Architecture](#architecture) · [Roadmap](#roadmap)
+**[🌐 Live Demo →](https://leon-hf.github.io/pping-lang/)** — see the dashboard captured from a live GPU box right in your browser (Live / Kernel / Rules / Bench, bilingual)
+
+[Live Demo](https://leon-hf.github.io/pping-lang/) · [Quick Start](#quick-start) · [Dashboard](#dashboard) · [Compatibility](#compatibility) · [Architecture](#architecture) · [Roadmap](#roadmap)
 
 </div>
 
