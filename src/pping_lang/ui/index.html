@@ -1134,10 +1134,10 @@
                 </div>
                 <span class="sev-pill" :class="d.severity" x-text="d.severity"></span>
               </div>
-              <div class="diag-msg" x-text="d.message"></div>
+              <div class="diag-msg" x-text="ruleI18n(d.rule_id, 'name', d.message)"></div>
               <div class="diag-sug">
                 <div class="diag-sug-label" x-text="t('common.suggestion')"></div>
-                <div class="diag-sug-text" x-text="d.suggestion"></div>
+                <div class="diag-sug-text" x-text="diagSuggestion(d)"></div>
               </div>
             </div>
           </div>
@@ -1161,7 +1161,7 @@
           <div class="rule-row">
             <div class="rule-row-main">
               <div class="rule-row-head">
-                <h3 class="rule-row-name" x-text="r.name"></h3>
+                <h3 class="rule-row-name" x-text="ruleI18n(r.id, 'name', r.name)"></h3>
                 <span class="sev-pill" :class="r.severity" x-text="r.severity"></span>
                 <span class="badge default" x-text="t('kind.'+r.kind)"></span>
                 <template x-if="r.requires_regime"><span class="badge" x-text="t('rules.onlyRegime')+r.requires_regime"></span></template>
@@ -1190,13 +1190,13 @@
               <template x-if="r.hypothesis">
                 <div class="diag-sug" style="margin-top:10px;">
                   <div class="diag-sug-label" x-text="t('common.inference')"></div>
-                  <div class="diag-sug-text" x-text="r.hypothesis"></div>
+                  <div class="diag-sug-text" x-text="ruleI18n(r.id, 'hypothesis', r.hypothesis)"></div>
                 </div>
               </template>
               <template x-if="r.suggestion">
                 <div class="diag-sug" style="margin-top:8px;">
                   <div class="diag-sug-label" x-text="t('common.suggestion')"></div>
-                  <div class="diag-sug-text" x-text="r.suggestion"></div>
+                  <div class="diag-sug-text" x-text="ruleI18n(r.id, 'suggestion', r.suggestion)"></div>
                 </div>
               </template>
             </div>
@@ -1217,7 +1217,7 @@
           <div class="rule-row">
             <div class="rule-row-main">
               <div class="rule-row-head">
-                <h3 class="rule-row-name" x-text="r.name"></h3>
+                <h3 class="rule-row-name" x-text="ruleI18n(r.id, 'name', r.name)"></h3>
                 <span class="sev-pill" :class="r.severity" x-text="r.severity"></span>
                 <span class="badge" x-text="t('kind.custom')"></span>
               </div>
@@ -1233,13 +1233,13 @@
               <template x-if="r.hypothesis">
                 <div class="diag-sug" style="margin-top:10px;">
                   <div class="diag-sug-label" x-text="t('common.inference')"></div>
-                  <div class="diag-sug-text" x-text="r.hypothesis"></div>
+                  <div class="diag-sug-text" x-text="ruleI18n(r.id, 'hypothesis', r.hypothesis)"></div>
                 </div>
               </template>
               <template x-if="r.suggestion">
                 <div class="diag-sug" style="margin-top:8px;">
                   <div class="diag-sug-label" x-text="t('common.suggestion')"></div>
-                  <div class="diag-sug-text" x-text="r.suggestion"></div>
+                  <div class="diag-sug-text" x-text="ruleI18n(r.id, 'suggestion', r.suggestion)"></div>
                 </div>
               </template>
             </div>
