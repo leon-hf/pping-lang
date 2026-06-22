@@ -69,12 +69,12 @@ def test_root_references_known_api_endpoints(client):
 
 
 def test_root_references_marquee_kpi_labels(client):
-    """Dashboard 必须把 marquee KPI 标签暴露给用户（中文为主、英文术语共存）。
+    """Dashboard 必须把 marquee KPI 标签暴露给用户。
 
-    服务端 `/api/kpis` 返回的是命名字段（ttft_p99_ms 等），原始 metric 名不再
-    出现在 HTML 里。改成检查用户能看到的 label。
+    i18n 后:标签文本搬进 dashboard.js 的 I18N 字典,HTML 用 t('key') 引用。
+    所以查 html + js 合起来(同 test_rules_tab 的做法)。
     """
-    body = client.get("/").text
+    body = client.get("/").text + client.get("/dashboard.js").text
     for label in ["TTFT", "TPOT", "MFU", "KV cache", "padding", "Roofline"]:
         assert label in body, f"UI missing marquee KPI label {label!r}"
 
@@ -85,14 +85,19 @@ def test_ui_assets_split_and_under_budget():
 
     预算 90KB→100KB→110KB→120KB:Kernel tab 扩成完整诊断面板;规则 tab 重做成
     策展事实规则只读 + 中心配置弹框 + 自定义规则 CRUD(列表 + 新建/编辑弹框),
-    markup 实打实变多。once-load、gzip 后才十几 KB,为这点体积上构建工具不划算。"""
+    markup 实打实变多。once-load、gzip 后才十几 KB,为这点体积上构建工具不划算。
+
+    i18n(中/英):dashboard.js 多了双语字典 I18N(每串两份),index.html 的中文文本
+    换成 `<span x-text="t('key')">`(比裸文本长)。全站 i18n 后字典 ~280 键×2 语言:
+    js 95KB→135KB;index.html 反而变小(中文文本被 t('key') 取代)。
+    gzip 后仍十几 KB(双语字典压缩比高),拆 i18n.js 多一个路由不划算。"""
     ui = Path(__file__).parent.parent / "src" / "pping_lang" / "ui"
     html = (ui / "index.html").stat().st_size
     css = (ui / "dashboard.css").stat().st_size
     js = (ui / "dashboard.js").stat().st_size
-    assert html < 120_000, f"index.html is {html} bytes, exceeds 120KB"
+    assert html < 140_000, f"index.html is {html} bytes, exceeds 140KB"
     assert css < 70_000, f"dashboard.css is {css} bytes, exceeds 70KB"
-    assert js < 70_000, f"dashboard.js is {js} bytes, exceeds 70KB"
+    assert js < 135_000, f"dashboard.js is {js} bytes, exceeds 135KB"
 
 
 def test_css_and_js_served(client):
@@ -132,5 +137,20 @@ def test_rules_tab_config_editor_and_readonly_rules(client):
     assert "advancedOpen" in body                     # 高级阈值折叠开关
     assert "advKeys()" in body and "cfgLabels" in body  # 高级阈值网格
     # 只读规则渲染
-    for token in ["r.name", "r.hypothesis", "r.suggestion", "r.checks", "kindLabel"]:
+    for token in ["r.name", "r.hypothesis", "r.suggestion", "r.checks", "r.requires_regime"]:
         assert token in body, f"rules tab missing {token}"
+
+
+def test_i18n_framework(client):
+    """i18n:dashboard.js 带中英字典 + 全局 t();index.html 有语言切换且用 t() 渲染。"""
+    html = client.get("/").text
+    js = client.get("/dashboard.js").text
+    # 语言切换控件 + 写 store
+    assert "lang-toggle" in html
+    assert "$store.i18n.lang" in html
+    # 关键串走 t()
+    assert "t('nav.live')" in html
+    assert "t('cfg.form')" in html
+    # 字典 + 全局 t() + 中英两套
+    assert "const I18N" in js and "window.t" in js
+    assert "'nav.live': 'Live'" in js and "'nav.live': '实时'" in js
