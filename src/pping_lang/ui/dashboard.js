@@ -1243,7 +1243,7 @@ function benchTab() {
       // Discover builtin prompt datasets — populates the dropdown below
       // the synthetic default. Fails open: dropdown still has 'synthetic'.
       try {
-        const r = await fetch('/api/bench/prompt-sources').then(r => r.json());
+        const r = await fetch('/api/bench/prompt-sources?lang=' + _uiLang()).then(r => r.json());
         if (r.sources && r.sources.length) {
           this.promptSources = r.sources;
         }
@@ -1252,6 +1252,13 @@ function benchTab() {
       }
       await this.refresh();
       this._timer = setInterval(() => this.refresh(), 3000);
+      // 切语言时重取 prompt-source 标签/描述(后端按 ?lang= 出双语)
+      this.$watch('$store.i18n.lang', async () => {
+        try {
+          const r = await fetch('/api/bench/prompt-sources?lang=' + _uiLang()).then(x => x.json());
+          if (r.sources && r.sources.length) this.promptSources = r.sources;
+        } catch (e) { /* fail-open */ }
+      });
     },
 
     onPromptSourceChange() {
