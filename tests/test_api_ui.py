@@ -88,7 +88,8 @@ def test_ui_assets_split_and_under_budget():
     markup 实打实变多。once-load、gzip 后才十几 KB,为这点体积上构建工具不划算。
 
     i18n(中/英):dashboard.js 多了双语字典 I18N(每串两份),index.html 的中文文本
-    换成 `<span x-text="t('key')">`(比裸文本长)。html 120KB→140KB、js 70KB→95KB。
+    换成 `<span x-text="t('key')">`(比裸文本长)。全站 i18n 后字典 ~280 键×2 语言:
+    js 95KB→135KB;index.html 反而变小(中文文本被 t('key') 取代)。
     gzip 后仍十几 KB(双语字典压缩比高),拆 i18n.js 多一个路由不划算。"""
     ui = Path(__file__).parent.parent / "src" / "pping_lang" / "ui"
     html = (ui / "index.html").stat().st_size
@@ -96,7 +97,7 @@ def test_ui_assets_split_and_under_budget():
     js = (ui / "dashboard.js").stat().st_size
     assert html < 140_000, f"index.html is {html} bytes, exceeds 140KB"
     assert css < 70_000, f"dashboard.css is {css} bytes, exceeds 70KB"
-    assert js < 95_000, f"dashboard.js is {js} bytes, exceeds 95KB"
+    assert js < 135_000, f"dashboard.js is {js} bytes, exceeds 135KB"
 
 
 def test_css_and_js_served(client):
