@@ -128,6 +128,38 @@
   }
   .meta-sep { width: 1px; height: 13px; background: var(--border-strong); }
 
+  /* 右上角 GitHub 直达按钮(提 issue / star) */
+  .header-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 11px;
+    border-radius: 8px;
+    border: 1px solid var(--border-strong);
+    background: var(--surface);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 12.5px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    text-decoration: none;
+    transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.06s;
+  }
+  .header-link svg { width: 14px; height: 14px; stroke-width: 2.2; }
+  .header-link:hover {
+    background: var(--surface-tint);
+    border-color: var(--coral);
+    color: var(--coral-strong);
+    transform: translateY(-1px);
+  }
+  .header-link:active { transform: translateY(0); }
+  .header-link.star:hover {
+    background: #fdf6e3;
+    border-color: #d4a72c;
+    color: #9a6a00;
+  }
+  .header-link.star:hover svg { fill: #e3b341; stroke: #d4a72c; }
+
   /* === Tabs === */
   nav.tabs {
     padding: 0 36px;
@@ -956,6 +988,72 @@
     justify-content: space-between;
     align-items: center;
   }
+
+  /* 诊断配置:规则 tab 顶部常驻上下文条(业务形态 + SLA 常显,10 个阈值折进高级) */
+  .cfg-bar {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 13px;
+    margin-bottom: 26px;
+    overflow: hidden;
+  }
+  .cfg-bar-main {
+    display: flex;
+    align-items: center;
+    padding: 12px 16px;
+    flex-wrap: wrap;
+    row-gap: 12px;
+  }
+  .cfg-bar .cfg-seg {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 0 16px;
+    border-right: 1px solid var(--border);
+  }
+  .cfg-bar .cfg-seg:first-child { padding-left: 0; }
+  .cfg-bar .cfg-lbl { font-size: 12px; color: var(--muted); white-space: nowrap; }
+  .cfg-bar select, .cfg-bar input {
+    font-family: inherit;
+    font-size: 13.5px;
+    color: var(--text);
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    border-radius: 8px;
+    padding: 7px 10px;
+    outline: none;
+  }
+  .cfg-bar select:focus, .cfg-bar input:focus {
+    border-color: var(--coral);
+    box-shadow: 0 0 0 3px rgba(91, 91, 214, 0.12);
+  }
+  .cfg-bar .cfg-unit { position: relative; display: inline-flex; align-items: center; }
+  .cfg-bar .cfg-unit input { width: 94px; padding-right: 34px; }
+  .cfg-bar .cfg-unit i {
+    position: absolute; right: 10px; font-style: normal;
+    color: var(--muted); font-size: 12px; pointer-events: none;
+  }
+  .cfg-bar .cfg-spacer { flex: 1; min-width: 12px; }
+  .cfg-bar .cfg-acts { display: flex; align-items: center; gap: 8px; }
+  .cfg-adv-toggle {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: none; border: none; cursor: pointer;
+    font-family: inherit; font-size: 12.5px; font-weight: 600;
+    color: var(--coral); padding: 6px 6px;
+  }
+  .cfg-adv-toggle:hover { opacity: 0.8; }
+  .cfg-adv-toggle .chev {
+    display: inline-block; font-size: 16px; line-height: 1;
+    transition: transform 0.15s ease;
+  }
+  .cfg-adv-toggle.open .chev { transform: rotate(90deg); }
+  .cfg-adv {
+    border-top: 1px solid var(--border);
+    background: var(--surface-alt);
+    padding: 16px;
+  }
+  .cfg-adv-head { font-size: 12px; color: var(--muted); margin-bottom: 14px; }
+  .cfg-adv .cfg-adv-grid { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
   .btn {
     background: var(--text-strong);
     color: white;
