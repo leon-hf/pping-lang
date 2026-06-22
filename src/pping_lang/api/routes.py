@@ -384,6 +384,11 @@ _BUILTIN_DESCRIPTIONS: dict[str, str] = {
     "mixed-long":  "长上下文：文档摘要 / 长指令 / 转录稿（每条 1000–3000 tokens）",
     "code":        "代码相关：写函数 / 解释代码 / 修 bug / 重构",
 }
+_BUILTIN_DESCRIPTIONS_EN: dict[str, str] = {
+    "mixed-short": "Short Q&A + chit-chat + simple instructions (50–180 tokens each)",
+    "mixed-long":  "Long context: doc summaries / long instructions / transcripts (1000–3000 tokens each)",
+    "code":        "Code-related: write functions / explain code / fix bugs / refactor",
+}
 
 logger = logging.getLogger(__name__)
 
@@ -848,7 +853,7 @@ def build_app(
         lang: str = Query("zh", description="findings 语言 zh/en"),
     ) -> dict[str, Any]:
         if cupti is None:
-            return {"available": False, "error": "CUPTI collector 未配置", "findings": []}
+            return {"available": False, "error": "CUPTI collector not configured", "findings": []}
         result = cupti.run_deep_evidence(window_s=window, period_log2=period_log2)
         result["findings"] = _stall_findings(result, lang)
         return result
@@ -1117,7 +1122,7 @@ def build_app(
     # === 自定义规则 CRUD —— 与策展规则同一评估器(DiagnosisEngine 每轮一起评)===
     def _require_store():
         if custom_store is None:
-            raise HTTPException(503, "自定义规则不可用(诊断引擎未运行)")
+            raise HTTPException(503, "Custom rules unavailable (diagnosis engine not running)")
         return custom_store
 
     @app.post("/api/diagnosis_rules/custom")
@@ -1126,7 +1131,7 @@ def build_app(
         try:
             return store.add(body)
         except (ValueError, TypeError) as e:
-            raise HTTPException(400, f"非法规则: {e}")
+            raise HTTPException(400, f"Invalid rule: {e}")
 
     @app.put("/api/diagnosis_rules/custom/{rule_id}")
     def update_custom_rule(rule_id: str, body: dict = Body(...)) -> dict[str, Any]:
@@ -1134,15 +1139,15 @@ def build_app(
         try:
             return store.update(rule_id, body)
         except KeyError:
-            raise HTTPException(404, f"未找到自定义规则 {rule_id!r}")
+            raise HTTPException(404, f"Custom rule {rule_id!r} not found")
         except (ValueError, TypeError) as e:
-            raise HTTPException(400, f"非法规则: {e}")
+            raise HTTPException(400, f"Invalid rule: {e}")
 
     @app.delete("/api/diagnosis_rules/custom/{rule_id}")
     def delete_custom_rule(rule_id: str) -> dict[str, Any]:
         store = _require_store()
         if not store.delete(rule_id):
-            raise HTTPException(404, f"未找到自定义规则 {rule_id!r}")
+            raise HTTPException(404, f"Custom rule {rule_id!r} not found")
         return {"deleted": rule_id}
 
     # === PUT /api/diagnosis_config — 改中心 SLA/阈值,热生效 ===
@@ -1436,18 +1441,18 @@ def build_app(
         per_level_s: int = Query(25, ge=5, le=120, description="每档压测秒数"),
     ) -> dict[str, Any]:
         if _scaling["running"]:
-            raise HTTPException(409, "scaling sweep 已在运行")
+            raise HTTPException(409, "scaling sweep already running")
         if not _params:
-            raise HTTPException(400, "缺模型架构信息,无法把 tok/s 换算成 TFLOPs")
+            raise HTTPException(400, "Missing model architecture info; cannot convert tok/s to TFLOPs")
         model = _served_model()
         if not model:
-            raise HTTPException(400, "拿不到模型名(vllm_config 不可用)")
+            raise HTTPException(400, "Cannot resolve model name (vllm_config unavailable)")
         try:
             lv = sorted({int(x) for x in levels.split(",") if x.strip()})
         except ValueError:
-            raise HTTPException(422, f"levels 解析失败: {levels!r}")
+            raise HTTPException(422, f"Failed to parse levels: {levels!r}")
         if not lv:
-            raise HTTPException(422, "levels 为空")
+            raise HTTPException(422, "levels is empty")
         _scaling.update(running=True, error=None, progress="启动中")
         asyncio.create_task(_run_scaling_sweep(lv, per_level_s, _vllm_base_url(), model))
         return {"status": "running", "levels": lv, "per_level_s": per_level_s,
@@ -1460,16 +1465,21 @@ def build_app(
 
     # === GET /api/bench/prompt-sources — UI dropdown discovery ===
     @app.get("/api/bench/prompt-sources")
-    def bench_prompt_sources() -> dict[str, Any]:
+    def bench_prompt_sources(
+        lang: str = Query("zh", description="标签语言 zh/en"),
+    ) -> dict[str, Any]:
         from pping_lang.bench.prompts import available_builtins, load_prompts
+        en = lang == "en"
         items: list[dict[str, Any]] = [
             {
                 "value": "synthetic",
-                "label": "合成填充 (synthetic)",
-                "description": "按 prompt_tokens 长度循环 the quick brown fox 句模板",
+                "label": "Synthetic fill (synthetic)" if en else "合成填充 (synthetic)",
+                "description": ("Repeats the 'the quick brown fox' template up to prompt_tokens length"
+                                if en else "按 prompt_tokens 长度循环 the quick brown fox 句模板"),
                 "uses_prompt_tokens": True,
             },
         ]
+        descs = _BUILTIN_DESCRIPTIONS_EN if en else _BUILTIN_DESCRIPTIONS
         for name in available_builtins():
             try:
                 size = len(load_prompts(f"builtin:{name}"))
@@ -1477,8 +1487,8 @@ def build_app(
                 size = 0
             items.append({
                 "value": f"builtin:{name}",
-                "label": f"内置 {name} ({size} 条)",
-                "description": _BUILTIN_DESCRIPTIONS.get(name, ""),
+                "label": (f"Built-in {name} ({size})" if en else f"内置 {name} ({size} 条)"),
+                "description": descs.get(name, ""),
                 "uses_prompt_tokens": False,
             })
         return {"sources": items}
