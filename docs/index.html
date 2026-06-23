@@ -333,6 +333,26 @@ h2.sec{font-size:clamp(26px,3.5vw,34px);font-weight:800;letter-spacing:-.02em;co
 .rcard p{font-size:13px;color:var(--muted);line-height:1.55}
 .rcard .badge-now{display:inline-block;font-size:10px;font-weight:700;background:var(--brand);color:#fff;padding:2px 8px;border-radius:999px;margin-bottom:8px}
 
+/* positioning comparison */
+.cmp-wrap{overflow-x:auto;border-radius:14px;border:1px solid var(--border);box-shadow:var(--shadow-sm)}
+.cmp{width:100%;min-width:700px;border-collapse:separate;border-spacing:0;font-size:13.5px;background:var(--surface)}
+.cmp th,.cmp td{padding:13px 16px;text-align:left;border-bottom:1px solid var(--border);vertical-align:top}
+.cmp thead th{font-size:14px;font-weight:700;color:var(--muted);background:var(--surface-tint);white-space:nowrap}
+.cmp thead th .th-sub{display:block;font-size:11px;font-weight:500;color:var(--muted-3);margin-top:2px}
+.cmp thead th.us{color:#fff;background:var(--brand);font-size:15px}
+.cmp tbody tr:last-child td{border-bottom:none}
+.cmp td.dim{font-weight:700;color:var(--text-strong);white-space:nowrap}
+.cmp td{color:var(--muted);line-height:1.5}
+.cmp td.us{background:var(--brand-soft);color:var(--text)}
+.cmp .yes{color:var(--green);font-weight:800}
+.cmp .no{color:var(--muted-3);font-weight:800}
+.cmp .mid{color:var(--amber);font-weight:800}
+.pos-punch{display:flex;gap:14px;align-items:flex-start;margin-top:20px;background:var(--surface);border:1px solid var(--border-strong);border-radius:14px;padding:20px 22px;box-shadow:var(--shadow-sm)}
+.pos-punch svg{width:26px;height:26px;flex:none;color:var(--brand);margin-top:2px}
+.pos-punch p{font-size:14px;color:var(--text);line-height:1.65}
+.pos-punch p b{color:var(--text-strong);font-weight:700}
+.pos-note{display:block;font-size:12.5px;color:var(--muted-2);margin-top:8px}
+
 /* autopilot */
 .ap-badge{font-size:10.5px;font-weight:700;background:var(--amber-soft);color:var(--amber);padding:2px 10px;border-radius:999px;letter-spacing:.01em;text-transform:none}
 .ap-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:18px}
@@ -418,6 +438,7 @@ footer{border-top:1px solid var(--border);padding:48px 0 60px;margin-top:40px}
     </a>
     <nav class="links">
       <a href="#problem" data-i18n="nav.why">为什么</a>
+      <a href="#positioning" data-i18n="nav.vs">vs Nsight</a>
       <a href="#demo" data-i18n="nav.demo">实时演示</a>
       <a href="#autopilot" style="color:var(--brand-strong);font-weight:700">Autopilot</a>
       <a href="#how" data-i18n="nav.how">工作原理</a>
@@ -441,12 +462,12 @@ footer{border-top:1px solid var(--border);padding:48px 0 60px;margin-top:40px}
 <!-- ===================== HERO ===================== -->
 <div class="hero">
   <div class="wrap">
-    <span class="eyebrow"><span class="dot"></span><span data-i18n="hero.eyebrow">本页所有数据来自 runw 真机实跑 · RTX 5060 Ti · vLLM 0.21</span></span>
-    <h1 class="title" data-i18n="hero.title">不止诊断 vLLM，<br>更<span class="accent">自己把它调到最优</span></h1>
+    <span class="eyebrow"><span class="dot"></span><span data-i18n="hero.eyebrow">LLM serving 的实时剖析器 · Nsight 级深度，常驻 + 自己下结论</span></span>
+    <h1 class="title" data-i18n="hero.title">不止诊断 vLLM，<br><span class="accent">Autopilot 自主调优，零干扰</span></h1>
     <p class="lede" data-i18n="hero.lede">
-      <strong>pping-lang</strong> 先把 vLLM 的指标变成结构化诊断（已上线）；旗舰能力
-      <b>Autopilot</b>（设计中）再让 LLM 在沙盒里「诊断 → 改一个旋钮 → 压测打分 → 留下 / 回滚」迭代，
-      给出实测验证过的最优配置 —— <strong>看得见、动得了、还自证</strong>。
+      <strong>pping-lang</strong> 把你本来要开 <b>Nsight Compute</b> 才看得到的 kernel 级深度
+      （PC sampling / stall reason / SASS / 源码行）做成<strong>常驻、低开销、还附结论</strong>，而且懂 vLLM 语义。
+      旗舰能力 <b>Autopilot</b>（设计中）更进一步：不止诊断，还在沙盒里自动把 vLLM 调到最优。
     </p>
     <div class="badges">
       <span class="badge">PyPI <b>v0.1.0a1</b></span>
@@ -492,6 +513,44 @@ footer{border-top:1px solid var(--border);padding:48px 0 60px;margin-top:40px}
         <span class="step"><span class="em" style="background:var(--green)"></span><span data-i18n="thesis.s4">处方</span></span>
       </div>
       <p data-i18n="thesis.p">pping-lang 把诊断拆成两层：<b>规则名 = 测出来的客观事实</b>（如「TPOT p99 超 SLA」），根因与优化建议作为<b>署名推断</b>单列。事实和猜测分开摆，你能判断该不该信。</p>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ===================== POSITIONING (vs Nsight / Grafana) ===================== -->
+<section id="positioning">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="sec-tag" data-i18n="pos.tag">定位</div>
+      <h2 class="sec" data-i18n="pos.h2">占 Nsight 与 Grafana 之间的空位</h2>
+      <p class="sec-sub" data-i18n="pos.sub">Nsight 给你最深的证据，但要抓一段、离线看、还得自己是专家；Grafana 常驻实时，但看不到 kernel、也不下结论。pping-lang 把两边的好处合在一起 —— 常驻 + Nsight 级深度 + 直接给结论，而且懂 vLLM。</p>
+    </div>
+    <div class="cmp-wrap">
+      <table class="cmp">
+        <thead>
+          <tr>
+            <th data-i18n="pos.dim">维度</th>
+            <th>Nsight <span class="th-sub" data-i18n="pos.ns.sub">Systems / Compute</span></th>
+            <th>Grafana <span class="th-sub" data-i18n="pos.gf.sub">+ Prometheus</span></th>
+            <th class="us">pping-lang</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td class="dim" data-i18n="pos.r1">运行方式</td><td data-i18n="pos.r1n">抓一段 → 离线看报告</td><td data-i18n="pos.r1g">常驻、实时</td><td class="us" data-i18n="pos.r1u">常驻、实时（跑在 vLLM 进程里）</td></tr>
+          <tr><td class="dim" data-i18n="pos.r2">Kernel 级深度</td><td><span class="yes">✓</span> <span data-i18n="pos.r2n">极深</span></td><td><span class="no">✗</span></td><td class="us"><span class="yes">✓</span> <span data-i18n="pos.r2u">同源 CUPTI · PC sampling / stall / SASS / 源码行</span></td></tr>
+          <tr><td class="dim" data-i18n="pos.r3">给结论</td><td><span class="no">✗</span> <span data-i18n="pos.r3n">原始证据，自己读</span></td><td><span class="no">✗</span> <span data-i18n="pos.r3g">曲线，自己判</span></td><td class="us"><span class="yes">✓</span> <span data-i18n="pos.r3u">事实 + 署名推断 + 处方</span></td></tr>
+          <tr><td class="dim" data-i18n="pos.r4">懂 vLLM 语义</td><td><span class="no">✗</span> <span data-i18n="pos.r4n">只见 CUDA kernel</span></td><td><span class="mid">~</span> <span data-i18n="pos.r4g">见指标不解释</span></td><td class="us"><span class="yes">✓</span> <span data-i18n="pos.r4u">TTFT / TPOT / KV / batch / prefix / roofline</span></td></tr>
+          <tr><td class="dim" data-i18n="pos.r5">开销</td><td data-i18n="pos.r5n">高（详细 profiling 串行化 kernel）</td><td data-i18n="pos.r5g">低</td><td class="us" data-i18n="pos.r5u">低（~5% 预算，常驻）</td></tr>
+          <tr><td class="dim" data-i18n="pos.r6">上手门槛</td><td data-i18n="pos.r6n">高（要懂 GPU 架构）</td><td data-i18n="pos.r6g">中</td><td class="us" data-i18n="pos.r6u">低（直接给人话）</td></tr>
+          <tr><td class="dim" data-i18n="pos.r7">生产常驻</td><td><span class="no">✗</span> <span data-i18n="pos.r7n">一次性诊断</span></td><td><span class="yes">✓</span></td><td class="us"><span class="yes">✓</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="pos-punch">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/><path d="M11 8v6M8 11h6"/></svg>
+      <p data-i18n="pos.punch"><b>Nsight 是实验室显微镜</b> —— 偶尔抓一段、离线看、给原始证据；<b>pping-lang 是常驻听诊器</b> —— 一直跑、说人话、还告诉你该调哪个旋钮。<span class="pos-note">要对单个自定义 kernel 做穷尽式微架构调优，Nsight Compute 仍是那把专业手术刀；pping-lang 主打的是常驻、serving 级、结论驱动的那条线。</span></p>
     </div>
   </div>
 </section>
@@ -613,7 +672,7 @@ footer{border-top:1px solid var(--border);padding:48px 0 60px;margin-top:40px}
       <div class="tab-pane" data-pane="kernel">
         <div class="notice" style="margin-top:0;margin-bottom:20px">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01" stroke-linecap="round"/></svg>
-          <span data-i18n="ker.note">Kernel 级采集需<b>完整接入</b>（<code style="font-family:var(--mono)">pping-vllm serve</code>，经 CUPTI 注入做 PC Sampling）。下方为一次代表性 cudagraph 运行采到的真实热点 —— 演示「为什么慢」能下钻到什么粒度。</span>
+          <span data-i18n="ker.note"><b>这正是你会打开 Nsight Compute 看的东西 —— 但常驻、在仪表盘里、还附结论。</b> Kernel 级采集需完整接入（<code style="font-family:var(--mono)">pping-vllm serve</code>，经 CUPTI 注入做 PC Sampling）。下方为一次代表性 cudagraph 运行采到的真实热点。</span>
         </div>
 
         <div class="panel">
@@ -867,7 +926,7 @@ footer{border-top:1px solid var(--border);padding:48px 0 60px;margin-top:40px}
       <div class="feature"><div class="fi" style="background:var(--brand-soft);color:var(--brand)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 14l4-4 3 3 5-6"/></svg></div>
         <div><h3 data-i18n="feat.1.h">实时 KPI + Roofline</h3><p data-i18n="feat.1.p">12 项 KPI（TTFT/TPOT/吞吐/KV/队列/MFU/利用率/显存/Prefix/Padding/抢占），Roofline 散点带自动结论卡，TTFT/TPOT/E2E 多统计量时序。每项 hover 看公式与解读。</p></div></div>
       <div class="feature"><div class="fi" style="background:var(--teal-soft);color:var(--teal)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17l6-6-6-6"/><path d="M12 19h8"/></svg></div>
-        <div><h3 data-i18n="feat.2.h">Kernel 级 PC Sampling</h3><p data-i18n="feat.2.p">每个 GPU kernel 的时间占比 + 算子分类 + 主导 stall。Triton kernel 直定位到 <code>.py</code> 源码行；闭源库给 SASS 热点 + kernel 名解码；闭源 GEMM 也能归因到调它的 <code>nn.Linear</code>。</p></div></div>
+        <div><h3 data-i18n="feat.2.h">Kernel 级 PC Sampling（Nsight 级）</h3><p data-i18n="feat.2.p"><b>Nsight Compute 级的证据，常驻采集：</b>每个 GPU kernel 的时间占比 + 算子分类 + 主导 stall。Triton kernel 直定位到 <code>.py</code> 源码行；闭源库给 SASS 热点 + kernel 名解码；闭源 GEMM 也能归因到调它的 <code>nn.Linear</code>。</p></div></div>
       <div class="feature"><div class="fi" style="background:var(--amber-soft);color:var(--amber)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></div>
         <div><h3 data-i18n="feat.3.h">事实规则诊断引擎</h3><p data-i18n="feat.3.p">13 条策展规则，「事实 + 署名推断 + 处方」三段式。阈值集中在一份 SLA 配置，仪表盘热加载，不重启 vLLM；可增删自定义规则，与策展规则同一引擎评估。</p></div></div>
       <div class="feature"><div class="fi" style="background:var(--green-soft);color:var(--green)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9z"/></svg></div>
@@ -1108,10 +1167,21 @@ const RULES = [
 
 /* ============ i18n dictionary (English overrides; Chinese is inline default) ============ */
 const I18N_EN = {
-  "nav.why":"Why","nav.demo":"Live demo","nav.how":"How it works","nav.start":"Get started","nav.compat":"Compatibility","nav.roadmap":"Roadmap",
-  "hero.eyebrow":"Every number on this page was captured live on runw · RTX 5060 Ti · vLLM 0.21",
-  "hero.title":'Beyond diagnosing vLLM —<br>it <span class="accent">auto-tunes it to the best</span>',
-  "hero.lede":'<strong>pping-lang</strong> first turns vLLM\'s metrics into structured diagnoses (shipping today); its flagship <b>Autopilot</b> (in design) then lets an LLM iterate in a sandbox — diagnose → turn one knob → benchmark → keep / revert — and hand you an <strong>empirically-verified</strong> optimal config. It sees, it acts, it proves itself.',
+  "nav.why":"Why","nav.vs":"vs Nsight","nav.demo":"Live demo","nav.how":"How it works","nav.start":"Get started","nav.compat":"Compatibility","nav.roadmap":"Roadmap",
+  "hero.eyebrow":"A live profiler for LLM serving · Nsight-grade depth, always-on + it concludes",
+  "hero.title":'More than diagnosing vLLM —<br><span class="accent">Autopilot auto-tunes it, zero interference</span>',
+  "hero.lede":'<strong>pping-lang</strong> takes the kernel-level depth you\'d open <b>Nsight Compute</b> for (PC sampling / stall reasons / SASS / source lines) and makes it <strong>always-on, low-overhead, with a conclusion attached</strong> — and it speaks vLLM. Its flagship <b>Autopilot</b> (in design) goes further: it doesn\'t just diagnose — it auto-tunes vLLM in a sandbox.',
+  "pos.tag":"Positioning","pos.h2":"Filling the gap between Nsight and Grafana",
+  "pos.sub":"Nsight gives you the deepest evidence — but you capture a window, read it offline, and you\'d better be an expert; Grafana is always-on and live, but can\'t see kernels and won\'t conclude. pping-lang combines both — always-on + Nsight-grade depth + conclusions, and it speaks vLLM.",
+  "pos.dim":"Dimension","pos.ns.sub":"Systems / Compute","pos.gf.sub":"+ Prometheus",
+  "pos.r1":"How it runs","pos.r1n":"capture a window → read offline","pos.r1g":"always-on, live","pos.r1u":"always-on, live (inside the vLLM process)",
+  "pos.r2":"Kernel-level depth","pos.r2n":"very deep","pos.r2u":"same CUPTI source · PC sampling / stall / SASS / source line",
+  "pos.r3":"Gives conclusions","pos.r3n":"raw evidence, read it yourself","pos.r3g":"curves, judge them yourself","pos.r3u":"fact + signed inference + prescription",
+  "pos.r4":"vLLM-aware","pos.r4n":"sees only CUDA kernels","pos.r4g":"sees metrics, doesn\'t explain","pos.r4u":"TTFT / TPOT / KV / batch / prefix / roofline",
+  "pos.r5":"Overhead","pos.r5n":"high (detailed profiling serializes kernels)","pos.r5g":"low","pos.r5u":"low (~5% budget, always-on)",
+  "pos.r6":"Skill needed","pos.r6n":"high (GPU architecture)","pos.r6g":"medium","pos.r6u":"low (plain-language output)",
+  "pos.r7":"Runs in production","pos.r7n":"one-off diagnosis",
+  "pos.punch":'<b>Nsight is the lab microscope</b> — pulled out occasionally, read offline, raw evidence; <b>pping-lang is the always-on stethoscope</b> — runs continuously, speaks plainly, and tells you which knob to turn.<span class="pos-note">For exhaustive microarchitectural tuning of a single custom kernel, Nsight Compute is still that precision scalpel; pping-lang owns the continuous, serving-level, conclusion-driven lane.</span>',
   "hero.tests":"444 passing","hero.copy":"Copy","hero.cta":"See live demo ↓",
   "prob.tag":"The problem","prob.h2":"Metrics are visible — but they don't conclude",
   "prob.sub":"Prometheus + Grafana will chart every vLLM metric, but the moment you ask \"what's the bottleneck right now, which param do I touch\", it's on you. Two concrete gaps:",
@@ -1142,7 +1212,7 @@ const I18N_EN = {
   "diag.infer":"signed inference →",
   "diag.e1.t":"GPU utilization low","diag.e1.f":'GPU average utilization <code>3%</code> has stayed below 50% for 30s',"diag.e1.r":"Check whether batch degenerated to 1, or enable continuous batching",
   "diag.e2.t":"Batch degeneration","diag.e2.f":'Concurrent requests <code>1.0</code> ≤ 1.0 for 30s',"diag.e2.r":"Increase client concurrency, or check whether upstream routing serializes",
-  "ker.note":'Kernel-level capture needs the <b>full integration</b> (<code style="font-family:var(--mono)">pping-vllm serve</code>, PC Sampling via CUPTI injection). Below are real hotspots from a representative cudagraph run — showing how deep "why is it slow" can drill.',
+  "ker.note":'<b>This is exactly what you\'d open Nsight Compute for — but always-on, in your dashboard, with a conclusion attached.</b> Kernel-level capture needs the full integration (<code style="font-family:var(--mono)">pping-vllm serve</code>, PC Sampling via CUPTI injection). Below are real hotspots from a representative cudagraph run.',
   "ker.h":"GPU kernel time share · top hotspots + operator class",
   "ker.sub":"descending by GPU time · each kernel expands to a dual-track \"deepest hotspot\" (source line / SASS offset)",
   "ker.cls":"Class","ker.samples":"Samples","ker.hotspot":"Deepest hotspot",
@@ -1165,7 +1235,7 @@ const I18N_EN = {
   "perf.r1":"pure enqueue, no I/O","perf.r2":"incl. collector parse","perf.r3l":"Sink bg flush thread CPU","perf.r3":"separate daemon thread","perf.r4l":"Resident memory","perf.r4":"bounded ring buffer",
   "feat.tag":"Capabilities","feat.h2":"Four capabilities, one pip install",
   "feat.1.h":"Live KPI + Roofline","feat.1.p":"12 KPIs (TTFT/TPOT/throughput/KV/queue/MFU/utilization/memory/Prefix/Padding/preemption), a Roofline scatter with an auto-verdict card, and multi-statistic TTFT/TPOT/E2E trends. Hover any item for the formula and reading.",
-  "feat.2.h":"Kernel-level PC Sampling","feat.2.p":'Per-GPU-kernel time share + operator class + dominant stall. Triton kernels resolve straight to a <code>.py</code> source line; closed-source libraries get SASS hotspots + kernel-name decode; even closed-source GEMM attributes back to the <code>nn.Linear</code> that launched it.',
+  "feat.2.h":"Kernel-level PC Sampling (Nsight-grade)","feat.2.p":'<b>Nsight Compute-grade evidence, captured continuously:</b> per-GPU-kernel time share + operator class + dominant stall. Triton kernels resolve straight to a <code>.py</code> source line; closed-source libraries get SASS hotspots + kernel-name decode; even closed-source GEMM attributes back to the <code>nn.Linear</code> that launched it.',
   "feat.3.h":"Fact-rule diagnosis engine","feat.3.p":"13 curated rules in a three-part \"fact + signed inference + prescription\" shape. Thresholds live in one SLA config, hot-reloaded from the dashboard without restarting vLLM; add/remove custom rules, evaluated by the same engine as the curated ones.",
   "feat.4.h":"Built-in load tester","feat.4.p":"Kick off OpenAI-protocol static load tests from the dashboard — configure endpoint / concurrency / duration / prompt source, get client-side TTFT/TPOT/E2E distributions and SLO checks. Three built-in datasets: short Q&A / long docs / code.",
   "start.tag":"Get started","start.h2":"Three ways in, usable right after pip install",
