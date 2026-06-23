@@ -333,6 +333,65 @@ h2.sec{font-size:clamp(26px,3.5vw,34px);font-weight:800;letter-spacing:-.02em;co
 .rcard p{font-size:13px;color:var(--muted);line-height:1.55}
 .rcard .badge-now{display:inline-block;font-size:10px;font-weight:700;background:var(--brand);color:#fff;padding:2px 8px;border-radius:999px;margin-bottom:8px}
 
+/* autopilot */
+.ap-badge{font-size:10.5px;font-weight:700;background:var(--amber-soft);color:var(--amber);padding:2px 10px;border-radius:999px;letter-spacing:.01em;text-transform:none}
+.ap-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:18px}
+@media(max-width:820px){.ap-grid{grid-template-columns:1fr}}
+.ap-loop{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:20px 22px;display:flex;flex-direction:column}
+.ap-stage{display:flex;align-items:center;gap:14px;padding:8px 0;position:relative}
+.ap-stage:not(:last-child)::after{content:"";position:absolute;left:13px;top:36px;bottom:-8px;width:2px;background:var(--brand-soft)}
+.ap-stage .n{width:28px;height:28px;border-radius:50%;background:var(--grad);color:#fff;display:grid;place-items:center;font-size:13px;font-weight:700;flex:none;z-index:1}
+.ap-stage b{display:block;font-family:var(--mono);font-size:13px;color:var(--text-strong);font-weight:700}
+.ap-stage span{font-size:12.5px;color:var(--muted)}
+.ap-moat{background:linear-gradient(180deg,var(--brand-soft),#fff);border:1px solid var(--brand-soft);border-radius:14px;padding:22px}
+.ap-moat-h{font-size:14px;font-weight:800;color:var(--brand-strong);margin-bottom:14px}
+.ap-eyes{display:flex;gap:9px;margin-bottom:14px;flex-wrap:wrap}
+.ap-eye{display:flex;flex-direction:column;gap:1px;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:9px 13px;flex:1;min-width:96px}
+.ap-eye b{font-size:13px;color:var(--text-strong);font-weight:700}
+.ap-eye span{font-size:11px;color:var(--muted)}
+.ap-moat p{font-size:13px;color:var(--text);line-height:1.6}
+.ap-moat p b{color:var(--brand-strong)}
+.ap-trace-card{background:var(--surface);border:1px solid var(--border-strong);border-radius:16px;overflow:hidden;box-shadow:var(--shadow-md)}
+.ap-trace-top{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 20px;border-bottom:1px solid var(--border);background:var(--surface-tint);flex-wrap:wrap}
+.ap-trace-title{font-size:13px;font-weight:700;color:var(--text-strong);font-family:var(--mono)}
+.ap-preview-tag{font-size:11px;font-weight:600;color:var(--amber);background:var(--amber-soft);border-radius:999px;padding:3px 11px}
+.ap-trace{padding:4px 0}
+.ap-round{display:grid;grid-template-columns:46px 1fr 196px 78px;gap:14px;align-items:center;padding:12px 20px;border-bottom:1px solid var(--border)}
+@media(max-width:760px){.ap-round{grid-template-columns:38px 1fr;gap:6px 10px}.ap-round .ap-r-tput,.ap-round .ap-r-verdict{grid-column:2;text-align:left;justify-content:flex-start}}
+.ap-round:last-child{border-bottom:none}
+.ap-round.base{background:var(--surface-tint)}
+.ap-r-head{display:flex;flex-direction:column;gap:2px;align-items:flex-start}
+.ap-r-n{font-family:var(--mono);font-size:14px;font-weight:800;color:var(--brand-strong)}
+.ap-r-tag{font-size:9px;font-weight:700;color:var(--muted-2);text-transform:uppercase;letter-spacing:.04em}
+.ap-r-body{font-size:12.5px;min-width:0}
+.ap-r-cfg{font-size:11.5px;color:var(--muted)}
+.ap-r-diag,.ap-r-hyp{line-height:1.55}
+.ap-r-diag b{color:var(--teal);font-weight:700;font-size:10.5px;margin-right:6px;text-transform:uppercase;letter-spacing:.03em}
+.ap-r-hyp b{color:var(--brand-strong);font-weight:700;font-size:10.5px;margin-right:6px;text-transform:uppercase;letter-spacing:.03em}
+.ap-r-note{font-size:12.5px;color:var(--muted);line-height:1.55}
+.ap-r-tput{display:flex;align-items:center;gap:8px}
+.ap-bar{height:8px;border-radius:99px;background:var(--grad);flex:none;min-width:6px}
+.ap-round.rev .ap-bar{background:var(--muted-3)}
+.ap-tps{font-family:var(--mono);font-size:13px;font-weight:800;color:var(--text-strong);white-space:nowrap}
+.ap-tps small{font-size:10px;color:var(--muted-2);font-weight:600;margin-left:1px}
+.ap-delta{font-family:var(--mono);font-size:11px;font-weight:700;white-space:nowrap}
+.ap-delta.up{color:var(--green)}.ap-delta.down{color:var(--rose)}
+.ap-r-verdict{font-size:12px;font-weight:700;text-align:right;white-space:nowrap}
+.ap-r-verdict.kept{color:var(--green)}.ap-r-verdict.rev{color:var(--rose)}.ap-r-verdict.base{color:var(--muted-2)}.ap-r-verdict.stop{color:var(--muted)}
+.ap-result{padding:18px 20px;background:linear-gradient(180deg,var(--brand-soft),#fff);border-top:1px solid var(--border)}
+.ap-result-headline{font-size:15px;color:var(--text);margin-bottom:11px}
+.ap-result-headline b{color:var(--brand-strong);font-weight:800;font-size:18px}
+.ap-cmd{background:var(--text-strong);color:#e8e8f0;border-radius:9px;padding:11px 14px;font-family:var(--mono);font-size:12px;overflow-x:auto;white-space:nowrap}
+.ap-cmd .pfx{color:#7c6cf0}
+.ap-honest{font-size:12px;color:var(--muted);margin-top:12px;line-height:1.55;border-left:2px solid var(--amber-soft);padding-left:12px}
+/* roadmap flagship block */
+.ap-road{border:1px solid var(--brand-soft);background:linear-gradient(180deg,var(--brand-soft),#fff);border-radius:16px;padding:22px;margin-bottom:26px}
+.ap-road-head{display:flex;align-items:center;gap:11px;margin-bottom:6px}
+.ap-road-flag{font-size:10.5px;font-weight:700;background:var(--brand);color:#fff;padding:2px 10px;border-radius:999px}
+.ap-road-head h3{font-size:16px;font-weight:800;color:var(--text-strong)}
+.ap-road .rcard{background:var(--surface)}
+.ap-road-sub{font-size:12px;font-weight:700;color:var(--muted-2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:14px}
+
 /* footer */
 footer{border-top:1px solid var(--border);padding:48px 0 60px;margin-top:40px}
 .foot-grid{display:flex;justify-content:space-between;gap:30px;flex-wrap:wrap;align-items:flex-start}
@@ -360,6 +419,7 @@ footer{border-top:1px solid var(--border);padding:48px 0 60px;margin-top:40px}
     <nav class="links">
       <a href="#problem" data-i18n="nav.why">为什么</a>
       <a href="#demo" data-i18n="nav.demo">实时演示</a>
+      <a href="#autopilot" style="color:var(--brand-strong);font-weight:700">Autopilot</a>
       <a href="#how" data-i18n="nav.how">工作原理</a>
       <a href="#start" data-i18n="nav.start">快速上手</a>
       <a href="#compat" data-i18n="nav.compat">兼容性</a>
@@ -382,11 +442,11 @@ footer{border-top:1px solid var(--border);padding:48px 0 60px;margin-top:40px}
 <div class="hero">
   <div class="wrap">
     <span class="eyebrow"><span class="dot"></span><span data-i18n="hero.eyebrow">本页所有数据来自 runw 真机实跑 · RTX 5060 Ti · vLLM 0.21</span></span>
-    <h1 class="title" data-i18n="hero.title">把 vLLM 的指标<br>变成<span class="accent">能照着做的结论</span></h1>
+    <h1 class="title" data-i18n="hero.title">不止诊断 vLLM，<br>更<span class="accent">自己把它调到最优</span></h1>
     <p class="lede" data-i18n="hero.lede">
-      <strong>pping-lang</strong> 直接消费 vLLM 的 <code style="font-family:var(--mono);font-size:.9em">stat_logger_plugins</code> 回调，
-      结合 NVML 物理层采样，通过<strong>事实规则引擎</strong>输出结构化诊断与优化路径 ——
-      不只是画指标，而是告诉你瓶颈在哪、该调哪个旋钮。
+      <strong>pping-lang</strong> 先把 vLLM 的指标变成结构化诊断（已上线）；旗舰能力
+      <b>Autopilot</b>（设计中）再让 LLM 在沙盒里「诊断 → 改一个旋钮 → 压测打分 → 留下 / 回滚」迭代，
+      给出实测验证过的最优配置 —— <strong>看得见、动得了、还自证</strong>。
     </p>
     <div class="badges">
       <span class="badge">PyPI <b>v0.1.0a1</b></span>
@@ -664,6 +724,101 @@ footer{border-top:1px solid var(--border);padding:48px 0 60px;margin-top:40px}
 
 <div class="divider"></div>
 
+<!-- ===================== AUTOPILOT ===================== -->
+<section id="autopilot">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="sec-tag" style="display:flex;align-items:center;gap:10px"><span data-i18n="ap.tag">旗舰方向</span><span class="ap-badge" data-i18n="ap.badge">设计中 · 即将到来</span></div>
+      <h2 class="sec" data-i18n="ap.h2">Autopilot —— 诊断驱动的自主调优</h2>
+      <p class="sec-sub" data-i18n="ap.sub">一条命令起 pping-lang → 点「自动调优」→ Agent 在<b>沙盒</b>里迭代「诊断 → 改一个旋钮 → 压测 → Δ → 留下 / 回滚」→ 给出<b>实测验证过</b>的最优配置 + 全程推理。把 LLM 变成一个会看证据、自己动手、用压测打分的 LLM-serving 性能工程师。</p>
+    </div>
+
+    <div class="ap-grid">
+      <div class="ap-loop">
+        <div class="ap-stage"><span class="n">1</span><div><b>observe</b><span data-i18n="ap.s1">读当前诊断 + 配置 + 历史</span></div></div>
+        <div class="ap-stage"><span class="n">2</span><div><b>hypothesize</b><span data-i18n="ap.s2">挂在诊断上选一个旋钮</span></div></div>
+        <div class="ap-stage"><span class="n">3</span><div><b>act</b><span data-i18n="ap.s3">沙盒带新 flag 重启</span></div></div>
+        <div class="ap-stage"><span class="n">4</span><div><b>measure</b><span data-i18n="ap.s4">跑同一套压测打分</span></div></div>
+        <div class="ap-stage"><span class="n">5</span><div><b>decide</b><span data-i18n="ap.s5">更好留下 / 破 SLA 回滚</span></div></div>
+      </div>
+
+      <div class="ap-moat">
+        <div class="ap-moat-h" data-i18n="ap.moat.h">为什么只有 pping-lang 能做</div>
+        <div class="ap-eyes">
+          <span class="ap-eye"><b data-i18n="ap.eye1">👁 眼睛</b><span data-i18n="ap.eye1d">深度诊断</span></span>
+          <span class="ap-eye"><b data-i18n="ap.eye2">✋ 手</b><span data-i18n="ap.eye2d">压测 + serve 控制</span></span>
+          <span class="ap-eye"><b data-i18n="ap.eye3">📊 记分牌</b><span data-i18n="ap.eye3d">基线 / Δ</span></span>
+        </div>
+        <p data-i18n="ap.moat.p"><b>三件套在同一进程。</b>别人的 AI infra agent = 把 nvidia-smi 喂给 GPT 盲调；Autopilot = 诊断驱动（只动对症旋钮）→ 3–5 轮收敛，而非盲搜几十轮。每步改动必须 bench 验证才留下，LLM 无权声明压测没证实的收益。</p>
+      </div>
+    </div>
+
+    <div class="ap-trace-card">
+      <div class="ap-trace-top">
+        <div class="ap-trace-title" data-i18n="ap.goal">目标：吞吐优先 · TTFT p99 ≤ 1000ms · 预算 6 轮</div>
+        <div class="ap-preview-tag" data-i18n="ap.preview">设计预览 · 示意数字（区别于上方真机数据）</div>
+      </div>
+      <div class="ap-trace">
+        <div class="ap-round base">
+          <div class="ap-r-head"><span class="ap-r-n">R0</span><span class="ap-r-tag" data-i18n="ap.basetag">基线</span></div>
+          <div class="ap-r-body"><div class="ap-r-cfg mono">max_num_seqs=32 · chunked_prefill=off · gpu_util=0.70</div></div>
+          <div class="ap-r-tput"><div class="ap-bar" style="width:32%"></div><span class="ap-tps">1,240<small>tok/s</small></span></div>
+          <div class="ap-r-verdict base">baseline</div>
+        </div>
+        <div class="ap-round">
+          <div class="ap-r-head"><span class="ap-r-n">R1</span></div>
+          <div class="ap-r-body">
+            <div class="ap-r-diag"><b data-i18n="ap.diag">诊断</b><span data-i18n="ap.r1d">MFU/MBU 双低 · running=8≪32 · waiting=0</span></div>
+            <div class="ap-r-hyp"><b data-i18n="ap.hyp">假设</b><span data-i18n="ap.r1h">batch 没拼起来 → enable-chunked-prefill</span></div>
+          </div>
+          <div class="ap-r-tput"><div class="ap-bar" style="width:51%"></div><span class="ap-tps">1,980<small>tok/s</small></span><span class="ap-delta up">+60%</span></div>
+          <div class="ap-r-verdict kept">✓ kept</div>
+        </div>
+        <div class="ap-round">
+          <div class="ap-r-head"><span class="ap-r-n">R2</span></div>
+          <div class="ap-r-body">
+            <div class="ap-r-diag"><b data-i18n="ap.diag">诊断</b><span data-i18n="ap.r2d">running 仍 ≪ max · KV 用量 31%</span></div>
+            <div class="ap-r-hyp"><b data-i18n="ap.hyp">假设</b><span data-i18n="ap.r2h">显存富余 → max_num_seqs 32→128</span></div>
+          </div>
+          <div class="ap-r-tput"><div class="ap-bar" style="width:90%"></div><span class="ap-tps">3,520<small>tok/s</small></span><span class="ap-delta up">+78%</span></div>
+          <div class="ap-r-verdict kept">✓ kept</div>
+        </div>
+        <div class="ap-round">
+          <div class="ap-r-head"><span class="ap-r-n">R3</span></div>
+          <div class="ap-r-body">
+            <div class="ap-r-hyp"><b data-i18n="ap.hyp">假设</b><span data-i18n="ap.r3h">gpu_util 0.70→0.90 扩 KV 池</span></div>
+            <div class="ap-r-diag"><b data-i18n="ap.measure">实测</b><span data-i18n="ap.r3d">TTFT p99 940ms（逼近 SLA）</span></div>
+          </div>
+          <div class="ap-r-tput"><div class="ap-bar" style="width:100%"></div><span class="ap-tps">3,910<small>tok/s</small></span><span class="ap-delta up">+11%</span></div>
+          <div class="ap-r-verdict kept">✓ kept</div>
+        </div>
+        <div class="ap-round rev">
+          <div class="ap-r-head"><span class="ap-r-n">R4</span></div>
+          <div class="ap-r-body">
+            <div class="ap-r-hyp"><b data-i18n="ap.hyp">假设</b><span data-i18n="ap.r4h">max_num_seqs 128→256</span></div>
+            <div class="ap-r-diag"><b data-i18n="ap.measure">实测</b><span data-i18n="ap.r4d">TTFT p99 1,180ms ✗ 破 SLA</span></div>
+          </div>
+          <div class="ap-r-tput"><div class="ap-bar" style="width:98%"></div><span class="ap-tps">3,840<small>tok/s</small></span><span class="ap-delta down">−2%</span></div>
+          <div class="ap-r-verdict rev" data-i18n="ap.reverted">↩ reverted</div>
+        </div>
+        <div class="ap-round">
+          <div class="ap-r-head"><span class="ap-r-n">R5</span></div>
+          <div class="ap-r-body"><div class="ap-r-note" data-i18n="ap.r5">Agent 判：已近最优（再扩并发破 SLA、屋顶已贴）→ 停</div></div>
+          <div class="ap-r-tput"></div>
+          <div class="ap-r-verdict stop" data-i18n="ap.done">■ done</div>
+        </div>
+      </div>
+      <div class="ap-result">
+        <div class="ap-result-headline"><span data-i18n="ap.res.pre">吞吐</span> <b>1,240 → 3,910 tok/s（×3.15）</b><span data-i18n="ap.res.post">，仍满足 TTFT SLA</span></div>
+        <div class="ap-cmd"><span class="pfx">$</span> vllm serve &lt;model&gt; --enable-chunked-prefill --max-num-seqs 128 --gpu-memory-utilization 0.90</div>
+        <div class="ap-honest" data-i18n="ap.honest">「×3」只在「现实但没调过」的默认基线上成立 —— 那正是大量真实部署的现状（默认 max_num_seqs、chunked-prefill 关着、gpu-util 保守）。已调过的基线则是诚实的边际收益（+5~15%），Agent 会如实报「已近最优」。</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
 <!-- ===================== HOW IT WORKS ===================== -->
 <section id="how">
   <div class="wrap">
@@ -804,8 +959,32 @@ footer{border-top:1px solid var(--border);padding:48px 0 60px;margin-top:40px}
   <div class="wrap">
     <div class="sec-head">
       <div class="sec-tag" data-i18n="road.tag">路线图</div>
-      <h2 class="sec" data-i18n="road.h2">从单机 Embedded 到 K8s 多副本</h2>
+      <h2 class="sec" data-i18n="road.h2">旗舰是 Autopilot，底座是诊断</h2>
     </div>
+
+    <div class="ap-road">
+      <div class="ap-road-head"><span class="ap-road-flag" data-i18n="road.flag">旗舰能力</span><h3 data-i18n="road.ap.h">Autopilot 自主调优 · 分期</h3></div>
+      <div class="road" style="margin-top:8px">
+        <div class="rcard now">
+          <span class="badge-now" data-i18n="road.ap.m0tag">下一个里程碑</span>
+          <div class="rv">M0</div><div class="rmode" data-i18n="road.ap.m0mode">demo MVP</div>
+          <h3 data-i18n="road.ap.m0h">沙盒 + 5 旋钮 + LLM loop</h3>
+          <p data-i18n="road.ap.m0p">吞吐-under-SLA 目标 + Autopilot UI，runw 上从朴素基线跑出 ×2~3。不碰源码、不碰生产。前置：基线记分牌。</p>
+        </div>
+        <div class="rcard">
+          <div class="rv">M1 / M2</div><div class="rmode" data-i18n="road.ap.m1mode">多目标 / 源码级建议</div>
+          <h3 data-i18n="road.ap.m1h">更多旋钮 + advisory</h3>
+          <p data-i18n="road.ap.m1p">多旋钮 / 多目标 / 去噪 / promote-to-prod；M2 用 PC sampling 给 kernel / 源码级建议（仅建议，不自动改）。</p>
+        </div>
+        <div class="rcard">
+          <div class="rv">M3+</div><div class="rmode" data-i18n="road.ap.m3mode">数据飞轮</div>
+          <h3 data-i18n="road.ap.m3h">多卡调优 + 学策略</h3>
+          <p data-i18n="road.ap.m3p">TP/PP/EP 通信维度；每次调优攒「诊断→动作→压测Δ」轨迹 → 学策略，趋近「看一眼直接给最优配置」。</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="ap-road-sub" data-i18n="road.deploy">部署形态</div>
     <div class="road">
       <div class="rcard now">
         <span class="badge-now" data-i18n="road.now">当前</span>
@@ -931,8 +1110,8 @@ const RULES = [
 const I18N_EN = {
   "nav.why":"Why","nav.demo":"Live demo","nav.how":"How it works","nav.start":"Get started","nav.compat":"Compatibility","nav.roadmap":"Roadmap",
   "hero.eyebrow":"Every number on this page was captured live on runw · RTX 5060 Ti · vLLM 0.21",
-  "hero.title":'Turn vLLM\'s metrics<br>into <span class="accent">conclusions you can act on</span>',
-  "hero.lede":'<strong>pping-lang</strong> consumes vLLM\'s <code style="font-family:var(--mono);font-size:.9em">stat_logger_plugins</code> callbacks directly, pairs them with NVML physical-layer sampling, and runs a <strong>fact-rule engine</strong> that emits structured diagnoses and optimization paths — not just charts, but where the bottleneck is and which knob to turn.',
+  "hero.title":'Beyond diagnosing vLLM —<br>it <span class="accent">auto-tunes it to the best</span>',
+  "hero.lede":'<strong>pping-lang</strong> first turns vLLM\'s metrics into structured diagnoses (shipping today); its flagship <b>Autopilot</b> (in design) then lets an LLM iterate in a sandbox — diagnose → turn one knob → benchmark → keep / revert — and hand you an <strong>empirically-verified</strong> optimal config. It sees, it acts, it proves itself.',
   "hero.tests":"444 passing","hero.copy":"Copy","hero.cta":"See live demo ↓",
   "prob.tag":"The problem","prob.h2":"Metrics are visible — but they don't conclude",
   "prob.sub":"Prometheus + Grafana will chart every vLLM metric, but the moment you ask \"what's the bottleneck right now, which param do I touch\", it's on you. Two concrete gaps:",
@@ -1000,7 +1179,30 @@ const I18N_EN = {
   "compat.gpu.h":"Recognized GPUs (BF16 peak / bandwidth)","compat.gen":"Generation","compat.dev":"Devices",
   "compat.ada.dc":"Ada data center","compat.ada.desk":"Ada desktop/mobile","compat.old":"Older",
   "compat.gpu.note":"Unrecognized GPUs don't block metric capture — only peak-dependent derived values are skipped. Native on Linux; Windows via WSL2 + Ubuntu.",
-  "road.tag":"Roadmap","road.h2":"From single-host Embedded to K8s multi-replica","road.now":"current",
+  "road.tag":"Roadmap","road.h2":"Flagship is Autopilot, the foundation is diagnosis","road.now":"current",
+  "road.flag":"flagship","road.ap.h":"Autopilot auto-tuning · phased",
+  "road.ap.m0tag":"next milestone","road.ap.m0mode":"demo MVP","road.ap.m0h":"Sandbox + 5 knobs + LLM loop","road.ap.m0p":"Throughput-under-SLA objective + Autopilot UI; ×2~3 from a naive baseline on runw. No source edits, no production. Prerequisite: baseline scorecard.",
+  "road.ap.m1mode":"multi-objective / source-level advice","road.ap.m1h":"More knobs + advisory","road.ap.m1p":"More knobs / multi-objective / de-noising / promote-to-prod; M2 adds kernel/source-level advice via PC sampling (advisory only, never auto-applied).",
+  "road.ap.m3mode":"data flywheel","road.ap.m3h":"Multi-GPU tuning + learned policy","road.ap.m3p":"TP/PP/EP communication dimensions; every run accrues a \"diagnosis → action → benchmark Δ\" trace → learn a policy, approaching \"one look, optimal config\".",
+  "road.deploy":"Deployment modes",
+  "ap.tag":"Flagship direction","ap.badge":"in design · coming",
+  "ap.h2":"Autopilot — diagnosis-driven autonomous tuning",
+  "ap.sub":"Start pping-lang with one command → click \"Auto-tune\" → the Agent iterates in a <b>sandbox</b>: diagnose → turn one knob → benchmark → Δ → keep / revert → and hands you an <b>empirically-verified</b> optimal config plus the full reasoning. It turns an LLM into an LLM-serving performance engineer that reads evidence, acts, and scores itself with benchmarks.",
+  "ap.s1":"read current diagnosis + config + history","ap.s2":"pick one knob, anchored to a diagnosis","ap.s3":"restart the sandbox with the new flag","ap.s4":"run the same benchmark, score it","ap.s5":"better → keep / breaks SLA → revert",
+  "ap.moat.h":"Why only pping-lang can do this",
+  "ap.eye1":"👁 Eyes","ap.eye1d":"deep diagnosis","ap.eye2":"✋ Hands","ap.eye2d":"benchmark + serve control","ap.eye3":"📊 Scorecard","ap.eye3d":"baseline / Δ",
+  "ap.moat.p":"<b>All three in one process.</b> Other AI-infra agents feed nvidia-smi to GPT and blind-tune; Autopilot is diagnosis-driven (only touches the on-symptom knob) → converges in 3–5 rounds, not dozens of blind trials. Every change must pass a benchmark to stick — the LLM can't claim gains the benchmark didn't confirm.",
+  "ap.goal":"Goal: throughput-first · TTFT p99 ≤ 1000ms · budget 6 rounds",
+  "ap.preview":"design preview · illustrative numbers (distinct from the live data above)",
+  "ap.basetag":"baseline","ap.diag":"diag","ap.hyp":"hypo","ap.measure":"measured",
+  "ap.r1d":"MFU/MBU both low · running=8≪32 · waiting=0","ap.r1h":"batch not formed → enable-chunked-prefill",
+  "ap.r2d":"running still ≪ max · KV usage 31%","ap.r2h":"memory headroom → max_num_seqs 32→128",
+  "ap.r3h":"gpu_util 0.70→0.90 to grow KV pool","ap.r3d":"TTFT p99 940ms (approaching SLA)",
+  "ap.r4h":"max_num_seqs 128→256","ap.r4d":"TTFT p99 1,180ms ✗ breaks SLA",
+  "ap.r5":"Agent: near-optimal (more concurrency breaks SLA, roof already hit) → stop",
+  "ap.reverted":"↩ reverted","ap.done":"■ done",
+  "ap.res.pre":"Throughput","ap.res.post":", still within TTFT SLA",
+  "ap.honest":"\"×3\" only holds on a \"realistic but untuned\" default baseline — which is exactly the state of many real deployments (default max_num_seqs, chunked-prefill off, conservative gpu-util). On an already-tuned baseline it's honest marginal gains (+5~15%), and the Agent reports \"near-optimal\" plainly.",
   "road.1.h":"Single host, usable on pip install","road.1.p":"dashboard + rule engine + bench. Target: single-host local dev, single-GPU / single-Pod deployment.",
   "road.2.h":"Standalone server process","road.2.p":"Docker image, Helm chart, K8s multi-replica metric aggregation. For production-side deployment.",
   "road.3.h":"OTel-native","road.3.p":"Diagnosis on top of existing Prometheus / Tempo backends, reusing your current observability stack.",
