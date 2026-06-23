@@ -27,6 +27,39 @@ logger = logging.getLogger("pping_lang.engine_pcs")
 
 DEFAULT_RESULT_FILE = "/tmp/pping-lang-pcs-result.json"
 
+# 心跳 + 看门狗:run_window 若卡死(无异常,纯阻塞),N 秒后把**所有线程的 Python 栈**dump
+# 到 .STALL 文件(faulthandler,无需 ptrace)→ 直接定位死锁卡在哪一行。
+import faulthandler  # noqa: E402
+
+_HEARTBEAT = {"t": 0.0, "window": -1, "phase": "init"}
+
+
+def _beat(phase: str, window: int) -> None:
+    _HEARTBEAT["t"] = time.monotonic()
+    _HEARTBEAT["window"] = window
+    _HEARTBEAT["phase"] = phase
+
+
+def _watchdog_loop(stall_s: float = 20.0) -> None:
+    dumped = False
+    while True:
+        time.sleep(5.0)
+        t = _HEARTBEAT["t"]
+        if t <= 0:
+            continue
+        age = time.monotonic() - t
+        if age > stall_s and not dumped:
+            try:
+                with open(_result_file() + ".STALL", "w") as f:
+                    f.write(f"STALL age={age:.0f}s window={_HEARTBEAT['window']} "
+                            f"phase={_HEARTBEAT['phase']}\n\n")
+                    faulthandler.dump_traceback(file=f, all_threads=True)
+                dumped = True
+            except Exception:  # noqa: BLE001
+                pass
+        elif age < stall_s:
+            dumped = False
+
 _started = False
 
 
@@ -122,10 +155,17 @@ def _driver_loop() -> None:
     window_count = 0
     reprime_cooldown_s = float(os.environ.get("PPING_LANG_PCS_REPRIME_COOLDOWN_S", "20"))
     dry_threshold = int(os.environ.get("PPING_LANG_PCS_REPRIME_DRY_WINDOWS", "2"))
-    max_reprimes = int(os.environ.get("PPING_LANG_PCS_MAX_REPRIMES", "1"))
+    # ★ 默认 0(禁用 reprime):reprime 调 cuptiPCSamplingStop,在 Blackwell+CUDA13 上与在飞推理
+    #   kernel 在驱动层互等 → EngineCore 永久死锁(.STALL 实锤:reprime→stop 卡在 cuptiPCSamplingStop,
+    #   主线程在 flash_attn)。且 reprime 本是为"cudagraph capture 打断采样"设计的自愈,但 period_log2=2^16
+    #   修复后采样已能持续(见上方注释),reprime 已无必要、纯粹是死锁源。空闲期的 dry 窗是正常的(没流量),
+    #   不该被当成"采样被打断"去 reprime。需要时可 env 显式开。
+    max_reprimes = int(os.environ.get("PPING_LANG_PCS_MAX_REPRIMES", "0"))
     status_file = result_file + ".status"
+    threading.Thread(target=_watchdog_loop, name="pping-pcs-watchdog", daemon=True).start()
     while True:
         try:
+            _beat("run_window", window_count + 1)
             res = ctl.run_window(window_s=window_s, period_log2=period_log2)
             window_count += 1
             samples = (res.get("sample_total") or 0) if res.get("available") else 0
@@ -169,8 +209,31 @@ def _driver_loop() -> None:
                 "hwfull": ov.get("hwfull"), **extra,
                 "available": res.get("available"), "err": res.get("error"),
             })
-        except Exception:  # noqa: BLE001
-            logger.exception("[pping-lang] PCS 驱动:窗口失败")
+        except BaseException as e:  # noqa: BLE001  自愈:一次窗口异常(含乱抛的 SystemExit)绝不能永久杀死采样 daemon
+            # ★ 先记录死因(在任何 re-raise 之前!)—— 含 KeyboardInterrupt/SystemExit。
+            #   之前线程就是被一个 KI/SE 带走、且没留痕:re-raise 在记录前发生了。
+            import traceback  # noqa: PLC0415
+            cause = "".join(traceback.format_exception(type(e), e, e.__traceback__))[-3000:]
+            try:  # 落进独立 CRASH 文件(durable,append)——从线上读真实 traceback 的钥匙
+                with open(_result_file() + ".CRASH", "a") as _cf:
+                    _cf.write(f"\n==== window={window_count} type={type(e).__name__} ====\n{cause}\n")
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                _atomic_write_json(status_file, {
+                    "window": window_count, "samples": 0, "available": False,
+                    "loop_alive": True, "window_error": f"{type(e).__name__}: {e!r}"[:400],
+                    "traceback": cause,
+                })
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                logger.warning("[pping-lang] PCS driver window %s (self-heal, no re-raise): %r",
+                               type(e).__name__, e)
+            except Exception:  # noqa: BLE001
+                pass
+            # ★ 不 re-raise(连 KI/SE 也不):后台采样 daemon 的一次窗口异常不该永久杀死它;
+            #   进程真退出会自然带走 daemon 线程。
             time.sleep(2.0)
 
 
