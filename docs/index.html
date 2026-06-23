@@ -672,20 +672,20 @@ footer{border-top:1px solid var(--border);padding:48px 0 60px;margin-top:40px}
       <div class="tab-pane" data-pane="kernel">
         <div class="notice" style="margin-top:0;margin-bottom:20px">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01" stroke-linecap="round"/></svg>
-          <span data-i18n="ker.note"><b>这正是你会打开 Nsight Compute 看的东西 —— 但常驻、在仪表盘里、还附结论。</b> Kernel 级采集需完整接入（<code style="font-family:var(--mono)">pping-vllm serve</code>，经 CUPTI 注入做 PC Sampling）。下方为一次代表性 cudagraph 运行采到的真实热点。</span>
+          <span data-i18n="ker.note"><b>这正是你会打开 Nsight Compute 看的东西 —— 但常驻、在仪表盘里、还附结论。</b> Kernel 级采集需完整接入（<code style="font-family:var(--mono)">pping-vllm serve</code>，经 CUPTI 注入做 PC Sampling）。下方为 <b>runw RTX 5060 Ti（Blackwell）实采</b>、单窗 826 万样本的真实热点。</span>
         </div>
 
         <div class="panel">
           <h4 data-i18n="ker.h">GPU Kernel 时间占比 · Top 热点 + 算子分类</h4>
           <div class="ph-sub" data-i18n="ker.sub">按 GPU 时间降序 · 每个 kernel 展开后给「最深热点」双轨（源码行 / SASS 偏移）</div>
           <table class="tbl" style="margin-top:10px">
-            <thead><tr><th>Kernel</th><th data-i18n="ker.cls">分类</th><th data-i18n="ker.samples">样本</th><th data-i18n="ker.hotspot">最深热点</th></tr></thead>
+            <thead><tr><th>Kernel</th><th data-i18n="ker.cls">分类</th><th data-i18n="ker.samples">GPU 时间</th><th data-i18n="ker.hotspot">最深热点</th></tr></thead>
             <tbody>
-              <tr><td class="kname">wmma_bf16_16x16_128x1</td><td><span class="kcls gemm">GEMM</span></td><td class="mono">51.17 M</td><td><span class="track sass">◆ SASS 0x35c0 · long_scoreboard 80%</span></td></tr>
-              <tr><td class="kname">cutlass 16x16_128x2</td><td><span class="kcls gemm">GEMM</span></td><td class="mono">7.68 M</td><td><span class="track sass" data-i18n="ker.sassrow">◆ SASS 偏移级（闭源 cutlass）</span></td></tr>
-              <tr><td class="kname">cutlass 32x32_128x2</td><td><span class="kcls gemm">GEMM</span></td><td class="mono">4.62 M</td><td><span class="track sass" data-i18n="ker.sassrow2">◆ SASS 偏移级（闭源 cutlass）</span></td></tr>
-              <tr><td class="kname">_compute_slot_mapping_kernel</td><td><span class="kcls tri">Triton</span></td><td class="mono" data-i18n="ker.tiny">微量</td><td><span class="track src" data-i18n="ker.srcrow">● block_table.py:326（源码行）</span></td></tr>
-              <tr><td class="kname">_topk_topp_kernel</td><td><span class="kcls tri">Triton</span></td><td class="mono" data-i18n="ker.tiny2">微量</td><td><span class="track src" data-i18n="ker.srcrow2">● topk_topp_triton.py:136（源码行）</span></td></tr>
+              <tr><td class="kname">cutlass wmma_bf16 16x16_128x1</td><td><span class="kcls gemm">GEMM</span></td><td class="mono">57.0%</td><td><span class="track sass" data-i18n="ker.hs1">◆ SASS 0x11f0 · memory_dependency 77%</span></td></tr>
+              <tr><td class="kname">cutlass wmma_bf16 16x16_128x2</td><td><span class="kcls gemm">GEMM</span></td><td class="mono">33.5%</td><td><span class="track sass" data-i18n="ker.hs2">◆ SASS 偏移级（闭源 cutlass）</span></td></tr>
+              <tr><td class="kname">flash_fwd_splitkv（FlashAttention）</td><td><span class="kcls attn">Attention</span></td><td class="mono">1.7%</td><td><span class="track sass" data-i18n="ker.hs3">◆ SASS 偏移级（闭源 flash）</span></td></tr>
+              <tr><td class="kname">flashinfer RadixTopK（采样）</td><td><span class="kcls norm">Sampling</span></td><td class="mono">0.8%</td><td><span class="track sass" data-i18n="ker.hs4">◆ SASS 偏移级（闭源 flashinfer）</span></td></tr>
+              <tr><td class="kname">at::native elementwise</td><td><span class="kcls norm">Elementwise</span></td><td class="mono">0.7%</td><td><span class="track sass" data-i18n="ker.hs5">◆ SASS 偏移级</span></td></tr>
             </tbody>
           </table>
         </div>
@@ -693,9 +693,9 @@ footer{border-top:1px solid var(--border);padding:48px 0 60px;margin-top:40px}
         <div class="evtwo">
           <div class="panel">
             <h4 data-i18n="ker.attr.h">启动来源 · 即便闭源 GEMM 也能归因</h4>
-            <div class="ph-sub" data-i18n="ker.attr.sub">CUPTI 钩 cuLaunchKernel 回溯 host 调用栈 —— 84% 的 GPU 时间来自一条 nn.Linear 链</div>
+            <div class="ph-sub" data-i18n="ker.attr.sub">CUPTI 钩 cuLaunchKernel 回溯 host 调用栈 —— 92% 的 GPU 时间（全是 GEMM）来自一条 nn.Linear 链，71,408 次启动</div>
             <div class="attr-chain" style="margin-top:12px">
-              <div class="node"><span class="box" style="background:var(--rose-soft);border-color:rgba(216,72,63,.2);color:var(--rose)">cutlass GEMM</span><span class="pct" data-i18n="ker.attr.pct">84% GPU 时间</span></div>
+              <div class="node"><span class="box" style="background:var(--rose-soft);border-color:rgba(216,72,63,.2);color:var(--rose)">cutlass GEMM</span><span class="pct" data-i18n="ker.attr.pct">92% GPU 时间</span></div>
               <div class="down" data-i18n="ker.attr.from">↑ 来自</div>
               <div class="node"><span class="box">cublasLtMatmul</span></div>
               <div class="down" data-i18n="ker.attr.from2">↑ 来自</div>
@@ -706,23 +706,23 @@ footer{border-top:1px solid var(--border);padding:48px 0 60px;margin-top:40px}
           </div>
           <div class="panel">
             <h4 data-i18n="ker.de.h">Deep Evidence · 为什么慢</h4>
-            <div class="ph-sub" data-i18n="ker.de.sub">最热 SASS 偏移处的主导 stall reason（PerfWorks 下钻）</div>
+            <div class="ph-sub" data-i18n="ker.de.sub">本窗 826 万样本的 stall reason 分解（PerfWorks 下钻）</div>
             <div class="bars stall-bars" style="margin-top:14px">
-              <div class="bar-row"><span class="bl">long_scoreboard</span><div class="bar-track"><div class="bar-fill" style="width:80%;background:var(--rose)"></div></div><span class="bv">80%</span></div>
-              <div class="bar-row"><span class="bl">wait</span><div class="bar-track"><div class="bar-fill" style="width:11%;background:var(--amber)"></div></div><span class="bv">11%</span></div>
-              <div class="bar-row"><span class="bl">not_selected</span><div class="bar-track"><div class="bar-fill" style="width:5%;background:var(--brand)"></div></div><span class="bv">5%</span></div>
-              <div class="bar-row"><span class="bl" data-i18n="ker.de.other">其它</span><div class="bar-track"><div class="bar-fill" style="width:4%;background:var(--muted-3)"></div></div><span class="bv">4%</span></div>
+              <div class="bar-row"><span class="bl">memory_dependency</span><div class="bar-track"><div class="bar-fill" style="width:71%;background:var(--rose)"></div></div><span class="bv">71%</span></div>
+              <div class="bar-row"><span class="bl">exec_dependency</span><div class="bar-track"><div class="bar-fill" style="width:9%;background:var(--amber)"></div></div><span class="bv">9%</span></div>
+              <div class="bar-row"><span class="bl">memory_throttle</span><div class="bar-track"><div class="bar-fill" style="width:9%;background:var(--brand)"></div></div><span class="bv">9%</span></div>
+              <div class="bar-row"><span class="bl" data-i18n="ker.de.other">其它</span><div class="bar-track"><div class="bar-fill" style="width:11%;background:var(--muted-3)"></div></div><span class="bv">11%</span></div>
             </div>
             <div class="notice" style="margin-top:16px">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke-linejoin="round"/></svg>
-              <span data-i18n="ker.de.note"><b>kernel 名即诊断：</b><code style="font-family:var(--mono)">wmma_bf16_16x16_128x1</code> → tile 16×16 / bf16 / wmma 指令类。小 tile = 小矩阵、低并发 → 呼应 Roofline 的「增大 batch」结论。<b>long_scoreboard 80%</b> = 在等显存 → 实锤 memory-bound。</span>
+              <span data-i18n="ker.de.note"><b>kernel 名即诊断：</b><code style="font-family:var(--mono)">cutlass wmma_bf16 16x16</code> → tile 16×16 / bf16 / wmma tensorop / SM80。小 tile = 小矩阵、低并发 → 呼应 Roofline 的「增大 batch」结论。<b>memory_dependency 71%</b> = 在等显存 → 实锤 memory-bound。</span>
             </div>
           </div>
         </div>
 
         <div class="notice">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01" stroke-linecap="round"/></svg>
-          <span data-i18n="ker.bound"><b>价值边界（诚实披露）：</b>「翻到 .py 源码行」只在 Triton / 自编译 kernel 路径有效。本类负载 <b>98% 时间在闭源 cutlass/flash GEMM</b> 里 → 那里只能到 SASS 偏移级 + stall reason + kernel 名解码。这是物理事实，不是 bug。</span>
+          <span data-i18n="ker.bound"><b>价值边界（诚实披露）：</b>「翻到 .py 源码行」只在 Triton / 自编译 kernel 路径有效。本类负载 <b>~92% 时间在闭源 cutlass GEMM</b> 里 → 那里只能到 SASS 偏移级 + stall reason + kernel 名解码。runw 实采印证：top kernels 全 <code style="font-family:var(--mono)">mappable=false</code>。这是物理事实，不是 bug。</span>
         </div>
       </div>
 
@@ -1212,19 +1212,20 @@ const I18N_EN = {
   "diag.infer":"signed inference →",
   "diag.e1.t":"GPU utilization low","diag.e1.f":'GPU average utilization <code>3%</code> has stayed below 50% for 30s',"diag.e1.r":"Check whether batch degenerated to 1, or enable continuous batching",
   "diag.e2.t":"Batch degeneration","diag.e2.f":'Concurrent requests <code>1.0</code> ≤ 1.0 for 30s',"diag.e2.r":"Increase client concurrency, or check whether upstream routing serializes",
-  "ker.note":'<b>This is exactly what you\'d open Nsight Compute for — but always-on, in your dashboard, with a conclusion attached.</b> Kernel-level capture needs the full integration (<code style="font-family:var(--mono)">pping-vllm serve</code>, PC Sampling via CUPTI injection). Below are real hotspots from a representative cudagraph run.',
+  "ker.note":'<b>This is exactly what you\'d open Nsight Compute for — but always-on, in your dashboard, with a conclusion attached.</b> Kernel-level capture needs the full integration (<code style="font-family:var(--mono)">pping-vllm serve</code>, PC Sampling via CUPTI injection). Below are <b>real hotspots captured live on runw\'s RTX 5060 Ti (Blackwell)</b> — 8.26M samples in one window.',
   "ker.h":"GPU kernel time share · top hotspots + operator class",
   "ker.sub":"descending by GPU time · each kernel expands to a dual-track \"deepest hotspot\" (source line / SASS offset)",
-  "ker.cls":"Class","ker.samples":"Samples","ker.hotspot":"Deepest hotspot",
+  "ker.cls":"Class","ker.samples":"GPU time","ker.hotspot":"Deepest hotspot",
+  "ker.hs1":"◆ SASS 0x11f0 · memory_dependency 77%","ker.hs2":"◆ SASS offset level (closed-source cutlass)","ker.hs3":"◆ SASS offset level (closed-source flash)","ker.hs4":"◆ SASS offset level (closed-source flashinfer)","ker.hs5":"◆ SASS offset level",
   "ker.sassrow":"◆ SASS offset level (closed-source cutlass)","ker.sassrow2":"◆ SASS offset level (closed-source cutlass)",
   "ker.tiny":"tiny","ker.tiny2":"tiny",
   "ker.srcrow":"● block_table.py:326 (source line)","ker.srcrow2":"● topk_topp_triton.py:136 (source line)",
   "ker.attr.h":"Launch origin · attribute even closed-source GEMM",
-  "ker.attr.sub":"CUPTI hooks cuLaunchKernel to walk the host call stack — 84% of GPU time comes from one nn.Linear chain",
-  "ker.attr.pct":"84% GPU time","ker.attr.from":"↑ from","ker.attr.from2":"↑ from","ker.attr.from3":"↑ from",
-  "ker.de.h":"Deep Evidence · why is it slow","ker.de.sub":"dominant stall reason at the hottest SASS offset (PerfWorks drill-down)","ker.de.other":"other",
-  "ker.de.note":'<b>The kernel name is itself a diagnosis:</b> <code style="font-family:var(--mono)">wmma_bf16_16x16_128x1</code> → tile 16×16 / bf16 / wmma class. Small tile = small matrix, low concurrency → echoes Roofline\'s "grow the batch". <b>long_scoreboard 80%</b> = waiting on memory → hard proof of memory-bound.',
-  "ker.bound":'<b>Value boundary (honest disclosure):</b> "drill to the .py source line" only works on Triton / self-compiled kernel paths. For this workload <b>98% of time is in closed-source cutlass/flash GEMM</b> → there you only get SASS offset + stall reason + kernel-name decode. That\'s a physical fact, not a bug.',
+  "ker.attr.sub":"CUPTI hooks cuLaunchKernel to walk the host call stack — 92% of GPU time (all GEMM) comes from one nn.Linear chain, 71,408 launches",
+  "ker.attr.pct":"92% GPU time","ker.attr.from":"↑ from","ker.attr.from2":"↑ from","ker.attr.from3":"↑ from",
+  "ker.de.h":"Deep Evidence · why is it slow","ker.de.sub":"stall-reason breakdown over 8.26M samples this window (PerfWorks drill-down)","ker.de.other":"other",
+  "ker.de.note":'<b>The kernel name is itself a diagnosis:</b> <code style="font-family:var(--mono)">cutlass wmma_bf16 16x16</code> → tile 16×16 / bf16 / wmma tensorop / SM80. Small tile = small matrix, low concurrency → echoes Roofline\'s "grow the batch". <b>memory_dependency 71%</b> = waiting on memory → hard proof of memory-bound.',
+  "ker.bound":'<b>Value boundary (honest disclosure):</b> "drill to the .py source line" only works on Triton / self-compiled kernel paths. For this workload <b>~92% of time is in closed-source cutlass GEMM</b> → there you only get SASS offset + stall reason + kernel-name decode. Confirmed on runw: top kernels are all <code style="font-family:var(--mono)">mappable=false</code>. That\'s a physical fact, not a bug.',
   "rules.summary":'<b style="color:var(--text-strong)">13</b> curated rules active · thresholds centralized in one <span class="mono" style="font-size:12px">SLA config</span> — edit in the dashboard and it hot-reloads without restarting vLLM.',
   "bench.desc":'Built-in OpenAI-protocol static load tester · scenario <span class="mono" style="font-size:12px">showcase-demo</span> · concurrency 8 · 35s · dataset builtin:mixed-short · output 128 tok',
   "bench.total":"Total requests","bench.okerr":"OK / errors","bench.tput":"Output throughput","bench.tokens":"Output tokens",
