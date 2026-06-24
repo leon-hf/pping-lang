@@ -404,6 +404,22 @@ h2.sec{font-size:clamp(26px,3.5vw,34px);font-weight:800;letter-spacing:-.02em;co
 .ap-cmd{background:var(--text-strong);color:#e8e8f0;border-radius:9px;padding:11px 14px;font-family:var(--mono);font-size:12px;overflow-x:auto;white-space:nowrap}
 .ap-cmd .pfx{color:#7c6cf0}
 .ap-honest{font-size:12px;color:var(--muted);margin-top:12px;line-height:1.55;border-left:2px solid var(--amber-soft);padding-left:12px}
+/* L0-L4 自主级别阶梯 */
+.ap-ladder-head{margin-top:30px;font-size:15px;font-weight:800;color:var(--text-strong)}
+.ap-ladder-sub{font-size:13px;color:var(--muted);margin:6px 0 16px;line-height:1.55}
+.ap-ladder-sub b{color:var(--brand-strong)}
+.ap-ladder{display:flex;flex-direction:column;gap:8px}
+.ap-lvl{display:grid;grid-template-columns:50px 1fr auto;gap:14px;align-items:center;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:13px 17px}
+.ap-lvl.now{border-color:var(--brand);box-shadow:0 0 0 1px var(--brand-soft)}
+.ap-lvl.adv{opacity:.66}
+.ap-lvl .lv{font-family:var(--mono);font-weight:800;font-size:16px;color:var(--brand-strong);text-align:center}
+.ap-lvl .lbody .t{font-size:14px;font-weight:700;color:var(--text-strong)}
+.ap-lvl .lbody .d{font-size:12.5px;color:var(--muted);margin-top:2px;line-height:1.5}
+.ap-lvl .ltag{font-size:10.5px;font-weight:700;padding:3px 11px;border-radius:999px;white-space:nowrap}
+.ap-lvl .ltag.ship{background:var(--teal-soft);color:var(--teal)}
+.ap-lvl .ltag.m0{background:var(--coral, #5b5bd6);color:#fff;background:var(--brand)}
+.ap-lvl .ltag.road{background:var(--brand-soft);color:var(--brand-strong)}
+.ap-lvl .ltag.advt{background:var(--amber-soft);color:var(--amber)}
 /* roadmap flagship block */
 .ap-road{border:1px solid var(--brand-soft);background:linear-gradient(180deg,var(--brand-soft),#fff);border-radius:16px;padding:22px;margin-bottom:26px}
 .ap-road-head{display:flex;align-items:center;gap:11px;margin-bottom:6px}
@@ -873,6 +889,37 @@ footer{border-top:1px solid var(--border);padding:48px 0 60px;margin-top:40px}
         <div class="ap-honest" data-i18n="ap.honest">「×3」只在「现实但没调过」的默认基线上成立 —— 那正是大量真实部署的现状（默认 max_num_seqs、chunked-prefill 关着、gpu-util 保守）。已调过的基线则是诚实的边际收益（+5~15%），Agent 会如实报「已近最优」。</div>
       </div>
     </div>
+
+    <!-- L0–L4 自主级别阶梯 -->
+    <div class="ap-ladder-head" data-i18n="lvl.h">自主级别 L0–L4 · 从「看见」到「自己写算子」</div>
+    <div class="ap-ladder-sub" data-i18n="lvl.sub">两条正交轴：<b>能力级</b>（配置 → 代码）与<b>放行度</b>（沙盒自动 / 生产人工）。自动到 L3 封顶，<b>生产永远人工 promote</b>。</div>
+    <div class="ap-ladder">
+      <div class="ap-lvl">
+        <span class="lv">L0</span>
+        <div class="lbody"><div class="t" data-i18n="lvl.0t">观测</div><div class="d" data-i18n="lvl.0d">只诊断、给结论，不动手 —— 今天的 pping-lang</div></div>
+        <span class="ltag ship" data-i18n="lvl.0g">已上线</span>
+      </div>
+      <div class="ap-lvl now">
+        <span class="lv">L1</span>
+        <div class="lbody"><div class="t" data-i18n="lvl.1t">调参</div><div class="d" data-i18n="lvl.1d">改 vllm serve 旋钮（introspect 全量参数面）· bench + SLA 验证</div></div>
+        <span class="ltag m0">M0</span>
+      </div>
+      <div class="ap-lvl">
+        <span class="lv">L2</span>
+        <div class="lbody"><div class="t" data-i18n="lvl.2t">配组件</div><div class="d" data-i18n="lvl.2d">开/换投机解码 · attention 后端 · KV offload · 编译配置 · + 等价检查</div></div>
+        <span class="ltag road">M1</span>
+      </div>
+      <div class="ap-lvl">
+        <span class="lv">L3</span>
+        <div class="lbody"><div class="t" data-i18n="lvl.3t">写算子</div><div class="d" data-i18n="lvl.3d">自己写自定义 scheduler / 融合 kernel，经插件点插入（不改源码）· + 强正确性闸</div></div>
+        <span class="ltag road">M2/3</span>
+      </div>
+      <div class="ap-lvl adv">
+        <span class="lv">L4</span>
+        <div class="lbody"><div class="t" data-i18n="lvl.4t">改源码</div><div class="d" data-i18n="lvl.4d">patch vLLM 本体（fork 债、升级即碎）—— 自动封顶在 L3，L4 只提补丁、人审</div></div>
+        <span class="ltag advt" data-i18n="lvl.4g">advisory</span>
+      </div>
+    </div>
   </div>
 </section>
 
@@ -1274,6 +1321,13 @@ const I18N_EN = {
   "ap.reverted":"↩ reverted","ap.done":"■ done",
   "ap.res.pre":"Throughput","ap.res.post":", still within TTFT SLA",
   "ap.honest":"\"×3\" only holds on a \"realistic but untuned\" default baseline — which is exactly the state of many real deployments (default max_num_seqs, chunked-prefill off, conservative gpu-util). On an already-tuned baseline it's honest marginal gains (+5~15%), and the Agent reports \"near-optimal\" plainly.",
+  "lvl.h":"Autonomy levels L0–L4 · from \"seeing\" to \"writing its own kernels\"",
+  "lvl.sub":"Two orthogonal axes: <b>capability</b> (config → code) and <b>promotion</b> (sandbox-auto / production-human). Auto caps at L3; <b>production is always a human promote</b>.",
+  "lvl.0t":"Observe","lvl.0d":"diagnose and conclude, no action — pping-lang today","lvl.0g":"shipped",
+  "lvl.1t":"Tune knobs","lvl.1d":"change vllm serve flags (full introspected surface) · bench + SLA",
+  "lvl.2t":"Configure components","lvl.2d":"toggle/swap speculative decoding · attention backend · KV offload · compilation · + equivalence check",
+  "lvl.3t":"Write operators","lvl.3d":"author a custom scheduler / fused kernel via plugin points (no source patch) · + strong correctness gate",
+  "lvl.4t":"Patch source","lvl.4d":"patch vLLM core (fork debt, breaks on upgrade) — auto caps at L3; L4 only proposes a diff for human review","lvl.4g":"advisory",
   "road.1.h":"Single host, usable on pip install","road.1.p":"dashboard + rule engine + bench. Target: single-host local dev, single-GPU / single-Pod deployment.",
   "road.2.h":"Standalone server process","road.2.p":"Docker image, Helm chart, K8s multi-replica metric aggregation. For production-side deployment.",
   "road.3.h":"OTel-native","road.3.p":"Diagnosis on top of existing Prometheus / Tempo backends, reusing your current observability stack.",
