@@ -48,3 +48,7 @@ htmlcov/
 # Personal design notes — kept on disk for reference, never committed
 _design-notes/
 _scratch/
+
+# Deploy tooling for the runw GPU box — kept on disk for the deploy-runw skill,
+# never committed (carries infra topology + tailnet addressing)
+deploy/runw/
