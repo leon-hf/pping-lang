@@ -743,12 +743,13 @@ def test_runner_records_p0_pruned_candidates_in_diagnosis(tmp_path):
 
     class CapacitySandbox(SimSandbox):
         def measure(self, obj):
+            # KV 半满(D 守卫按实测余量 0.5 放行大 batch),但并发翻倍在解析上装不下 → P0 剪
             return Scorecard(output_tps=1000, ttft_p99_ms=100, tpot_p99_ms=10,
                              run_meta={"prompt_tokens": 7500, "output_tokens": 16,
                                        "diagnosis": {"bottleneck": "A", "evidence_refs": ["A:live"],
                                                      "metrics": {}},
                                        "runtime_probe": {
-                                           "kv_cache_usage": {"max": 1.0},
+                                           "kv_cache_usage": {"max": 0.5},
                                            "running_reqs": {"max": 160},
                                        }})
 
@@ -1039,3 +1040,89 @@ def test_run_cli_resumes_session(tmp_path, monkeypatch):
     assert s["state"] == "done"
     assert any(r["state_at_record"] == "resuming" for r in s["rounds"])
     assert s["best"]["score"] > 1240.0
+
+
+# ---- review fixes:kv 语义 / equivalence 顺序 / flag 渲染 ----
+
+def test_diag_block_kv_util_is_capacity_not_bandwidth():
+    # kv_util = KV cache 占用比(容量维,D 证据),不是 NVML HBM busy%(带宽维,B 证据)
+    from pping_lang.autopilot.runner import diag_block
+    sc = Scorecard(output_tps=1000, ttft_p99_ms=100, tpot_p99_ms=10, run_meta={
+        "diagnosis": {"bottleneck": "D", "source": "live:/api/diagnoses",
+                      "metrics": {"gpu.mem_util_pct:avg": 88.0,
+                                  "vllm.perf.mfu_ratio:avg": 0.05}},
+        "runtime_probe": {"kv_cache_usage": {"max": 0.97, "avg": 0.9},
+                          "gpu_mem_bw_pct": {"avg": 88.0},
+                          "waiting_reqs": {"max": 12.0}},
+    })
+    d = diag_block({"max_num_seqs": 256}, sc)
+    assert d["kv_util"] == 0.97
+    assert d["mbu"] == 88.0
+    assert d["waiting"] == 12.0
+
+
+def test_kv_headroom_prefers_measured_kv_usage():
+    from pping_lang.autopilot.runner import kv_headroom
+    sc = Scorecard(run_meta={"runtime_probe": {"kv_cache_usage": {"max": 0.95}}})
+    diag = {"running": 8.0}
+    # 准入闸代理会说余量充足(running≪max_num_seqs),但实测 KV 占用 95% → 余量 0.05
+    assert kv_headroom({"max_num_seqs": 256}, diag, sc) == pytest.approx(0.05)
+    # 真 KV 证据缺失 → 退回准入闸代理
+    assert kv_headroom({"max_num_seqs": 256}, diag, None) == pytest.approx(1 - 8 / 256)
+
+
+def test_runner_t2_golden_taken_before_candidate_apply(tmp_path):
+    # resume 场景 golden 缺失:必须在 apply 候选**前**取 golden(此刻沙盒是 best)。
+    # 若在候选加载后再取,候选自己的输出会被当 golden → 等价检查恒真放行。
+    from pping_lang.autopilot.agent import AgentDecision
+
+    class DriftSandbox(SimSandbox):
+        def sample_outputs(self, prompts=None):
+            return ["changed"] if self._cfg.get("kv_cache_dtype") == "fp8" else ["gold"]
+
+    class PickKvAgent:
+        model = "pick-kv"
+
+        def propose(self, ctx):
+            cand = next(c for c in ctx.candidates if c["knob"] == "kv_cache_dtype")
+            return AgentDecision(knob="kv_cache_dtype", config=cand["config"],
+                                 from_val=cand["from"], to_val=cand["to"], flag=cand["flag"],
+                                 rationale="try fp8 kv")
+
+    base_cfg = {"max_num_seqs": 128, "gpu_memory_utilization": 0.70}
+    probe = SimSandbox("M")
+    probe.apply(base_cfg)
+    base_sc = probe.measure(OBJ)
+    store = SessionStore(tmp_path / "eq-resume.jsonl")
+    store.new_session("ap-eq-resume", {"target": "throughput"}, {"rounds": 2})
+    store.append_round(Round(round=0, kind="baseline", decision="baseline",
+                             config_after=dict(base_cfg),
+                             scorecard_after=base_sc.to_dict(),
+                             objective_score_after=base_sc.output_tps))
+    store.update_best(0, base_cfg, base_sc.output_tps, "cmd")
+    Runner(store=store, sandbox=DriftSandbox("M"), agent=PickKvAgent(), obj=OBJ,
+           budget={"rounds": 2, "seconds": 900}, model="M", step_delay_s=0.0,
+           baseline_config=base_cfg, quality_gate=True).run()
+    cand = [r for r in store.status_dict()["rounds"]
+            if r["kind"] == "candidate" and (r.get("action") or {}).get("knob") == "kv_cache_dtype"]
+    assert cand and cand[0]["decision"] == "reverted"
+    assert "equivalence check" in cand[0]["rationale"]
+    assert cand[0]["scorecard_after"] is None          # 没 bench 错误配置
+    store.close()
+
+
+def test_render_speculative_and_cudagraph_as_valid_cli():
+    # --speculative-config 收 JSON dict;cudagraph_mode 是 CompilationConfig 字段,
+    # 顶层没有 --cudagraph-mode flag(§4.5)
+    from pping_lang.autopilot.action_space import render_flags
+    flags = render_flags({"speculative": "ngram", "cudagraph_mode": "PIECEWISE"})
+    spec = json.loads(flags[flags.index("--speculative-config") + 1])
+    assert spec["method"] == "ngram" and spec["num_speculative_tokens"] >= 1
+    comp = json.loads(flags[flags.index("--compilation-config") + 1])
+    assert comp == {"cudagraph_mode": "PIECEWISE"}
+    assert "--cudagraph-mode" not in flags
+
+
+def test_render_command_quotes_json_tokens():
+    cmd = render_command("M", {"cudagraph_mode": "PIECEWISE"})
+    assert "'{\"cudagraph_mode\":\"PIECEWISE\"}'" in cmd

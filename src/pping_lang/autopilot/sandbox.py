@@ -259,7 +259,9 @@ class DockerSandbox:
         for v in self._volumes:
             head += ["-v", v]
         if self._cmd_template:                           # entrypoint 覆盖 + shell 模板(tuning flags 在尾,覆盖基线 flag)
-            shell = self._cmd_template.format(model=self._model, port=self._internal, flags=" ".join(flags))
+            import shlex
+            quoted = " ".join(shlex.quote(f) for f in flags)   # JSON flag 值须防 shell 拆词/吃引号
+            shell = self._cmd_template.format(model=self._model, port=self._internal, flags=quoted)
             tail = ["--entrypoint", self._entrypoint or "/bin/bash", self._image, "-c", shell]
         else:                                            # 简单形:直接 serve_cmd model flags
             ep = ["--entrypoint", self._entrypoint] if self._entrypoint else []

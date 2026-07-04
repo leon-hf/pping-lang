@@ -33,27 +33,56 @@ MAX_ILLEGAL = 2          # proposing:连续非法提案上限 → failed(§9.3)
 INCOMPLETE_STATES = {"applying", "warming_up", "benchmarking", "deciding"}
 
 
+def _probe_stat(sc: Scorecard | None, group: str, field: str = "avg") -> float | None:
+    """bench 窗口 runtime_probe(sandbox._runtime_probe)里的一项统计。"""
+    probe = ((sc.run_meta or {}).get("runtime_probe") if sc else None) or {}
+    try:
+        val = probe[group][field]
+    except (KeyError, TypeError):
+        return None
+    return float(val) if val is not None else None
+
+
 def diag_block(config: dict, sc: Scorecard) -> dict:
     """observe → §8 蒸馏诊断块。优先候选实测的真诊断(③:sc.run_meta['diagnosis']),
-    映射成 {bottleneck, fired_rules, mfu, running, kv_util, ttft/tpot/tps, evidence_refs};
-    没有则回退 config 启发式 diagnose()。"""
+    映射成 {bottleneck, fired_rules, mfu, mbu, running, waiting, kv_util, ttft/tpot/tps,
+    evidence_refs};没有则回退 config 启发式 diagnose()。
+
+    语义注意:`kv_util` = KV cache 占用比(0-1,容量维,D 的证据),来源
+    `runtime_probe.kv_cache_usage` / `vllm.scheduler.kv_cache_usage_ratio`;
+    `mbu` = NVML HBM 控制器繁忙%(带宽维,B 的证据),来源 `gpu.mem_util_pct`。别混。"""
     live = (sc.run_meta or {}).get("diagnosis")
     if live and live.get("bottleneck"):
         m = live.get("metrics") or {}
         bn = live["bottleneck"]
+        kv_util = _probe_stat(sc, "kv_cache_usage", "max")
+        if kv_util is None:
+            kv_util = m.get("vllm.scheduler.kv_cache_usage_ratio:avg")
         return {
             "bottleneck": bn, "fired_rules": [bn], "source": live.get("source"),
-            "mfu": m.get("vllm.perf.mfu_ratio:avg"),
-            "running": m.get("vllm.scheduler.running_reqs:avg"),
-            "kv_util": m.get("gpu.mem_util_pct:avg"),
+            "mfu": m.get("vllm.perf.mfu_ratio:avg", _probe_stat(sc, "mfu")),
+            "mbu": m.get("gpu.mem_util_pct:avg", _probe_stat(sc, "gpu_mem_bw_pct")),
+            "running": m.get("vllm.scheduler.running_reqs:avg", _probe_stat(sc, "running_reqs")),
+            "waiting": _probe_stat(sc, "waiting_reqs", "max"),
+            "kv_util": kv_util,
             "ttft_p99_ms": sc.ttft_p99_ms, "tpot_p99_ms": sc.tpot_p99_ms,
             "output_tps": sc.output_tps, "evidence_refs": live.get("evidence_refs", []),
         }
     return diagnose(config, sc)
 
 
-def kv_headroom(config: dict, diag: dict) -> float:
-    """KV 余量代理(§4.4 D 守卫):准入闸快满(running≈max_num_seqs)→ 余量低,推大-batch 先治 D。"""
+def kv_headroom(config: dict, diag: dict, sc: Scorecard | None = None) -> float:
+    """KV 余量(§4.4 D 守卫)。优先真证据:bench 窗口 KV 占用峰值(runtime_probe /
+    diag.kv_util,0-1)→ 余量 = 1 - 峰值;没有再退准入闸代理(running≈max_num_seqs
+    → 余量低),最后 sim 路由的 kv_pressure。"""
+    kv = _probe_stat(sc, "kv_cache_usage", "max")
+    if kv is None:
+        kv = diag.get("kv_util")
+    if kv is not None:
+        try:
+            return max(0.0, 1.0 - float(kv))
+        except (TypeError, ValueError):
+            pass
     running = diag.get("running")
     seqs = config.get("max_num_seqs")
     if running and seqs:
@@ -195,12 +224,15 @@ class Runner(threading.Thread):
             return None
 
     def _ensure_equivalence_golden(self) -> bool:
+        """T2 前置:golden 输出必须取自「当前 best 已加载」的沙盒。
+        只允许在 apply 候选**之前**调用——候选加载后再取会把候选自己的输出当 golden,
+        等价检查恒真(且兜底 re-apply 会把 bench 打到错误配置上)。"""
         if self._equivalence_golden is not None:
             return True
         self._equivalence_golden = self._sample_outputs()
         if self._equivalence_golden is not None:
             return True
-        try:
+        try:                                     # resume 等场景:沙盒还没加载 → 先回 best
             self._sb.apply(self._best_cfg)
             self._equivalence_golden = self._sample_outputs()
         except Exception:  # noqa: BLE001
@@ -212,9 +244,10 @@ class Runner(threading.Thread):
         return bool(k and k.output_impact == "equivalence")
 
     def _equivalence_ok(self, dec) -> tuple[bool, str]:
+        """候选已加载后比对。golden 缺失 → fail-closed(判负,不 bench)。"""
         if not self._needs_equivalence(dec):
             return True, ""
-        if not self._ensure_equivalence_golden():
+        if self._equivalence_golden is None:
             return False, "equivalence check unavailable: no baseline golden outputs"
         outs = self._sample_outputs()
         if outs is None:
@@ -318,7 +351,7 @@ class Runner(threading.Thread):
             effective_cfg = self._effective_config()
             diag = diag_block(effective_cfg, self._best_sc)             # ③ observe(真诊断优先)
             cands = propose_candidates(diag["bottleneck"], effective_cfg,
-                                       kv_headroom=kv_headroom(effective_cfg, diag),
+                                       kv_headroom=kv_headroom(effective_cfg, diag, self._best_sc),
                                        quality_gate=self._quality_gate)   # §4 交集 + D 守卫
             cands = prepare_search_candidates(
                 cands, effective_cfg, diag["bottleneck"], history,
@@ -370,19 +403,25 @@ class Runner(threading.Thread):
     def _run_candidate(self, rnd: int, dec, diag: dict, *, deadline: float | None = None) -> None:
         self._store.set_state("benchmarking")
         before_cfg, before_sc, before_score = self._best_cfg, self._best_sc, self._best_score
+        # T2 golden 必须在 apply 候选前拿到(此刻沙盒里是 best;见 _ensure_equivalence_golden)
+        golden_ok = self._ensure_equivalence_golden() if self._needs_equivalence(dec) else True
         try:
-            self._sb.apply(dec.config)
-            ok, reason = self._equivalence_ok(dec)
-            if not ok:
-                dec.rationale += f" [{reason}]"
+            if not golden_ok:
+                dec.rationale += " [equivalence check unavailable: no baseline golden outputs]"
                 sc, score = None, float("-inf")
             else:
-                sc = self._measure_loaded()
-                if deadline is not None and time.monotonic() >= deadline:
-                    dec.rationale += " [时间预算在 benchmarking 中途耗尽,半截轮丢弃]"
+                self._sb.apply(dec.config)
+                ok, reason = self._equivalence_ok(dec)
+                if not ok:
+                    dec.rationale += f" [{reason}]"
                     sc, score = None, float("-inf")
                 else:
-                    score = objective_score(sc, self._obj)
+                    sc = self._measure_loaded()
+                    if deadline is not None and time.monotonic() >= deadline:
+                        dec.rationale += " [时间预算在 benchmarking 中途耗尽,半截轮丢弃]"
+                        sc, score = None, float("-inf")
+                    else:
+                        score = objective_score(sc, self._obj)
         except Exception as e:               # LaunchError/BenchError → 判负回滚
             sc, score = None, float("-inf")
             dec.rationale += f" [候选失败:{type(e).__name__}]"

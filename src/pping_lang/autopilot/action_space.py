@@ -220,17 +220,42 @@ def propose_candidates(bottleneck: str | None, config: dict, *,
     return cands
 
 
+def _render_special(key: str, value) -> list[str] | None:
+    """个别旋钮不是「--flag 值」的朴素形状,按 vLLM 0.21 真实 CLI 形态渲染(§4.5):
+    - speculative:`--speculative-config` 收 JSON dict,裸字符串起不来;
+    - cudagraph_mode:是 CompilationConfig 字段,顶层没有 --cudagraph-mode flag,
+      走 `--compilation-config` JSON(`config/compilation.py:53-103`)。
+    返回 None = 走通用渲染。"""
+    import json as _json
+    if key == "speculative":
+        if value in (None, "", "none"):
+            return []                            # 关 = 不传 flag
+        spec = {"method": str(value), "num_speculative_tokens": 3}
+        return ["--speculative-config", _json.dumps(spec, separators=(",", ":"))]
+    if key == "cudagraph_mode":
+        return ["--compilation-config",
+                _json.dumps({"cudagraph_mode": str(value)}, separators=(",", ":"))]
+    return None
+
+
 def render_flags(config: dict) -> list[str]:
     """config → vllm serve flag tokens(给 docker run 拼参数)。choice/None 跳过。"""
     out: list[str] = []
     for k in KNOBS:
         if k.key in config and config[k.key] is not None:
-            out += [k.flag, str(config[k.key])]
+            special = _render_special(k.key, config[k.key])
+            if special is not None:
+                out += special
+            else:
+                out += [k.flag, str(config[k.key])]
     return out
 
 
 def render_command(model: str, config: dict) -> str:
-    return " ".join([f"vllm serve {model}", *render_flags(config)])
+    """可复制的 `vllm serve ...`;含 JSON/空白的 token 加 shell 单引号。"""
+    def q(tok: str) -> str:
+        return f"'{tok}'" if any(c in tok for c in ' {}"') else tok
+    return " ".join([f"vllm serve {model}", *(q(t) for t in render_flags(config))])
 
 
 def is_known_knob(key: str) -> bool:
