@@ -407,7 +407,6 @@ def build_app(
     sink: Sink,
     rule_store: RuleStore,
     diag_engine: Any = None,
-    custom_store: Any = None,
     nvml: NvmlSampler | None = None,
     cupti: CuptiKernelCollector | None = None,
     version: str = "0.0.1.dev0",
@@ -1103,21 +1102,27 @@ def build_app(
         from pping_lang.rules.diagnosis_config import load_config  # noqa: PLC0415
         return load_config()
 
+    def _serialize_check(cfg, c) -> dict[str, Any]:
+        resolved = getattr(cfg, c.threshold_ref) if c.threshold_ref else c.threshold
+        return {
+            "metric": c.metric, "op": c.op,
+            "threshold": resolved, "threshold_ref": c.threshold_ref,
+            "window_seconds": c.window_seconds, "aggregation": c.aggregation,
+        }
+
     def _serialize_rules(cfg) -> list[dict[str, Any]]:
         out: list[dict[str, Any]] = []
         for r in DIAGNOSIS_RULES:
-            checks = []
-            for c in r.checks:
-                resolved = getattr(cfg, c.threshold_ref) if c.threshold_ref else c.threshold
-                checks.append({
-                    "metric": c.metric, "op": c.op,
-                    "threshold": resolved, "threshold_ref": c.threshold_ref,
-                    "window_seconds": c.window_seconds, "aggregation": c.aggregation,
-                })
+            detectors = [
+                {
+                    "key": det.key, "name": det.name, "layer": det.layer,
+                    "checks": [_serialize_check(cfg, c) for c in det.checks],
+                }
+                for det in r.detectors
+            ]
             out.append({
                 "id": r.id, "name": r.name, "kind": r.kind, "severity": r.severity,
-                "claim": r.claim, "match": r.match, "checks": checks,
-                "precondition": list(r.precondition), "requires_regime": r.requires_regime,
+                "detectors": detectors,
                 "hypothesis": r.hypothesis, "suggestion": r.suggestion,
             })
         return out
@@ -1127,43 +1132,10 @@ def build_app(
         cfg = _active_config()
         return {
             "active": diag_engine is not None,
-            "rules": _serialize_rules(cfg),               # 策展事实规则(只读)
-            "custom_rules": custom_store.list_dicts() if custom_store else [],  # 用户自定义(可改)
-            "custom_editable": custom_store is not None,
+            "rules": _serialize_rules(cfg),               # 4 瓶颈诊断规则(只读)
             "config": diag_config_to_dict(cfg),
             "workload_forms": list(WORKLOAD_FORMS),
         }
-
-    # === 自定义规则 CRUD —— 与策展规则同一评估器(DiagnosisEngine 每轮一起评)===
-    def _require_store():
-        if custom_store is None:
-            raise HTTPException(503, "Custom rules unavailable (diagnosis engine not running)")
-        return custom_store
-
-    @app.post("/api/diagnosis_rules/custom")
-    def create_custom_rule(body: dict = Body(...)) -> dict[str, Any]:
-        store = _require_store()
-        try:
-            return store.add(body)
-        except (ValueError, TypeError) as e:
-            raise HTTPException(400, f"Invalid rule: {e}")
-
-    @app.put("/api/diagnosis_rules/custom/{rule_id}")
-    def update_custom_rule(rule_id: str, body: dict = Body(...)) -> dict[str, Any]:
-        store = _require_store()
-        try:
-            return store.update(rule_id, body)
-        except KeyError:
-            raise HTTPException(404, f"Custom rule {rule_id!r} not found")
-        except (ValueError, TypeError) as e:
-            raise HTTPException(400, f"Invalid rule: {e}")
-
-    @app.delete("/api/diagnosis_rules/custom/{rule_id}")
-    def delete_custom_rule(rule_id: str) -> dict[str, Any]:
-        store = _require_store()
-        if not store.delete(rule_id):
-            raise HTTPException(404, f"Custom rule {rule_id!r} not found")
-        return {"deleted": rule_id}
 
     # === PUT /api/diagnosis_config — 改中心 SLA/阈值,热生效 ===
     @app.put("/api/diagnosis_config")
@@ -1620,6 +1592,23 @@ def build_app(
             "started_at_ns": started_at_ns,
             "scenario_name": scenario.name,
         }
+
+    # === Autopilot(M0:默认 SimSandbox + StubAgent 跑通闭环;真 GPU 沙盒为下一增量)===
+    try:
+        from pathlib import Path as _Path  # noqa: PLC0415
+
+        from pping_lang.autopilot.api import register_autopilot_routes  # noqa: PLC0415
+        _ap_model = (os.environ.get("PPING_LANG_INFO_SERVED_MODEL_NAME")
+                     or os.environ.get("PPING_LANG_INFO_MODEL")
+                     or "Qwen/Qwen2.5-0.5B-Instruct")
+        # session_dir 可被 env 覆盖,指向共享挂载卷 → host CLI 跑的真 session 直接在 dashboard 显示
+        _ap_dir = (os.environ.get("PPING_LANG_AUTOPILOT_DIR")
+                   or str(_Path(db_path).parent / "autopilot"))
+        _ap_bridge = os.environ.get("PPING_LANG_AUTOPILOT_BRIDGE_URL")
+        register_autopilot_routes(app, model=_ap_model, sim=True, session_dir=_ap_dir,
+                                  bridge_url=_ap_bridge)
+    except Exception:  # noqa: BLE001
+        logger.exception("[pping-lang] autopilot routes registration failed")
 
     return app
 

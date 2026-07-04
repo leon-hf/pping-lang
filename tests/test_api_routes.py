@@ -282,31 +282,36 @@ def test_diagnosis_rules_endpoint_lists_fact_rules_and_config(empty_app):
     client, _db, _sink = empty_app
     data = client.get("/api/diagnosis_rules").json()
     ids = {r["id"] for r in data["rules"]}
-    assert {"S1", "S5", "D3a", "regime-classify"} <= ids   # 事实规则在列
+    assert ids == {"A", "B", "C", "D"}                     # 4 瓶颈在列
     assert data["active"] is False                          # 无引擎实例(只浏览)
     assert "sla_ttft_p99_ms" in data["config"]              # 中心配置透出
     assert "custom" in data["workload_forms"]
-    # 阈值已按配置解析成具体数(S1 引 sla_ttft_p99_ms)
-    s1 = next(r for r in data["rules"] if r["id"] == "S1")
-    assert s1["checks"][0]["threshold"] == data["config"]["sla_ttft_p99_ms"]
-    assert s1["checks"][0]["threshold_ref"] == "sla_ttft_p99_ms"
-    # 名字是纯事实,根因/处方分列(署名)
-    assert s1["name"] == "TTFT p99 超 SLA"
-    assert "[推断]" not in s1["name"] and s1["hypothesis"]
+    # 每个瓶颈暴露多条检测手段(detector),带测量层
+    a = next(r for r in data["rules"] if r["id"] == "A")
+    assert len(a["detectors"]) >= 2
+    assert {d["layer"] for d in a["detectors"]} <= {"L1", "L2", "L3", "L4", "L5"}
+    # 阈值已按配置解析成具体数(A roofline 手段的 MFU check 引 mfu_low_ratio)
+    all_checks = [c for det in a["detectors"] for c in det["checks"]]
+    mfu_check = next(c for c in all_checks if c["threshold_ref"] == "mfu_low_ratio")
+    assert mfu_check["threshold"] == data["config"]["mfu_low_ratio"]
+    # 名字 = 事实/瓶颈,根因/处方署名分列
+    assert "[推断]" not in a["name"] and a["hypothesis"]
 
 
 def test_update_diagnosis_config_validates_and_echoes(empty_app):
     """PUT /api/diagnosis_config:合法配置回显解析后的值;无引擎时 applied=False。"""
     client, _db, _sink = empty_app
-    r = client.put("/api/diagnosis_config", json={"workload_form": "code", "sla_ttft_p99_ms": 123.0})
+    r = client.put("/api/diagnosis_config", json={"workload_form": "code", "mfu_low_ratio": 0.15})
     assert r.status_code == 200
     body = r.json()
     assert body["applied"] is False                         # 测试 app 没接引擎
-    assert body["config"]["sla_ttft_p99_ms"] == 123.0
+    assert body["config"]["mfu_low_ratio"] == 0.15
     assert body["config"]["workload_form"] == "code"
-    # 规则里 S1 阈值随之变成 123
-    s1 = next(x for x in body["rules"] if x["id"] == "S1")
-    assert s1["checks"][0]["threshold"] == 123.0
+    # 规则 A 的 MFU 阈值随之变成 0.15(在某条 detector 的 check 里)
+    a = next(x for x in body["rules"] if x["id"] == "A")
+    all_checks = [c for det in a["detectors"] for c in det["checks"]]
+    mfu_check = next(c for c in all_checks if c["threshold_ref"] == "mfu_low_ratio")
+    assert mfu_check["threshold"] == 0.15
 
 
 def test_update_diagnosis_config_rejects_invalid(empty_app):

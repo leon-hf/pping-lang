@@ -657,7 +657,7 @@ footer{border-top:1px solid var(--border);padding:48px 0 60px;margin-top:40px}
             <div class="canvas-box"><canvas id="latency"></canvas></div>
             <div class="notice" style="margin-top:24px">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01" stroke-linecap="round"/></svg>
-              <span data-i18n="lat.note">本机 <b>--enforce-eager</b> 运行，vLLM 未导出 <code style="font-family:var(--mono)">perf_stats</code>，故 MFU / padding ratio 显示为空，Roofline 自动切换 analytical 模式（绝对值约 ±20% 误差）。其余 KPI 不受影响。</span>
+              <span data-i18n="lat.note">本机按生产默认 CUDA graph 路径运行；诊断保留 <code style="font-family:var(--mono)">--enable-mfu-metrics</code>，因此 MFU / bandwidth / Roofline 可直接来自 vLLM 运行时指标。</span>
             </div>
           </div>
         </div>
@@ -1253,7 +1253,7 @@ const I18N_EN = {
   "roof.compute":"Compute util","roof.bandwidth":"Bandwidth util","roof.paths":"Optimization paths",
   "roof.p1":"Grow batch until KV cache usage nears 80%","roof.p2":"Enable speculative decoding","roof.p3":"Weight quantization (AWQ / GPTQ)","roof.p4":"Move to a higher-bandwidth GPU",
   "lat.h":"Latency over time · TTFT / TPOT","lat.sub":"p50 / p99 trend, bucketed (4s/bucket) over the bench window",
-  "lat.note":'This host runs <b>--enforce-eager</b>, so vLLM exports no <code style="font-family:var(--mono)">perf_stats</code> — MFU / padding ratio show empty and Roofline falls back to analytical mode (≈ ±20% on absolute values). Other KPIs are unaffected.',
+  "lat.note":'This host follows the production-default CUDA graph path; diagnostics keep <code style="font-family:var(--mono)">--enable-mfu-metrics</code>, so MFU / bandwidth / Roofline can come directly from vLLM runtime metrics.',
   "diag.h":"Diagnoses · fact + signed inference",
   "diag.sub":"The rule engine evaluates every 1s by default. The examples below show the output shape when a rule fires (this bench was healthy — no alerts).",
   "diag.infer":"signed inference →",
