@@ -1,13 +1,11 @@
-"""诊断规则求值核 —— 把"规则逻辑"和"数据源"解耦。
+"""诊断求值核 —— 把"规则逻辑"和"数据源"解耦。
 
-核心 `evaluate(rules, cfg, metric_fn, regime)` 是**纯函数**:
+`evaluate(metric_fn, cfg, rules)` 是**纯函数**:
 - `metric_fn(metric, window_s, agg) -> float | None` 提供某指标的窗口聚合值(没数据返 None);
-- 返回触发的 `DiagFinding`(事实 + 署名的根因/处方)。
+- 每个瓶颈(`FactRule`)有多条独立检测手段(`Detector`,各是一组 check 的 AND);
+- **任一手段命中 → 瓶颈触发**(OR);返回触发的 `DiagFinding`(带命中了哪几条手段 = 几路互证)。
 
-好处:同一套逻辑既能合成数据单测,又能喂真实指标(内存环 / JSONL 扫描)跑验证,
-引擎本身不依赖 GPU/vLLM。两阶段求值实现"前置守卫":
-  ① 先算每条规则的 `holds`(checks 是否成立);
-  ② 再判 active = holds 且(无前置或任一前置 holds)且(无 requires_regime 或 regime 匹配)。
+好处:同一套逻辑既能合成数据单测,又能喂真实指标跑验证,引擎本身不依赖 GPU/vLLM。
 """
 from __future__ import annotations
 
@@ -15,7 +13,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from pping_lang.rules.diagnosis_config import DiagnosisConfig
-from pping_lang.rules.diagnosis_rules import DIAGNOSIS_RULES, FactCheck, FactRule
+from pping_lang.rules.diagnosis_rules import DIAGNOSIS_RULES, Detector, FactCheck, FactRule
 from pping_lang.rules.engine import _OP_TO_FN
 
 # (metric, window_seconds, aggregation) -> 聚合值 或 None(无数据)
@@ -24,15 +22,15 @@ MetricFn = Callable[[str, int, str], "float | None"]
 
 @dataclass(frozen=True)
 class DiagFinding:
-    """一条触发的诊断:事实 + 署名推断(hypothesis/suggestion)。"""
+    """一个触发的瓶颈:事实 + 署名推断 + 命中了哪几条检测手段(几路互证)。"""
 
     rule_id: str
-    name: str                       # 客观事实(规则名)
-    claim: str
+    name: str                       # 客观事实(瓶颈名)
     severity: str = "info"
-    values: dict[str, float] = field(default_factory=dict)  # 触发时各 check 实测值
-    hypothesis: str = ""            # 根因推断(署名,非判决)
+    values: dict[str, float] = field(default_factory=dict)  # 各 check 实测值(key = metric:agg)
+    hypothesis: str = ""            # 根因推断(署名)
     suggestion: str = ""            # 处方
+    fired_detectors: tuple[str, ...] = ()   # 命中的手段 key(len = 几路互证)
 
 
 def _check_value(metric_fn: MetricFn, c: FactCheck) -> float | None:
@@ -52,58 +50,36 @@ def _threshold(c: FactCheck, cfg: DiagnosisConfig) -> float:
     return c.threshold
 
 
-def _checks_hold(
-    rule: FactRule, metric_fn: MetricFn, cfg: DiagnosisConfig,
-) -> tuple[bool, dict[str, float]]:
-    """评一条规则的 checks(按 match all/any),返回 (是否成立, 各 check 实测值)。"""
-    flags: list[bool] = []
-    values: dict[str, float] = {}
-    for c in rule.checks:
+def _detector_holds(
+    det: Detector, metric_fn: MetricFn, cfg: DiagnosisConfig, values: dict[str, float],
+) -> bool:
+    """评一条检测手段(checks 的 AND)。把每个有数据的 check 值并进 `values`(供 UI 复算 + 当证据)。"""
+    held = True
+    for c in det.checks:
         v = _check_value(metric_fn, c)
-        key = f"{c.metric}:{c.aggregation}"
-        if v is None:
-            flags.append(False)
-            continue
-        values[key] = v
-        flags.append(_OP_TO_FN[c.op](v, _threshold(c, cfg)))
-    if not flags:
-        return False, values
-    held = all(flags) if rule.match == "all" else any(flags)
-    return held, values
+        if v is not None:
+            values[f"{c.metric}:{c.aggregation}"] = v
+        if v is None or not _OP_TO_FN[c.op](v, _threshold(c, cfg)):
+            held = False
+    return held and bool(det.checks)
 
 
 def evaluate(
     metric_fn: MetricFn,
     cfg: DiagnosisConfig,
     rules: tuple[FactRule, ...] = DIAGNOSIS_RULES,
-    regime: str | None = None,
+    regime: str | None = None,   # 兼容旧签名;现不依赖 regime(纯物理判)
 ) -> list[DiagFinding]:
-    """一次求值:返回所有触发的诊断。
-
-    `regime`("memory_bound"/"compute_bound"/None)由外部传入(操作点解析,暂未回流后端
-    时传 None;则 `requires_regime` 的规则不触发,优雅降级,不乱报)。
-    """
-    # ① 算 holds(分类器规则不参与,regime 由参数给)
-    holds: dict[str, bool] = {}
-    values: dict[str, dict[str, float]] = {}
-    for r in rules:
-        if r.kind == "classifier":
-            continue
-        h, vals = _checks_hold(r, metric_fn, cfg)
-        holds[r.id] = h
-        values[r.id] = vals
-
-    # ② active = holds 且 前置任一 holds 且 regime 匹配
+    """一次求值:每个瓶颈任一 detector 命中即触发,返回所有触发的诊断。"""
     findings: list[DiagFinding] = []
     for r in rules:
-        if r.kind == "classifier" or not holds.get(r.id):
-            continue
-        if r.precondition and not any(holds.get(p) for p in r.precondition):
-            continue
-        if r.requires_regime is not None and r.requires_regime != regime:
-            continue
-        findings.append(DiagFinding(
-            rule_id=r.id, name=r.name, claim=r.claim, severity=r.severity,
-            values=values[r.id], hypothesis=r.hypothesis, suggestion=r.suggestion,
-        ))
+        values: dict[str, float] = {}
+        fired = [det.key for det in r.detectors
+                 if _detector_holds(det, metric_fn, cfg, values)]
+        if fired:
+            findings.append(DiagFinding(
+                rule_id=r.id, name=r.name, severity=r.severity,
+                values=values, hypothesis=r.hypothesis, suggestion=r.suggestion,
+                fired_detectors=tuple(fired),
+            ))
     return findings

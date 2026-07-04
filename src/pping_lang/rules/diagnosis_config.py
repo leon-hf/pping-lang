@@ -46,16 +46,22 @@ class DiagnosisConfig:
     sla_ttft_p99_ms: float = 2000.0      # S1
     sla_tpot_p99_ms: float = 50.0        # S2
     # --- 阈值(各规则引用;名称对应规则)---
-    long_prompt_tokens: int = 2048       # D1a 长 prompt
-    waiting_reqs: float = 50.0           # D1b 队列偏长
-    mbu_high_pct: float = 85.0           # D2a 贴带宽屋顶
-    mbu_low_pct: float = 50.0            # D3a 远离带宽屋顶(配 MFU 低 = 双低)
-    batch_small_reqs: float = 4.0        # D2b 并发偏小
-    mfu_low_ratio: float = 0.20          # D1c / D3a 算力利用低
-    tail_ratio: float = 5.0              # S5 TTFT p99/p50
-    kv_pressure_ratio: float = 0.90      # S4 / D4a KV 用量
-    prefix_hit_low: float = 0.10         # D3c 前缀命中低
-    weights_hbm_ratio: float = 0.90      # D4b 权重占显存
+    long_prompt_tokens: int = 2048       # (保留:历史字段)
+    waiting_reqs: float = 50.0           # (保留:历史字段)
+    min_running_reqs: float = 0.5        # A 空载守卫:窗口内平均在跑请求数下限(挡掉"空载也双低"误报)
+    mbu_low_pct: float = 50.0            # A 远离带宽屋顶:NVML HBM 控制器繁忙% < 此(有界 0-100)
+    stall_scheduler_slack_pct: float = 30.0   # A 内核佐证手段:warp 就绪未选中(scheduler_slack)占 stall%
+    mbu_high_pct: float = 85.0           # B 贴带宽屋顶:NVML HBM 控制器繁忙% > 此(有界;实测 perf-MBU 因 L2 复用无界,弃用作阈)
+    stall_memory_throttle_pct: float = 25.0   # B 内核佐证:访存管线 throttle 占 stall%
+    stall_memory_dep_pct: float = 25.0   # B 内核佐证:访存延迟(long_scoreboard)占 stall%
+    stall_math_pipe_pct: float = 25.0    # C 内核佐证:计算管线(FMA/ALU/Tensor)打满占 stall%
+    batch_small_reqs: float = 4.0        # (保留:历史字段)
+    mfu_low_ratio: float = 0.20          # A 算力利用低(配 MBU 低 = 双低 / 喂不饱)
+    mfu_high_ratio: float = 0.50         # C 算力打满(算力墙)
+    tail_ratio: float = 5.0              # (保留:历史字段)
+    kv_pressure_ratio: float = 0.90      # D KV 用量
+    prefix_hit_low: float = 0.10         # (保留:历史字段)
+    weights_hbm_ratio: float = 0.90      # (保留:历史字段)
 
 
 def default_config(workload_form: str = "custom") -> DiagnosisConfig:
@@ -74,17 +80,21 @@ def validate_config(cfg: DiagnosisConfig) -> None:
             f"unknown workload_form {cfg.workload_form!r}; must be one of {WORKLOAD_FORMS}"
         )
     for f in ("sla_ttft_p99_ms", "sla_tpot_p99_ms", "long_prompt_tokens",
-              "waiting_reqs", "batch_small_reqs", "tail_ratio"):
+              "waiting_reqs", "batch_small_reqs", "tail_ratio", "min_running_reqs"):
         if getattr(cfg, f) <= 0:
             raise ValueError(f"{f} must be > 0")
-    for f in ("mbu_high_pct", "mbu_low_pct"):
+    for f in ("mbu_low_pct", "mbu_high_pct", "stall_memory_throttle_pct", "stall_memory_dep_pct",
+              "stall_math_pipe_pct", "stall_scheduler_slack_pct"):
         if not 0 < getattr(cfg, f) <= 100:
             raise ValueError(f"{f} must be in (0, 100]")
-    for f in ("mfu_low_ratio", "kv_pressure_ratio", "prefix_hit_low", "weights_hbm_ratio"):
+    for f in ("mfu_low_ratio", "mfu_high_ratio",
+              "kv_pressure_ratio", "prefix_hit_low", "weights_hbm_ratio"):
         if not 0 < getattr(cfg, f) <= 1:
             raise ValueError(f"{f} must be in (0, 1]")
     if cfg.mbu_low_pct >= cfg.mbu_high_pct:
-        raise ValueError("mbu_low_pct must be < mbu_high_pct(否则'双低'与'贴屋顶'区间重叠)")
+        raise ValueError("mbu_low_pct 须 < mbu_high_pct(否则'双低'与'贴屋顶'区间重叠)")
+    if cfg.mfu_low_ratio >= cfg.mfu_high_ratio:
+        raise ValueError("mfu_low_ratio must be < mfu_high_ratio(否则'喂不饱'与'算力墙'区间重叠)")
 
 
 def from_dict(d: dict) -> DiagnosisConfig:

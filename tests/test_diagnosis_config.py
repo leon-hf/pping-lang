@@ -20,9 +20,10 @@ def test_default_custom():
     assert c.workload_form == "custom"
     assert c.sla_ttft_p99_ms == 2000.0
     assert c.sla_tpot_p99_ms == 50.0
-    # 阈值用 dataclass 默认
+    # 阈值用 dataclass 默认(MBU 用 NVML HBM 繁忙%,有界)
     assert c.mbu_high_pct == 85.0 and c.mbu_low_pct == 50.0
-    assert c.mfu_low_ratio == 0.20
+    assert c.mfu_low_ratio == 0.20 and c.min_running_reqs == 0.5
+    assert c.stall_memory_throttle_pct == 25.0 and c.stall_memory_dep_pct == 25.0 and c.stall_math_pipe_pct == 25.0
 
 
 @pytest.mark.parametrize("form,ttft,tpot", [
@@ -74,6 +75,7 @@ def test_validate_rejects_nonpositive_sla():
 
 
 def test_validate_rejects_mbu_low_ge_high():
+    # mbu_low_pct 须 < mbu_high_pct;90 ≥ 85 → 拒
     with pytest.raises(ValueError):
         validate_config(DiagnosisConfig(mbu_low_pct=90, mbu_high_pct=85))
 
