@@ -84,6 +84,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--agent-base-url", default=None)
     p.add_argument("--agent-key", default=None)
     p.add_argument("--agent-model", default=None)
+    p.add_argument("--agent-provider", default=None)
     p.add_argument("--agent-guidance", default="")
     args = p.parse_args(argv)
 
@@ -91,10 +92,12 @@ def main(argv: list[str] | None = None) -> int:
     agent_key = args.agent_key or os.environ.get("AGENT_KEY")
     agent_base = args.agent_base_url or os.environ.get("AGENT_BASE_URL")
     agent_model = args.agent_model or os.environ.get("AGENT_MODEL")
+    agent_provider = args.agent_provider or os.environ.get("AGENT_PROVIDER")
     agent_guidance = args.agent_guidance or os.environ.get("AGENT_GUIDANCE", "")
     if agent_key and agent_base and agent_model:
         agent_cfg = {"base_url": agent_base, "api_key": agent_key,
-                     "model": agent_model, "guidance": agent_guidance}
+                     "model": agent_model, "provider": agent_provider,
+                     "guidance": agent_guidance}
 
     env = {}
     for kv in args.env:

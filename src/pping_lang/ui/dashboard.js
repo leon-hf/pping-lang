@@ -1505,7 +1505,7 @@ function autopilotTab() {
     budget: { rounds: 6, minutes: 15 },
     agentOpen: false,
     preset: 'openrouter',
-    agent: { base_url: 'https://openrouter.ai/api/v1', api_key: '', model: 'anthropic/claude-opus-4' },
+    agent: { provider: '', base_url: 'https://openrouter.ai/api/v1', api_key: '', model: 'anthropic/claude-opus-4' },
     agentTest: '',
     agentTesting: false,
     advOpen: false,
@@ -1523,18 +1523,20 @@ function autopilotTab() {
 目标 / 预算 / 当前配置 / 蒸馏诊断 / 历史 / 动作范围。
 你的「额外指引」会追加在以上合约之后。`,
     PRESETS: {
-      openrouter: { base_url: 'https://openrouter.ai/api/v1', model: 'anthropic/claude-opus-4' },
-      openai:     { base_url: 'https://api.openai.com/v1',    model: 'gpt-4o' },
-      deepseek:   { base_url: 'https://api.deepseek.com/v1',  model: 'deepseek-chat' },
-      kimi:       { base_url: 'https://api.moonshot.ai/v1',   model: 'kimi-k2.6', temperature: 0.6 },
-      local:      { base_url: 'http://localhost:11434/v1',    model: 'llama3.1' },
-      custom:     { base_url: '', model: '' },
+      openrouter:  { provider: '', base_url: 'https://openrouter.ai/api/v1', model: 'anthropic/claude-opus-4' },
+      openai:      { provider: '', base_url: 'https://api.openai.com/v1',    model: 'gpt-4o' },
+      deepseek:    { provider: '', base_url: 'https://api.deepseek.com/v1',  model: 'deepseek-chat' },
+      kimi_coding: { provider: 'kimi_coding', base_url: 'https://api.kimi.com/coding/v1', model: 'kimi-for-coding', temperature: 0.4 },
+      kimi:        { provider: '', base_url: 'https://api.moonshot.ai/v1',   model: 'kimi-k2.6', temperature: 0.6 },
+      local:       { provider: '', base_url: 'http://localhost:11434/v1',    model: 'llama3.1' },
+      custom:      { provider: '', base_url: '', model: '' },
     },
     applyPreset() {
       const p = this.PRESETS[this.preset];
       if (p) {
         this.agent.base_url = p.base_url;
         this.agent.model = p.model;
+        this.agent.provider = p.provider || '';
         if (p.temperature != null) this.adv.temperature = p.temperature;
       }
     },

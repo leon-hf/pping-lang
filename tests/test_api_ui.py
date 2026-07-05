@@ -89,6 +89,11 @@ def test_autopilot_agent_presets_include_kimi(client):
     assert "https://api.moonshot.ai/v1" in body
     assert "kimi-k2.6" in body
     assert "temperature: 0.6" in body
+    assert 'value="kimi_coding"' in body
+    assert "Kimi Coding" in body
+    assert "https://api.kimi.com/coding/v1" in body
+    assert "kimi-for-coding" in body
+    assert "provider: 'kimi_coding'" in body
 
 
 def test_autopilot_agent_test_calls_backend_probe(client):

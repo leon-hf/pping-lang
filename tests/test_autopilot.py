@@ -441,6 +441,49 @@ def test_agent_config_connectivity_probe(monkeypatch):
     assert seen["timeout"] == 9
 
 
+def test_agent_config_kimi_coding_probe(monkeypatch):
+    from pping_lang.autopilot import api as ap_api
+
+    class Resp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
+
+        def read(self):
+            return b'{"content":[{"type":"thinking","thinking":"hidden"},{"type":"text","text":"ok"}]}'
+
+    seen = {}
+
+    def fake_urlopen(req, timeout):
+        seen["url"] = req.full_url
+        seen["auth"] = req.headers.get("Authorization")
+        seen["ua"] = req.headers.get("User-agent")
+        seen["body"] = json.loads(req.data.decode("utf-8"))
+        seen["timeout"] = timeout
+        return Resp()
+
+    monkeypatch.setattr(ap_api.urllib.request, "urlopen", fake_urlopen)
+    out = ap_api.test_agent_config({
+        "provider": "kimi_coding",
+        "base_url": "https://api.kimi.com/coding/v1",
+        "api_key": "secret",
+        "model": "kimi-for-coding",
+        "temperature": 0.6,
+        "timeout_s": 9,
+    })
+    assert out["ok"] is True and out["provider"] == "kimi_coding"
+    assert out["sample"] == "ok"
+    assert seen["url"] == "https://api.kimi.com/coding/v1/messages"
+    assert seen["auth"] == "Bearer secret"
+    assert seen["ua"] == "KimiCLI/0.77"
+    assert seen["body"]["model"] == "kimi-for-coding"
+    assert seen["body"]["max_tokens"] == 32
+    assert "temperature" not in seen["body"]
+    assert seen["timeout"] == 9
+
+
 # ---- 真 LLM agent(mock HTTP)+ 兜底 ----
 
 def _ctx(cands, bottleneck="A", config=None, tried=None):
@@ -498,7 +541,7 @@ def test_validate_rejects_offmenu_and_repeat():
 
 
 def test_build_agent_selects_claude_openai_stub():
-    from pping_lang.autopilot.agent import ClaudeAgent, OpenAIAgent, ResilientAgent
+    from pping_lang.autopilot.agent import ClaudeAgent, KimiCodingAgent, OpenAIAgent, ResilientAgent
     from pping_lang.autopilot.api import build_agent
     assert isinstance(build_agent(None), StubAgent)
     assert isinstance(build_agent({"base_url": "http://x/v1", "model": "m"}), StubAgent)  # 没 key
@@ -506,6 +549,9 @@ def test_build_agent_selects_claude_openai_stub():
     assert isinstance(a, ResilientAgent) and isinstance(a._primary, OpenAIAgent)
     c = build_agent({"provider": "anthropic", "api_key": "k", "model": "claude-opus-4"})  # G3 默认 Claude
     assert isinstance(c, ResilientAgent) and isinstance(c._primary, ClaudeAgent)
+    k = build_agent({"provider": "kimi_coding", "base_url": "https://api.kimi.com/coding/v1",
+                     "api_key": "k", "model": "kimi-for-coding"})
+    assert isinstance(k, ResilientAgent) and isinstance(k._primary, KimiCodingAgent)
 
 
 # ---- DockerSandbox(真沙盒;mock docker / bench,无 GPU)----

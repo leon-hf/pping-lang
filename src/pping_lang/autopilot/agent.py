@@ -5,7 +5,8 @@
 ③ 必须接受压测判决(不得声称压测没证实的收益)。
 
 可插拔(G3,默认 Claude/Anthropic):`StubAgent`(确定性,无 key,默认兜底)/ `ClaudeAgent`
-(Anthropic /v1/messages)/ `OpenAIAgent`(OpenAI 兼容:DeepSeek/OpenRouter/本地)。
+(Anthropic /v1/messages)/ `KimiCodingAgent`(Kimi Coding /messages)/
+`OpenAIAgent`(OpenAI 兼容:DeepSeek/OpenRouter/本地)。
 `ResilientAgent` 把真 LLM 调用失败兜回 StubAgent,session 不因网络抖动而死。
 """
 from __future__ import annotations
@@ -224,6 +225,35 @@ class ClaudeAgent(_HTTPAgent):
                      "anthropic-version": "2023-06-01"})
         with urllib.request.urlopen(req, timeout=self.timeout_s) as resp:
             return json.loads(resp.read())["content"][0]["text"]
+
+
+class KimiCodingAgent(_HTTPAgent):
+    """Kimi Coding Messages API. This is not Moonshot's OpenAI-compatible API."""
+
+    def __init__(self, api_key: str, model: str = "kimi-for-coding",
+                 base_url: str = "https://api.kimi.com/coding/v1", **kw) -> None:
+        super().__init__(**kw)
+        self.api_key = api_key
+        self.model = model
+        self.base_url = base_url.rstrip("/")
+
+    def _call(self, system: str, user: str) -> str:
+        import urllib.request
+        body = json.dumps({
+            "model": self.model, "max_tokens": 1024,
+            "system": system, "messages": [{"role": "user", "content": user}],
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            f"{self.base_url}/messages", data=body,
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {self.api_key}",
+                     "User-Agent": "KimiCLI/0.77"})
+        with urllib.request.urlopen(req, timeout=self.timeout_s) as resp:
+            content = json.loads(resp.read()).get("content") or []
+        texts = [str(b.get("text") or "") for b in content
+                 if isinstance(b, dict) and b.get("type") == "text" and b.get("text")]
+        if texts:
+            return "\n".join(texts)
+        raise RuntimeError("Kimi Coding response did not contain a text block")
 
 
 class ResilientAgent:

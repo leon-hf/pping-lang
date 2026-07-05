@@ -13,7 +13,13 @@ from typing import Any
 import urllib.error
 import urllib.request
 
-from pping_lang.autopilot.agent import ClaudeAgent, OpenAIAgent, ResilientAgent, StubAgent
+from pping_lang.autopilot.agent import (
+    ClaudeAgent,
+    KimiCodingAgent,
+    OpenAIAgent,
+    ResilientAgent,
+    StubAgent,
+)
 from pping_lang.autopilot.objective import SLA, Floor, ObjectiveSpec
 from pping_lang.autopilot.runner import Runner
 from pping_lang.autopilot.sandbox import SimSandbox
@@ -23,6 +29,7 @@ from pping_lang.autopilot.session_store import SessionStore
 def build_agent(cfg: dict | None):
     """可插拔(§8,G3 默认 Claude):
     - provider=anthropic 或 base_url 含 anthropic → ClaudeAgent;
+    - provider=kimi_coding 或 base_url 含 api.kimi.com/coding → KimiCodingAgent;
     - 有 base_url+key+model(OpenAI 兼容:DeepSeek/OpenRouter/本地)→ OpenAIAgent;
     - 否则纯 StubAgent。真 LLM 一律用 ResilientAgent 兜底 StubAgent(网络/解析失败不死)。"""
     cfg = cfg or {}
@@ -32,6 +39,9 @@ def build_agent(cfg: dict | None):
     primary = None
     if key and (cfg.get("provider") == "anthropic" or (base and "anthropic" in base)):
         primary = ClaudeAgent(api_key=key, model=model or "claude-opus-4", **common)
+    elif key and (cfg.get("provider") == "kimi_coding" or (base and "api.kimi.com/coding" in base)):
+        primary = KimiCodingAgent(base_url=base or "https://api.kimi.com/coding/v1",
+                                  api_key=key, model=model or "kimi-for-coding", **common)
     elif key and base and model:
         primary = OpenAIAgent(base_url=base, api_key=key, model=model, **common)
     if primary is None:
@@ -53,7 +63,7 @@ def build_objective(d: dict) -> ObjectiveSpec:
 
 
 def test_agent_config(cfg: dict | None) -> dict:
-    """Try a minimal OpenAI-compatible chat call for the configured agent.
+    """Try a minimal provider call for the configured agent.
 
     This is intentionally server-side: browser-side provider calls usually hit
     CORS, and the API key should not be sprayed through page logs. The key is
@@ -65,6 +75,36 @@ def test_agent_config(cfg: dict | None) -> dict:
     model = str(cfg.get("model") or "")
     if not (base and key and model):
         return {"ok": False, "error": "missing base_url/api_key/model"}
+
+    timeout = max(3.0, min(float(cfg.get("timeout_s") or 15), 30.0))
+    if cfg.get("provider") == "kimi_coding" or "api.kimi.com/coding" in base:
+        url = base if base.endswith("/messages") else base + "/messages"
+        payload: dict[str, Any] = {
+            "model": model,
+            "messages": [{"role": "user", "content": "reply exactly ok"}],
+            "max_tokens": 32,
+        }
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            url, data=data, method="POST",
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {key}",
+                "User-Agent": "KimiCLI/0.77",
+            })
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                body = json.loads(r.read().decode("utf-8") or "{}")
+            blocks = body.get("content") or []
+            texts = [str(b.get("text") or "").strip() for b in blocks
+                     if isinstance(b, dict) and b.get("type") == "text" and b.get("text")]
+            sample = " ".join(t for t in texts if t).strip()
+            return {"ok": True, "provider": "kimi_coding", "model": model, "sample": sample[:80]}
+        except urllib.error.HTTPError as e:
+            msg = e.read().decode("utf-8", errors="replace")[:400]
+            return {"ok": False, "error": f"HTTP {e.code}: {msg}"}
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "error": f"{type(e).__name__}: {e}"}
 
     url = base if base.endswith("/chat/completions") else base + "/chat/completions"
     payload: dict[str, Any] = {
@@ -78,7 +118,6 @@ def test_agent_config(cfg: dict | None) -> dict:
     if cfg.get("temperature") is not None:
         payload["temperature"] = float(cfg["temperature"])
     data = json.dumps(payload).encode("utf-8")
-    timeout = max(3.0, min(float(cfg.get("timeout_s") or 15), 30.0))
     req = urllib.request.Request(
         url, data=data, method="POST",
         headers={

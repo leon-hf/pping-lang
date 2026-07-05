@@ -1551,6 +1551,7 @@
           <option value="openrouter">OpenRouter</option>
           <option value="openai">OpenAI</option>
           <option value="deepseek">DeepSeek</option>
+          <option value="kimi_coding">Kimi Coding</option>
           <option value="kimi">Kimi / Moonshot</option>
           <option value="local">本地 (Ollama / vLLM)</option>
           <option value="custom">自定义</option>
@@ -1563,7 +1564,7 @@
         <button class="ap-test" @click="testAgent()" :disabled="agentTesting" x-text="agentTest || '测试连接'"></button>
         <div class="ap-adv-toggle" @click="advOpen=!advOpen"><span class="c" x-text="advOpen?'▾':'▸'"></span> 高级</div>
       </div>
-      <div class="ap-agent-note">任意 <b style="color:var(--coral-strong)">OpenAI 兼容</b>端点都行（OpenRouter / OpenAI / DeepSeek / Kimi / 本地）。真实调优必须配置 LLM agent；StubAgent 只用于本地 SimSandbox/dev tests,不能驱动真实 GPU 调优。Key 仅本会话用于调 agent，<b>不入诊断热路径、不随轨迹存盘</b>；生产建议走环境变量注入。注意：<b>别用被压测的那个 vLLM 模型当 agent</b>（它在被压、可能太小）。</div>
+      <div class="ap-agent-note">OpenRouter / OpenAI / DeepSeek / Moonshot 走 <b style="color:var(--coral-strong)">OpenAI 兼容</b>端点；Kimi Coding 走 Kimi Coding Messages API。真实调优必须配置 LLM agent；StubAgent 只用于本地 SimSandbox/dev tests,不能驱动真实 GPU 调优。Key 仅本会话用于调 agent，<b>不入诊断热路径、不随轨迹存盘</b>；生产建议走环境变量注入。注意：<b>别用被压测的那个 vLLM 模型当 agent</b>（它在被压、可能太小）。</div>
 
       <!-- 高级：agent 行为（展开区） -->
       <div class="ap-adv" x-show="advOpen">
