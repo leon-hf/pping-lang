@@ -1706,12 +1706,15 @@ function autopilotTab() {
       if (this.activeSessionId && s.session_id && s.session_id !== this.activeSessionId) {
         return;
       }
-      const term = ['done', 'stopped', 'failed'].includes(s.state);
+      const bridgeStopped = s.bridge && s.bridge.running === false &&
+        ['starting', 'baselining', 'proposing', 'applying', 'warming_up', 'benchmarking', 'deciding', 'finalizing'].includes(s.state);
+      const state = bridgeStopped ? 'stopped' : s.state;
+      const term = ['done', 'stopped', 'failed'].includes(state);
       // Cold-opening the tab should not present the latest completed JSONL as
       // if the user just ran Autopilot. Still attach to active sessions, and
       // keep showing terminal state for sessions started in this page.
       if (term && !this.session && !this.running) { return; }
-      this.session = Object.assign({}, s, { state: s.state === 'failed' ? 'failed' : (term ? 'done' : 'running') });
+      this.session = Object.assign({}, s, { state: state === 'failed' ? 'failed' : (term ? 'done' : 'running') });
       this.shownRounds = (s.rounds || []).map(r => this._map(r));
       this.maxTps = Math.max(1, ...this.shownRounds.map(r => r.tps || 0));
       this.shownRounds.forEach(r => { r.barPct = r.tps ? Math.max(6, (r.tps / this.maxTps) * 100) : 0; });

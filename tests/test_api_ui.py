@@ -131,6 +131,13 @@ def test_autopilot_running_feedback_uses_structured_events(client):
     assert "pendingPhase" not in body
 
 
+def test_autopilot_treats_stopped_bridge_as_terminal(client):
+    js = client.get("/dashboard.js").text
+    assert "bridgeStopped" in js
+    assert "bridge.running === false" in js
+    assert "const state = bridgeStopped ? 'stopped' : s.state" in js
+
+
 def test_root_references_marquee_kpi_labels(client):
     """Dashboard 必须把 marquee KPI 标签暴露给用户。
 
