@@ -117,7 +117,18 @@ def test_autopilot_start_tracks_session_id_to_avoid_stale_completed_status(clien
     assert "activeSessionId" in js
     assert "out.session_id" in js
     assert "s.session_id !== this.activeSessionId" in js
-    assert "正在准备真实调优" in js
+    assert "正在创建 session 并准备基线压测" in js
+
+
+def test_autopilot_running_feedback_uses_structured_events(client):
+    body = client.get("/").text + client.get("/dashboard.js").text + client.get("/dashboard.css").text
+    assert "_pendingFromStatus" in body
+    assert "s.events" in body
+    assert "bench ${Math.min(elapsed, total)}s" in body
+    assert "ap-events" in body
+    assert "ap-event" in body
+    assert "状态心跳中，未改线上 serve" in body
+    assert "pendingPhase" not in body
 
 
 def test_root_references_marquee_kpi_labels(client):

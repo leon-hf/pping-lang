@@ -1573,7 +1573,6 @@ function autopilotTab() {
     running: false,
     shownRounds: [],
     pending: null,
-    pendingPhase: '应用候选配置 → 等就绪 → 真 bench 打分…',
     drawerOpen: false,
     promoteOpen: false,
     expandedRounds: [],
@@ -1608,6 +1607,59 @@ function autopilotTab() {
       if (this.session.state === 'running') return this.hasBridge() ? '真实调优中' : '调优进行中';
       return '已完成';
     },
+    _phaseLabel(phase) {
+      return {
+        baseline: '建立基线',
+        observe: '读取诊断',
+        propose: '等待 Agent 决策',
+        apply: '启动候选沙盒',
+        benchmark: '真实压测中',
+        decide: '判定收益',
+        restore: '恢复 best',
+        finalize: '收尾恢复',
+      }[phase] || '运行中';
+    },
+    _eventTime(ev) {
+      const t = Date.parse(ev && ev.ts_wall);
+      return Number.isFinite(t) ? t : Date.now();
+    },
+    _eventAge(ev) {
+      const s = Math.max(0, Math.round((Date.now() - this._eventTime(ev)) / 1000));
+      return s < 90 ? `${s}s 前` : `${Math.round(s / 60)}min 前`;
+    },
+    _benchProgress(ev) {
+      if (!ev || ev.phase !== 'benchmark') return '';
+      const bench = ((ev.detail || {}).bench) || {};
+      const total = Number(bench.duration_s || 0) + Number(bench.warmup_s || 0);
+      if (!total) return '';
+      const elapsed = Math.max(0, Math.round((Date.now() - this._eventTime(ev)) / 1000));
+      return `bench ${Math.min(elapsed, total)}s / ${total}s`;
+    },
+    _pendingFromStatus(s, term) {
+      if (term) return null;
+      const events = (s.events || []).slice(-5);
+      const ev = events[events.length - 1] || null;
+      if (!ev) {
+        return { phase: 'baseline', title: '启动真实调优', hyp: '正在创建 session 并准备基线压测', events: [], progress: '' };
+      }
+      const detail = ev.detail || {};
+      const action = detail.flag ? `${detail.flag} ${detail.from} → ${detail.to}` : '';
+      const evidence = (detail.evidence_refs || []).slice(0, 3).join(' · ');
+      let hyp = ev.message || this._phaseLabel(ev.phase);
+      if (evidence) hyp += ` · ${evidence}`;
+      return {
+        phase: ev.phase,
+        title: this._phaseLabel(ev.phase),
+        hyp,
+        action,
+        progress: this._benchProgress(ev),
+        age: this._eventAge(ev),
+        events: events.slice().reverse().map(x => Object.assign({}, x, {
+          label: this._phaseLabel(x.phase),
+          age: this._eventAge(x),
+        })),
+      };
+    },
 
     async start() {
       if (this.hasBridge() && (!this.agent.api_key || !this.agent.base_url || !this.agent.model)) {
@@ -1631,7 +1683,8 @@ function autopilotTab() {
         const out = await r.json().catch(() => ({}));
         this.running = true; this.shownRounds = []; this.expandedRounds = [];
         this.activeSessionId = out.session_id || '';
-        this.session = { session_id: this.activeSessionId, state: 'running', rounds: [] };
+        this.session = { session_id: this.activeSessionId, state: 'running', rounds: [], events: [] };
+        this.pending = { phase: 'baseline', title: '启动真实调优', hyp: '正在创建 session 并准备基线压测', events: [], progress: '' };
         this._startPoll();
       } catch (e) { this.agentTest = this.bridgeBase() ? 'host bridge 未连接' : '启动失败'; setTimeout(() => this.agentTest = '', 3500); }
     },
@@ -1662,8 +1715,7 @@ function autopilotTab() {
       this.shownRounds = (s.rounds || []).map(r => this._map(r));
       this.maxTps = Math.max(1, ...this.shownRounds.map(r => r.tps || 0));
       this.shownRounds.forEach(r => { r.barPct = r.tps ? Math.max(6, (r.tps / this.maxTps) * 100) : 0; });
-      const active = !term && this.shownRounds.length > 0 && ['proposing', 'applying', 'warming_up', 'benchmarking'].includes(s.state);
-      this.pending = (!term && (active || this.shownRounds.length === 0)) ? { hyp: '正在准备真实调优 → 写入 session → 跑 baseline…' } : null;
+      this.pending = this._pendingFromStatus(s, term);
       this.running = !term;
       if (term) {
         this.activeSessionId = '';

@@ -278,13 +278,18 @@ def test_diagnose_maps_pressure_to_bottleneck():
 def test_session_store_roundtrip(tmp_path):
     st = SessionStore(tmp_path / "s.jsonl")
     st.new_session("ap-x", {"target": "throughput"}, {"rounds": 6})
+    st.append_event("observe", "读取诊断", round=1, detail={"candidate_count": 3})
     st.append_round(Round(round=0, kind="baseline", decision="baseline"))
     st.update_best(0, {"max_num_seqs": 32}, 1240.0, "vllm serve ...")
     d = st.status_dict()
     assert d["session_id"] == "ap-x" and len(d["rounds"]) == 1
+    assert d["events"][0]["phase"] == "observe"
+    assert d["events"][0]["detail"]["candidate_count"] == 3
     assert d["best"]["score"] == 1240.0
     assert (tmp_path / "s.jsonl").exists()
     st.close()
+    loaded = SessionStore.load_status(tmp_path / "s.jsonl")
+    assert loaded["events"][0]["message"] == "读取诊断"
 
 
 # ---- runner 闭环(sim + stub)----
@@ -313,6 +318,9 @@ def test_runner_full_session_improves(tmp_path):
     assert d["promote_package"]["production_command"] == d["recommended_command"]
     assert d["promote_package"]["rollback_command"] == (
         "vllm serve M --max-num-seqs 32 --gpu-memory-utilization 0.7")
+    phases = [e["phase"] for e in d["events"]]
+    for phase in ["baseline", "observe", "propose", "apply", "benchmark", "decide", "finalize"]:
+        assert phase in phases
     store.close()
 
 

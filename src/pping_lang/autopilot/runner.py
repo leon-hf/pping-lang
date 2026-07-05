@@ -191,6 +191,22 @@ class Runner(threading.Thread):
     def stop(self) -> None:
         self._stopping.set()
 
+    def _event(self, phase: str, message: str, *, round: int | None = None,
+               detail: dict | None = None, level: str = "info") -> None:
+        if hasattr(self._store, "append_event"):
+            self._store.append_event(phase, message, round=round, detail=detail or {}, level=level)
+
+    def _bench_plan(self) -> dict:
+        spec = getattr(self._sb, "_spec", None) or {}
+        return {
+            "duration_s": spec.get("duration_s"),
+            "warmup_s": spec.get("warmup_s"),
+            "concurrency": spec.get("concurrency"),
+            "prompt_source": spec.get("prompt_source"),
+            "prompt_tokens": spec.get("prompt_tokens"),
+            "output_tokens": spec.get("output_tokens"),
+        }
+
     def _effective_config(self) -> dict:
         if hasattr(self._sb, "effective_config"):
             try:
@@ -322,6 +338,8 @@ class Runner(threading.Thread):
 
     def _run_baseline(self) -> None:
         self._store.set_state("baselining")
+        self._event("baseline", "建立基线:启动沙盒并跑第一轮压测",
+                    round=0, detail={"config": dict(self._baseline), "bench": self._bench_plan()})
         sc = self._measure(self._baseline)
         self._equivalence_golden = self._sample_outputs()
         score = objective_score(sc, self._obj)
@@ -336,6 +354,9 @@ class Runner(threading.Thread):
             decision="baseline", bench_spec=sc.run_meta, agent_model=self._agent.model
             if hasattr(self._agent, "model") else "",
             rationale="朴素基线(后续候选都跟它 + best-so-far 比)。"))
+        self._event("decide", f"基线完成: {sc.output_tps:g} tok/s",
+                    round=0, detail={"output_tps": sc.output_tps, "ttft_p99_ms": sc.ttft_p99_ms,
+                                     "tpot_p99_ms": sc.tpot_p99_ms})
         self._tick()
 
     def _run_loop(self, *, start_round: int = 1, history: list[dict] | None = None,
@@ -348,6 +369,8 @@ class Runner(threading.Thread):
                and (time.monotonic() - t0) < self._secs_budget and no_improve < K_NO_IMPROVE):
             deadline = t0 + self._secs_budget
             self._store.set_state("proposing")
+            self._event("observe", "读取当前 best 的诊断证据", round=rnd,
+                        detail={"best_config": dict(self._best_cfg)})
             effective_cfg = self._effective_config()
             diag = diag_block(effective_cfg, self._best_sc)             # ③ observe(真诊断优先)
             cands = propose_candidates(diag["bottleneck"], effective_cfg,
@@ -360,6 +383,17 @@ class Runner(threading.Thread):
             cands = p0.candidates
             diag["p0_kvfit"] = p0.summary()
             diag["p2_search"] = {"mode": self._search_mode, "candidates": len(cands)}
+            self._event(
+                "propose",
+                f"诊断命中 {diag.get('bottleneck') or 'N'}:从 {len(cands)} 个候选里请求 agent 选择",
+                round=rnd,
+                detail={
+                    "bottleneck": diag.get("bottleneck"),
+                    "evidence_refs": list(diag.get("evidence_refs", []))[:6],
+                    "candidate_count": len(cands),
+                    "search_mode": self._search_mode,
+                },
+            )
             ctx = AgentContext(
                 objective={"target": self._obj.target, "sla": {
                     "ttft_p99_ms": self._obj.sla.ttft_p99_ms, "tpot_p99_ms": self._obj.sla.tpot_p99_ms}},
@@ -369,13 +403,16 @@ class Runner(threading.Thread):
                 history=history, tried_configs=tried,
                 best_so_far={"config": dict(self._best_cfg), "scorecard": self._best_sc.to_dict()})
             if not cands:                                                # 无对症候选 → 近最优,停
+                self._event("decide", "没有对症候选,准备停止并恢复 best", round=rnd)
                 self._append_stop(rnd, AgentDecision(done=True, reason="无对症候选 → 近最优"), diag)
                 break
             dec = self._propose_valid(ctx)                              # 校验 ∈ 候选 + 防重(2 次非法→failed)
             if dec is None:
+                self._event("decide", "agent 连续给出非法提案,session 标记失败", round=rnd, level="error")
                 self._store.set_state("failed", "agent 连续 2 次非法提案(§9.3)")
                 return
             if dec.done:
+                self._event("decide", dec.reason or "agent 判断已近最优,准备停止", round=rnd)
                 self._append_stop(rnd, dec, diag)
                 break
             if dec.config is not None and dec.knob:
@@ -403,6 +440,16 @@ class Runner(threading.Thread):
     def _run_candidate(self, rnd: int, dec, diag: dict, *, deadline: float | None = None) -> None:
         self._store.set_state("benchmarking")
         before_cfg, before_sc, before_score = self._best_cfg, self._best_sc, self._best_score
+        self._event(
+            "apply",
+            f"应用候选:{dec.flag or dec.knob} {dec.from_val} → {dec.to_val}",
+            round=rnd,
+            detail={
+                "knob": dec.knob, "from": dec.from_val, "to": dec.to_val,
+                "flag": dec.flag, "config": dict(dec.config or {}),
+                "guardrail": dec.guardrail_notes,
+            },
+        )
         # T2 golden 必须在 apply 候选前拿到(此刻沙盒里是 best;见 _ensure_equivalence_golden)
         golden_ok = self._ensure_equivalence_golden() if self._needs_equivalence(dec) else True
         try:
@@ -413,9 +460,16 @@ class Runner(threading.Thread):
                 self._sb.apply(dec.config)
                 ok, reason = self._equivalence_ok(dec)
                 if not ok:
+                    self._event("decide", f"质量等价检查失败:{reason}", round=rnd, level="warn")
                     dec.rationale += f" [{reason}]"
                     sc, score = None, float("-inf")
                 else:
+                    self._event(
+                        "benchmark",
+                        "候选已就绪,开始真实 bench 打分",
+                        round=rnd,
+                        detail={"bench": self._bench_plan(), "endpoint": getattr(self._sb, "endpoint", lambda: "")()},
+                    )
                     sc = self._measure_loaded()
                     if deadline is not None and time.monotonic() >= deadline:
                         dec.rationale += " [时间预算在 benchmarking 中途耗尽,半截轮丢弃]"
@@ -424,6 +478,7 @@ class Runner(threading.Thread):
                         score = objective_score(sc, self._obj)
         except Exception as e:               # LaunchError/BenchError → 判负回滚
             sc, score = None, float("-inf")
+            self._event("decide", f"候选失败:{type(e).__name__}", round=rnd, level="warn")
             dec.rationale += f" [候选失败:{type(e).__name__}]"
         decision = decide(score, before_score, self._obj.noise_margin)
         if decision == "kept":
@@ -443,8 +498,20 @@ class Runner(threading.Thread):
             delta_pct=primary_delta_pct(sc, before_sc, self._obj) if sc and before_sc else None,
             decision=decision, bench_spec=sc.run_meta if sc else {},
             agent_model=getattr(self._agent, "model", "")))
+        if sc:
+            msg = (f"判定 {decision}: {before_sc.output_tps:g} → {sc.output_tps:g} tok/s "
+                   f"({primary_delta_pct(sc, before_sc, self._obj) or 0:+.2f}%)")
+            self._event("decide", msg, round=rnd,
+                        detail={"decision": decision, "output_tps": sc.output_tps,
+                                "ttft_p99_ms": sc.ttft_p99_ms, "tpot_p99_ms": sc.tpot_p99_ms,
+                                "noise_margin": self._obj.noise_margin})
+        else:
+            self._event("decide", f"判定 {decision}:候选未产生有效 score,回滚 best", round=rnd,
+                        detail={"decision": decision}, level="warn")
         if decision != "kept":                # 运行时也回 best,保证下一轮 observe 的是 best
             try:
+                self._event("restore", "候选未保留,恢复当前 best 后继续观察", round=rnd,
+                            detail={"best_config": dict(before_cfg)})
                 self._sb.apply(before_cfg)
                 self._equivalence_golden = self._sample_outputs()
             except Exception as e:            # noqa: BLE001
@@ -462,6 +529,7 @@ class Runner(threading.Thread):
 
     def _finalize(self) -> None:
         self._store.set_state("finalizing")
+        self._event("finalize", "收尾:恢复 best 配置并生成上线包")
         try:                                 # 收尾强制回 best 并验证就绪
             self._sb.apply(self._best_cfg)
         except Exception:                    # noqa: BLE001

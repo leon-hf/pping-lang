@@ -2070,6 +2070,15 @@
   .ap-rhyp b{color:var(--coral-strong);font-weight:700;font-size:10px;margin-right:6px;text-transform:uppercase;letter-spacing:.03em}
   .ap-rrun{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:12.5px}
   .ap-rrun .sp{width:13px;height:13px;border:2px solid var(--coral-soft);border-top-color:var(--coral);border-radius:50%;animation:apspin .7s linear infinite}
+  .ap-rrun small{color:var(--muted-3);font-size:11px}
+  .ap-events{display:grid;gap:5px;margin-top:8px}
+  .ap-event{display:grid;grid-template-columns:10px 86px minmax(0,1fr) 52px;align-items:center;gap:8px;color:var(--muted);font-size:11.5px;line-height:1.35}
+  .ap-event .dot{width:6px;height:6px;border-radius:50%;background:var(--coral);box-shadow:0 0 0 4px var(--coral-soft)}
+  .ap-event b{color:var(--text-strong);font-size:11px;font-weight:800;white-space:nowrap}
+  .ap-event span:nth-child(3){min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .ap-event em{font-style:normal;color:var(--muted-3);font-size:10.5px;text-align:right}
+  .ap-event.warn .dot{background:var(--amber);box-shadow:0 0 0 4px var(--amber-soft)}
+  .ap-event.error .dot{background:var(--coral-strong);box-shadow:0 0 0 4px var(--coral-soft)}
   @keyframes apspin{to{transform:rotate(360deg)}}
   .ap-rtput{display:flex;align-items:center;gap:9px}
   .ap-rtrack{width:72px;height:8px;background:var(--surface-alt);border-radius:99px;overflow:hidden;flex:none}

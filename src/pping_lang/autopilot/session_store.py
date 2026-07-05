@@ -13,6 +13,19 @@ from pathlib import Path
 
 
 @dataclass
+class Event:
+    ts_wall: str = ""
+    phase: str = ""                              # observe | propose | apply | benchmark | decide | finalize
+    message: str = ""
+    detail: dict = field(default_factory=dict)
+    round: int | None = None
+    level: str = "info"                          # info | warn | error
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass
 class Round:
     round: int
     state_at_record: str = "deciding"
@@ -46,6 +59,7 @@ class Session:
     started_ts: str
     state: str = "idle"
     rounds: list[Round] = field(default_factory=list)
+    events: list[Event] = field(default_factory=list)
     best_round: int | None = None
     best_config: dict = field(default_factory=dict)
     best_score: float | None = None
@@ -63,6 +77,7 @@ class Session:
             "session_id": self.session_id, "state": self.state,
             "objective": self.objective, "budget": self.budget,
             "rounds": [r.to_dict() for r in self.rounds],
+            "events": [e.to_dict() for e in self.events[-80:]],
             "best_round": self.best_round, "best": {
                 "config": self.best_config, "score": self.best_score,
             },
@@ -112,8 +127,11 @@ class SessionStore:
         if not st:
             return None
         round_fields = set(Round.__dataclass_fields__)
+        event_fields = set(Event.__dataclass_fields__)
         rounds = [Round(**{k: v for k, v in r.items() if k in round_fields})
                   for r in st.get("rounds", [])]
+        events = [Event(**{k: v for k, v in e.items() if k in event_fields})
+                  for e in st.get("events", [])]
         best = st.get("best") or {}
         with self._lock:
             old_state = st.get("state") or "idle"
@@ -124,6 +142,7 @@ class SessionStore:
                 started_ts=st.get("started_ts") or _now_iso(),
                 state=old_state,
                 rounds=rounds,
+                events=events,
                 best_round=st.get("best_round"),
                 best_config=best.get("config") or {},
                 best_score=best.get("score"),
@@ -166,6 +185,17 @@ class SessionStore:
             self._current.rounds.append(r)
             # 'rec' 作记录类型判别(不能用 'kind':会被 r.to_dict() 的 Round.kind 覆盖)
             self._write({"rec": "round", "session_id": self._current.session_id, **r.to_dict()})
+
+    def append_event(self, phase: str, message: str, *, round: int | None = None,
+                     detail: dict | None = None, level: str = "info") -> None:
+        with self._lock:
+            if not self._current:
+                return
+            ev = Event(ts_wall=_now_iso(), phase=phase, message=message,
+                       round=round, detail=dict(detail or {}), level=level)
+            self._current.events.append(ev)
+            self._current.events = self._current.events[-200:]
+            self._write({"rec": "event", "session_id": self._current.session_id, **ev.to_dict()})
 
     def update_best(self, round_idx: int, config: dict, score: float, command: str) -> None:
         with self._lock:
@@ -217,6 +247,7 @@ class SessionStore:
             return None
         final = start = None
         rounds: list[dict] = []
+        events: list[dict] = []
         state = error = None
         for line in path.read_text(encoding="utf-8").splitlines():
             if not line.strip():
@@ -231,12 +262,15 @@ class SessionStore:
                 state, error = o.get("state"), o.get("error")
             elif rec == "round":                          # 只新格式 round 行有 rec='round';保留其自带 kind
                 rounds.append({kk: vv for kk, vv in o.items() if kk not in ("rec", "session_id")})
+            elif rec == "event":
+                events.append({kk: vv for kk, vv in o.items() if kk not in ("rec", "session_id")})
         if final:                                        # final/start = status_dict 快照,session_id 是真数据
             return {kk: vv for kk, vv in final.items() if kk != "rec"}
         if not start:
             return None
         st = {kk: vv for kk, vv in start.items() if kk != "rec"}
         st["rounds"] = rounds
+        st["events"] = events[-80:]
         if state:
             st["state"], st["error"] = state, error
         return st

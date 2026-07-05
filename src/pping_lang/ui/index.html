@@ -1697,8 +1697,18 @@
         <div class="ap-round cur" x-show="running && pending">
           <div><span class="ap-rn" x-text="'R'+(shownRounds.length)"></span></div>
           <div class="ap-rbody">
-            <div class="ap-rhyp" x-show="pending && pending.hyp"><b>假设</b><span x-text="pending ? pending.hyp : ''"></span></div>
-            <div class="ap-rrun"><span class="sp"></span><span x-text="pendingPhase"></span></div>
+            <div class="ap-rhyp" x-show="pending && pending.hyp">
+              <b x-text="pending ? pending.title : '运行中'"></b><span x-text="pending ? pending.hyp : ''"></span>
+              <span class="ap-changed" x-show="pending && pending.action" x-text="pending ? pending.action : ''"></span>
+            </div>
+            <div class="ap-rrun"><span class="sp"></span><span x-text="pending && pending.progress ? pending.progress : '状态心跳中，未改线上 serve'"></span><small x-text="pending && pending.age ? pending.age : ''"></small></div>
+            <div class="ap-events" x-show="pending && pending.events && pending.events.length">
+              <template x-for="ev in pending.events" :key="ev.ts_wall + ev.phase + ev.message">
+                <div class="ap-event" :class="ev.level || 'info'">
+                  <span class="dot"></span><b x-text="ev.label"></b><span x-text="ev.message"></span><em x-text="ev.age"></em>
+                </div>
+              </template>
+            </div>
           </div>
           <div class="ap-rtput"></div>
           <div class="ap-verdict"></div>
