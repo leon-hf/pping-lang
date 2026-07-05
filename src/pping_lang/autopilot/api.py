@@ -73,10 +73,41 @@ def test_agent_config(cfg: dict | None) -> dict:
     base = str(cfg.get("base_url") or "").rstrip("/")
     key = str(cfg.get("api_key") or "")
     model = str(cfg.get("model") or "")
+    is_anthropic = cfg.get("provider") == "anthropic" or (base and "anthropic" in base)
+    if is_anthropic and not base:              # ClaudeAgent 同款默认,base 可省
+        base = "https://api.anthropic.com"
     if not (base and key and model):
         return {"ok": False, "error": "missing base_url/api_key/model"}
 
     timeout = max(3.0, min(float(cfg.get("timeout_s") or 15), 30.0))
+    if is_anthropic:                           # 与 build_agent 的 ClaudeAgent 路由保持一致
+        url = base if base.endswith("/v1/messages") else base + "/v1/messages"
+        payload: dict[str, Any] = {
+            "model": model, "max_tokens": 16,
+            "messages": [{"role": "user", "content": "reply exactly ok"}],
+        }
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            url, data=data, method="POST",
+            headers={
+                "Content-Type": "application/json",
+                "x-api-key": key,
+                "anthropic-version": "2023-06-01",
+            })
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                body = json.loads(r.read().decode("utf-8") or "{}")
+            blocks = body.get("content") or []
+            texts = [str(b.get("text") or "").strip() for b in blocks
+                     if isinstance(b, dict) and b.get("type") == "text" and b.get("text")]
+            sample = " ".join(t for t in texts if t).strip()
+            return {"ok": True, "provider": "anthropic", "model": model, "sample": sample[:80]}
+        except urllib.error.HTTPError as e:
+            msg = e.read().decode("utf-8", errors="replace")[:400]
+            return {"ok": False, "error": f"HTTP {e.code}: {msg}"}
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+
     if cfg.get("provider") == "kimi_coding" or "api.kimi.com/coding" in base:
         url = base if base.endswith("/messages") else base + "/messages"
         payload: dict[str, Any] = {

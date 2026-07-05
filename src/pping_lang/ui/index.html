@@ -1537,6 +1537,15 @@
           <span x-show="!hasBridge()">本地/dev 模式:当前没有 host bridge,开始后走 SimSandbox 验证闭环;在 runw dashboard 地址访问时才会启动真实 DockerSandbox 调优。</span>
         </div>
 
+        <!-- 调优期间主 serve(含本页)会下线:直播由 host 侧 bridge 直连,刷新本页会打不开 -->
+        <div class="preview-note" x-show="running && hasBridge()"
+             style="border-color:#fcd34d;background:#fffbeb;color:#92400e">
+          调优进行中:主 serve 已让位给候选沙盒,<b>本页(:8765)此刻打不开新标签,请勿刷新</b>。
+          本页直播直连 host bridge,不受影响;备用直播页:
+          <a :href="apiUrl('/')" target="_blank" style="color:#92400e;text-decoration:underline" x-text="apiUrl('/')"></a>。
+          调优结束或点「停止」后主 serve 与本页自动恢复。
+        </div>
+
   <!-- Agent(LLM) 配置：自由填任意 OpenAI 兼容端点 -->
   <div class="ap-agent">
     <div class="ap-agent-head" @click="agentOpen=!agentOpen">

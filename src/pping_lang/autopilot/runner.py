@@ -31,6 +31,14 @@ BASELINE_CONFIG = {"max_num_seqs": 32, "gpu_memory_utilization": 0.70}
 K_NO_IMPROVE = 4
 MAX_ILLEGAL = 2          # proposing:连续非法提案上限 → failed(§9.3)
 INCOMPLETE_STATES = {"applying", "warming_up", "benchmarking", "deciding"}
+# T2 等价判定阈值:serving 输出非 seed 决定性(§6.2),batching 差异可致个别 token 漂移,
+# 精确串比对会误杀好候选;fp8/量化真跑偏时相似度远低于此阈值。
+EQUIVALENCE_MIN_SIMILARITY = 0.85
+
+
+def _text_similarity(a: str, b: str) -> float:
+    import difflib
+    return difflib.SequenceMatcher(None, a or "", b or "").ratio()
 
 
 def _probe_stat(sc: Scorecard | None, group: str, field: str = "avg") -> float | None:
@@ -167,7 +175,7 @@ class Runner(threading.Thread):
                  budget: dict, model: str, step_delay_s: float = 0.0,
                  baseline_config: dict | None = None, quality_gate: bool = False,
                  bench_repeats: int = 1, search_mode: str = "agent",
-                 search_width: int = 3) -> None:
+                 search_width: int = 3, elapsed_s: float = 0.0) -> None:
         super().__init__(daemon=True, name="AutopilotRunner")
         self._store = store
         self._sb = sandbox
@@ -182,6 +190,7 @@ class Runner(threading.Thread):
         self._bench_repeats = max(1, int(bench_repeats))
         self._search_mode = search_mode
         self._search_width = max(1, int(search_width))
+        self._elapsed_s = max(0.0, float(elapsed_s))   # resume:时间预算不因进程重启归零
         self._stopping = threading.Event()
         self._best_cfg: dict = {}
         self._best_sc: Scorecard | None = None
@@ -260,7 +269,10 @@ class Runner(threading.Thread):
         return bool(k and k.output_impact == "equivalence")
 
     def _equivalence_ok(self, dec) -> tuple[bool, str]:
-        """候选已加载后比对。golden 缺失 → fail-closed(判负,不 bench)。"""
+        """候选已加载后比对。golden 缺失 → fail-closed(判负,不 bench)。
+
+        比对用逐条相似度阈值而非精确相等:serving 输出非 seed 决定性(§6.2),
+        batching 差异可致个别 token 漂移;质量真坏(fp8 跑偏)时相似度会远低于阈值。"""
         if not self._needs_equivalence(dec):
             return True, ""
         if self._equivalence_golden is None:
@@ -268,8 +280,13 @@ class Runner(threading.Thread):
         outs = self._sample_outputs()
         if outs is None:
             return False, "equivalence check failed: candidate outputs unavailable"
-        if outs != self._equivalence_golden:
-            return False, "equivalence check failed: candidate output differs from current best"
+        if len(outs) != len(self._equivalence_golden):
+            return False, "equivalence check failed: candidate output count differs"
+        for got, want in zip(outs, self._equivalence_golden):
+            sim = _text_similarity(got, want)
+            if sim < EQUIVALENCE_MIN_SIMILARITY:
+                return False, (f"equivalence check failed: similarity {sim:.2f} < "
+                               f"{EQUIVALENCE_MIN_SIMILARITY} vs current best")
         return True, ""
 
     def run(self) -> None:
@@ -363,7 +380,7 @@ class Runner(threading.Thread):
                   tried: list[dict] | None = None, no_improve: int = 0) -> None:
         history = list(history or [])
         tried = list(tried or [])
-        t0 = time.monotonic()
+        t0 = time.monotonic() - self._elapsed_s        # resume 时把已耗时间算进预算
         rnd = start_round
         while (not self._stopping.is_set() and rnd <= self._rounds_budget
                and (time.monotonic() - t0) < self._secs_budget and no_improve < K_NO_IMPROVE):

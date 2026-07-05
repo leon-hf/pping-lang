@@ -504,6 +504,43 @@ def test_agent_config_kimi_coding_probe(monkeypatch):
     assert seen["timeout"] == 9
 
 
+def test_agent_config_anthropic_probe(monkeypatch):
+    """agent-test 必须与 build_agent 的 ClaudeAgent 路由一致:/v1/messages + x-api-key。"""
+    from pping_lang.autopilot import api as ap_api
+
+    class Resp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
+
+        def read(self):
+            return b'{"content":[{"type":"text","text":"ok"}]}'
+
+    seen = {}
+
+    def fake_urlopen(req, timeout):
+        seen["url"] = req.full_url
+        seen["key"] = req.headers.get("X-api-key")
+        seen["version"] = req.headers.get("Anthropic-version")
+        seen["body"] = json.loads(req.data.decode("utf-8"))
+        return Resp()
+
+    monkeypatch.setattr(ap_api.urllib.request, "urlopen", fake_urlopen)
+    out = ap_api.test_agent_config({
+        "provider": "anthropic",
+        "api_key": "secret",                       # base_url 省略 → 用默认
+        "model": "claude-opus-4",
+    })
+    assert out["ok"] is True and out["provider"] == "anthropic"
+    assert out["sample"] == "ok"
+    assert seen["url"] == "https://api.anthropic.com/v1/messages"
+    assert seen["key"] == "secret"
+    assert seen["version"] == "2023-06-01"
+    assert seen["body"]["model"] == "claude-opus-4"
+
+
 # ---- 真 LLM agent(mock HTTP)+ 兜底 ----
 
 def _ctx(cands, bottleneck="A", config=None, tried=None):
@@ -964,6 +1001,51 @@ def test_runner_t2_equivalence_passes_and_benches(tmp_path):
     cand = [r for r in store.status_dict()["rounds"] if r["kind"] == "candidate"][0]
     assert cand["scorecard_after"] is not None
     assert cand["decision"] in ("kept", "tie")
+    store.close()
+
+
+def test_runner_t2_equivalence_tolerates_minor_drift(tmp_path):
+    """serving 非 seed 决定性(§6.2):个别 token 漂移不应误杀 T2 候选,相似度阈值放行。"""
+    from pping_lang.autopilot.agent import AgentDecision
+
+    class MinorDriftSandbox(SimSandbox):
+        def sample_outputs(self, prompts=None):
+            if self._cfg.get("kv_cache_dtype") == "fp8":
+                return ["The answer to 2 + 2 is 4, a basic arithmetic fact"]
+            return ["The answer to 2 + 2 is 4, a basic arithmetic fact."]
+
+    class PickKvAgent:
+        model = "pick-kv"
+
+        def propose(self, ctx):
+            cand = next(c for c in ctx.candidates if c["knob"] == "kv_cache_dtype")
+            return AgentDecision(knob="kv_cache_dtype", config=cand["config"],
+                                 from_val=cand["from"], to_val=cand["to"], flag=cand["flag"],
+                                 rationale="try fp8 kv")
+
+    store = SessionStore(tmp_path / "eq-drift.jsonl")
+    store.new_session("ap-eq-drift", {"target": "throughput"}, {"rounds": 1})
+    Runner(store=store, sandbox=MinorDriftSandbox("M"), agent=PickKvAgent(), obj=OBJ,
+           budget={"rounds": 1, "seconds": 900}, model="M", step_delay_s=0.0,
+           baseline_config={"max_num_seqs": 128, "gpu_memory_utilization": 0.70},
+           quality_gate=True).run()
+    cand = [r for r in store.status_dict()["rounds"] if r["kind"] == "candidate"][0]
+    assert cand["scorecard_after"] is not None          # 没被等价检查拦下,进了 bench
+    assert "equivalence check failed" not in cand["rationale"]
+    store.close()
+
+
+def test_runner_resume_elapsed_consumes_time_budget(tmp_path):
+    """resume 后时间预算按 session 起点算:已耗尽 → 不再跑候选轮,直接收尾。"""
+    store = SessionStore(tmp_path / "elapsed.jsonl")
+    store.new_session("ap-elapsed", {"target": "throughput"}, {"rounds": 6})
+    Runner(store=store, sandbox=SimSandbox("M"), agent=StubAgent(), obj=OBJ,
+           budget={"rounds": 6, "seconds": 900}, model="M", step_delay_s=0.0,
+           elapsed_s=901.0).run()
+    st = store.status_dict()
+    assert st["state"] == "done"
+    kinds = [r["kind"] for r in st["rounds"]]
+    assert kinds == ["baseline"]                        # 预算已尽:只有基线,零候选轮
     store.close()
 
 

@@ -42,6 +42,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--image", required=True, help="候选 vLLM 容器镜像(带 pping 插件最佳,可读真诊断)")
     p.add_argument("--serve-container", default=None,
                    help="主 serve 容器名;给了就 session 期间停它腾卡、结束必重启")
+    p.add_argument("--restore-cmd", default=None,
+                   help="收尾时在 host 执行的完整恢复命令(shell)。容器主进程是 sleep "
+                        "infinity、serve 靠 docker exec 起的部署形态必须给:单纯 docker "
+                        "start 只会拉起 sleep,serve/dashboard 不会回来")
     p.add_argument("--session-dir", default=".", help="session JSONL 落盘目录")
     p.add_argument("--session-id", default=None, help="外部指定 session id(bridge 用)")
     p.add_argument("--resume", default=None, help="从已有 session JSONL 恢复并继续跑")
@@ -116,6 +120,7 @@ def main(argv: list[str] | None = None) -> int:
     session_dir = Path(args.session_dir)
     session_dir.mkdir(parents=True, exist_ok=True)
     agent = build_agent(agent_cfg)
+    elapsed_s = 0.0
     if args.resume:
         session_path = Path(args.resume)
         store = SessionStore(session_path)
@@ -126,6 +131,13 @@ def main(argv: list[str] | None = None) -> int:
         sid = sess.session_id
         objective = sess.objective
         budget = sess.budget
+        # 时间预算按 session 起点算,不因进程重启而重置(§9.1 G5:双预算任一到顶即停)
+        try:
+            import calendar
+            started = calendar.timegm(time.strptime(sess.started_ts, "%Y-%m-%dT%H:%M:%SZ"))
+            elapsed_s = max(0.0, time.time() - started)
+        except (ValueError, TypeError):
+            pass
     else:
         objective = {"target": args.target,
                      "sla": {"ttft_p99_ms": args.ttft, "tpot_p99_ms": args.tpot}}
@@ -154,12 +166,15 @@ def main(argv: list[str] | None = None) -> int:
                obj=build_objective(objective), budget=budget, model=args.model,
                step_delay_s=0.0, baseline_config=baseline_config,
                quality_gate=args.quality_gate, bench_repeats=args.bench_repeats,
-               search_mode=args.search_mode, search_width=args.search_width).run()  # 同步跑到底
+               search_mode=args.search_mode, search_width=args.search_width,
+               elapsed_s=elapsed_s).run()                        # 同步跑到底
     finally:
         sandbox.teardown()                                       # 兜底清候选容器
         if serve_was_up:
             print(f"[autopilot] 重启主 serve 容器 '{serve}' …")
             _docker("start", serve)
+            if args.restore_cmd:                                 # sleep-infinity 形态还需 exec serve
+                subprocess.run(["bash", "-c", args.restore_cmd])
         store.close()
 
     st = store.status_dict()
