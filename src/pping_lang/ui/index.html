@@ -1532,7 +1532,10 @@
     <!-- ===== Autopilot tab(预览 · mock 数据)===== -->
     <div x-show="tab === 'autopilot'" x-data="autopilotTab()" x-init="init()">
       <div class="ap-wrap">
-        <div class="preview-note">Autopilot 会在 runw host 侧启动真实调优:停主 serve 腾卡 → 起候选 vLLM 沙盒 → 跑 bench → kept/reverted → 恢复主 serve。若 host bridge 未连接,开始按钮会报错而不是偷偷跑模拟。</div>
+        <div class="preview-note">
+          <span x-show="hasBridge()">真实模式:Autopilot 会在 runw host 侧停主 serve 腾卡 → 起候选 vLLM 沙盒 → 跑 bench → kept/reverted → 恢复主 serve。若 host bridge 未连接,开始按钮会报错而不是偷偷跑模拟。</span>
+          <span x-show="!hasBridge()">本地/dev 模式:当前没有 host bridge,开始后走 SimSandbox 验证闭环;在 runw dashboard 地址访问时才会启动真实 DockerSandbox 调优。</span>
+        </div>
 
   <!-- Agent(LLM) 配置：自由填任意 OpenAI 兼容端点 -->
   <div class="ap-agent">
@@ -1556,7 +1559,7 @@
       <div class="ap-field key"><label>API Key</label><input type="password" x-model="agent.api_key" placeholder="sk-..."></div>
       <div class="ap-field model"><label>Model</label><input x-model="agent.model" placeholder="anthropic/claude-opus-4"></div>
       <div style="display:flex;align-items:flex-end;gap:6px">
-        <button class="ap-test" @click="testAgent()" x-text="agentTest || '测试连接'"></button>
+        <button class="ap-test" @click="testAgent()" x-text="agentTest || '检查配置'"></button>
         <div class="ap-adv-toggle" @click="advOpen=!advOpen"><span class="c" x-text="advOpen?'▾':'▸'"></span> 高级</div>
       </div>
       <div class="ap-agent-note">任意 <b style="color:var(--coral-strong)">OpenAI 兼容</b>端点都行（OpenRouter / OpenAI / DeepSeek / 本地）。真实调优必须配置 LLM agent；StubAgent 只用于本地 SimSandbox/dev tests,不能驱动真实 GPU 调优。Key 仅本会话用于调 agent，<b>不入诊断热路径、不随轨迹存盘</b>；生产建议走环境变量注入。注意：<b>别用被压测的那个 vLLM 模型当 agent</b>（它在被压、可能太小）。</div>
@@ -1627,7 +1630,7 @@
       <span class="arr">→</span>
       <div class="st"><span class="n">5</span><b>decide</b><span>留下/回滚</span></div>
     </div>
-    <p>点开始后，Autopilot 会启动一个调优 session。Agent 在候选集中选一个 vLLM 旋钮,沙盒重启后跑同一套 bench,只有实测更好才 kept,破 SLA 或收益不足就 reverted。生产上线仍走人工 promote。</p>
+    <p>点开始后，Autopilot 会启动一个调优 session。Agent 在候选集中选一个 vLLM 旋钮,沙盒重启后跑同一套 bench,只有实测更好才 kept,破 SLA 或收益不足就 reverted。真实 runw 模式需要先配置 LLM agent;生产上线仍走人工 promote。</p>
     <div class="moat"><b>👁 眼睛</b>(深度诊断) + <b>✋ 手</b>(压测+serve控制) + <b>📊 记分牌</b>(基线/Δ) 同进程</div>
   </div>
 

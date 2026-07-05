@@ -1494,15 +1494,14 @@ function sloPanel() {
   };
 }
 
-// Autopilot tab(预览):脚本化演示一次"诊断驱动迭代调旋钮 + 压测打分 + 保留/回滚"的调优会话。
-// 数据为 mock;真后端来时把 MOCK 换成轮询 /api/autopilot/status。术语已对齐当前模型(双低 / A–D)。
+// Autopilot tab:轮询 /api/autopilot/status 展示诊断驱动的真实/模拟调优会话。
 function autopilotTab() {
   const VERDICT = {
     baseline: { t: '基线', c: 'base' }, kept: { t: '✓ 保留', c: 'kept' },
     reverted: { t: '↩ 回滚', c: 'rev' }, tie: { t: '≈ 持平', c: 'tie' }, done: { t: '■ 完成', c: 'stop' },
   };
   return {
-    obj: { target: 'throughput', ttft: 1000, tpot: 50 },
+    obj: { target: 'throughput', ttft: 8000, tpot: 50 },
     budget: { rounds: 6, minutes: 15 },
     agentOpen: false,
     preset: 'openrouter',
@@ -1530,7 +1529,15 @@ function autopilotTab() {
       custom:     { base_url: '', model: '' },
     },
     applyPreset() { const p = this.PRESETS[this.preset]; if (p) { this.agent.base_url = p.base_url; this.agent.model = p.model; } },
-    testAgent() { this.agentTest = '测试中…'; setTimeout(() => { this.agentTest = this.agent.api_key ? '✓ 可用' : '需填 API Key'; setTimeout(() => this.agentTest = '', 2000); }, 600); },
+    testAgent() {
+      this.agentTest = '检查中…';
+      setTimeout(() => {
+        this.agentTest = (this.agent.api_key && this.agent.base_url && this.agent.model)
+          ? '✓ 配置已填'
+          : '需填 Base URL / API Key / Model';
+        setTimeout(() => this.agentTest = '', 2200);
+      }, 400);
+    },
     session: null,
     running: false,
     shownRounds: [],
