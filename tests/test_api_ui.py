@@ -255,3 +255,13 @@ def test_autopilot_start_button_targets_real_bridge(client):
     assert "host bridge 状态不可达" in body
     assert "StubAgent 只用于本地 SimSandbox/dev tests" in body
     assert ":8776" in body
+
+
+def test_autopilot_has_explicit_stop_control(client):
+    body = client.get("/").text + client.get("/dashboard.js").text + client.get("/dashboard.css").text
+    assert "/api/autopilot/stop" in body
+    assert "停止调优" in body
+    assert "停止中…" in body
+    assert "正在停止调优并恢复 serve" in body
+    assert "ap-stop" in body
+    assert "stopping" in body

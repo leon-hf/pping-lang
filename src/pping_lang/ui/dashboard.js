@@ -1571,6 +1571,7 @@ function autopilotTab() {
     },
     session: null,
     running: false,
+    stopping: false,
     shownRounds: [],
     pending: null,
     drawerOpen: false,
@@ -1681,20 +1682,42 @@ function autopilotTab() {
         if (r.status === 409) { this.agentTest = '已有 session 在跑'; setTimeout(() => this.agentTest = '', 2500); return; }
         if (!r.ok) { throw new Error(`HTTP ${r.status}`); }
         const out = await r.json().catch(() => ({}));
-        this.running = true; this.shownRounds = []; this.expandedRounds = [];
+        this.running = true; this.stopping = false; this.shownRounds = []; this.expandedRounds = [];
         this.activeSessionId = out.session_id || '';
         this.session = { session_id: this.activeSessionId, state: 'running', rounds: [], events: [] };
         this.pending = { phase: 'baseline', title: '启动真实调优', hyp: '正在创建 session 并准备基线压测', events: [], progress: '' };
         this._startPoll();
       } catch (e) { this.agentTest = this.bridgeBase() ? 'host bridge 未连接' : '启动失败'; setTimeout(() => this.agentTest = '', 3500); }
     },
-    async stop() { try { await fetch(this.apiUrl('/api/autopilot/stop'), { method: 'POST' }); } catch (e) {} },
+    async stop() {
+      if (!this.running || this.stopping) return;
+      this.stopping = true;
+      this.agentTest = '正在停止调优并恢复 serve…';
+      this.pending = Object.assign({}, this.pending || {}, {
+        phase: 'restore',
+        title: '停止调优',
+        hyp: '正在终止候选沙盒并恢复主 serve',
+        progress: '请求停止中，未保留当前候选',
+      });
+      try {
+        const r = await fetch(this.apiUrl('/api/autopilot/stop'), { method: 'POST' });
+        const out = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(out.error || `HTTP ${r.status}`);
+        this.agentTest = out.stopped ? '已停止，正在恢复状态…' : '没有正在运行的调优';
+        await this._sync();
+      } catch (e) {
+        this.agentTest = '停止失败: ' + String(e.message || e).slice(0, 70);
+      } finally {
+        setTimeout(() => { this.agentTest = ''; }, 3500);
+      }
+    },
 
     _startPoll() { if (this._poll) clearInterval(this._poll); this._sync(); this._poll = setInterval(() => this._sync(), 2000); },
     async _sync() {
       let s; try { s = await fetch(this.apiUrl('/api/autopilot/status')).then(x => x.json()); } catch (e) {
         if (this.running) {
           this.running = false;
+          this.stopping = false;
           this.pending = null;
           this.session = Object.assign({}, this.session || {}, { state: 'failed', error: 'status fetch failed' });
           this.agentTest = this.hasBridge() ? 'host bridge 状态不可达' : 'status 不可达';
@@ -1721,6 +1744,7 @@ function autopilotTab() {
       this.pending = this._pendingFromStatus(s, term);
       this.running = !term;
       if (term) {
+        this.stopping = false;
         this.activeSessionId = '';
         if (this._poll) { clearInterval(this._poll); this._poll = null; }
       }

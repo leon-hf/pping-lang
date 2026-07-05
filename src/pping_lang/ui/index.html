@@ -1617,6 +1617,10 @@
       <svg x-show="running" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="9" stroke-opacity=".3"/><path d="M21 12a9 9 0 0 0-9-9"/></svg>
       <span x-text="startLabel()"></span>
     </button>
+    <button class="ap-stop" x-show="running" @click="stop()" :disabled="stopping">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 7h10v10H7z"/></svg>
+      <span x-text="stopping ? '停止中…' : '停止调优'"></span>
+    </button>
   </div>
 
   <!-- 空态 -->

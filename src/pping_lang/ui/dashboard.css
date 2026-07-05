@@ -2029,6 +2029,10 @@
   .ap-start:hover:not(:disabled){transform:translateY(-1px);box-shadow:var(--shadow-lg)}
   .ap-start:disabled{opacity:.65;cursor:default}
   .ap-start svg{width:16px;height:16px}
+  .ap-stop{display:inline-flex;align-items:center;gap:8px;font-family:inherit;font-size:14px;font-weight:700;color:var(--coral-strong);background:var(--surface);border:1px solid var(--coral-soft);border-radius:9px;padding:10px 14px;cursor:pointer;box-shadow:var(--shadow-sm);transition:.15s}
+  .ap-stop:hover:not(:disabled){transform:translateY(-1px);border-color:var(--coral);box-shadow:var(--shadow-md)}
+  .ap-stop:disabled{opacity:.65;cursor:default}
+  .ap-stop svg{width:15px;height:15px}
   .ap-idle{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:34px 28px;text-align:center;box-shadow:var(--shadow-sm)}
   .ap-loop{display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap;margin-bottom:18px}
   .ap-loop .st{display:flex;flex-direction:column;align-items:center;gap:6px;min-width:96px}
