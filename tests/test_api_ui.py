@@ -75,6 +75,13 @@ def test_autopilot_cold_open_ignores_terminal_history(client):
     assert "latest completed JSONL" in js
 
 
+def test_autopilot_start_button_uses_execute_label(client):
+    js = client.get("/dashboard.js").text
+    assert "return '执行调优'" in js
+    assert "重新调优" not in js
+    assert "重新真实调优" not in js
+
+
 def test_root_references_marquee_kpi_labels(client):
     """Dashboard 必须把 marquee KPI 标签暴露给用户。
 
@@ -186,7 +193,7 @@ def test_autopilot_promote_package_ui(client):
 def test_autopilot_start_button_targets_real_bridge(client):
     body = client.get("/").text + client.get("/dashboard.js").text
     assert "startLabel()" in body
-    assert "开始调优" in body
+    assert "执行调优" in body
     assert "host bridge 未连接" in body
     assert "真实调优需要先配置 LLM agent" in body
     assert "host bridge 状态不可达" in body

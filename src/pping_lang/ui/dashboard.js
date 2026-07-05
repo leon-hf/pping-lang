@@ -1568,8 +1568,7 @@ function autopilotTab() {
     startLabel() {
       const real = this.hasBridge();
       if (this.running) return real ? '真实调优中…' : '调优中…';
-      if (this.session) return real ? '重新真实调优' : '重新调优';
-      return real ? '开始真实调优' : '开始调优';
+      return '执行调优';
     },
     stateLabel() {
       if (!this.session) return '';
