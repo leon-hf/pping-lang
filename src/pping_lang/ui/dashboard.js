@@ -1574,6 +1574,7 @@ function autopilotTab() {
     stopping: false,
     shownRounds: [],
     pending: null,
+    pollFailures: 0,
     drawerOpen: false,
     promoteOpen: false,
     expandedRounds: [],
@@ -1641,8 +1642,12 @@ function autopilotTab() {
       const events = (s.events || []).slice(-5);
       const ev = events[events.length - 1] || null;
       if (!ev) {
-        return { phase: 'baseline', title: '启动真实调优', hyp: '正在创建 session 并准备基线压测', events: [], progress: '' };
+        return { phase: 'baseline', round: 0, title: '启动真实调优', hyp: '正在创建 session 并准备基线压测', events: [], progress: '' };
       }
+      const completedRounds = (s.rounds || []).map(r => Number(r.round)).filter(Number.isFinite);
+      const maxCompletedRound = completedRounds.length ? Math.max(...completedRounds) : -1;
+      const evRound = Number(ev.round);
+      if (Number.isFinite(evRound) && evRound <= maxCompletedRound) return null;
       const detail = ev.detail || {};
       const action = detail.flag ? `${detail.flag} ${detail.from} → ${detail.to}` : '';
       const evidence = (detail.evidence_refs || []).slice(0, 3).join(' · ');
@@ -1650,6 +1655,7 @@ function autopilotTab() {
       if (evidence) hyp += ` · ${evidence}`;
       return {
         phase: ev.phase,
+        round: Number.isFinite(evRound) ? evRound : maxCompletedRound + 1,
         title: this._phaseLabel(ev.phase),
         hyp,
         action,
@@ -1716,6 +1722,9 @@ function autopilotTab() {
     async _sync() {
       let s; try { s = await fetch(this.apiUrl('/api/autopilot/status')).then(x => x.json()); } catch (e) {
         if (this.running) {
+          this.pollFailures += 1;
+          if (this.pending) this.pending.progress = '状态刷新重试中，保留上一帧';
+          if (this.pollFailures < 3) return;
           this.running = false;
           this.stopping = false;
           this.pending = null;
@@ -1725,6 +1734,7 @@ function autopilotTab() {
         }
         return;
       }
+      this.pollFailures = 0;
       if (!s || s.state === 'idle') { return; }
       if (this.activeSessionId && s.session_id && s.session_id !== this.activeSessionId) {
         return;

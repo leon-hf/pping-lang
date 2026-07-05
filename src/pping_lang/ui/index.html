@@ -1699,7 +1699,7 @@
         </template>
         <!-- 进行中的候选 -->
         <div class="ap-round cur" x-show="running && pending">
-          <div><span class="ap-rn" x-text="'R'+(shownRounds.length)"></span></div>
+          <div><span class="ap-rn" x-text="'R'+(pending && pending.round != null ? pending.round : shownRounds.length)"></span></div>
           <div class="ap-rbody">
             <div class="ap-rhyp" x-show="pending && pending.hyp">
               <b x-text="pending ? pending.title : '运行中'"></b><span x-text="pending ? pending.hyp : ''"></span>

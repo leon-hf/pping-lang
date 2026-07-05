@@ -120,6 +120,20 @@ def test_autopilot_start_tracks_session_id_to_avoid_stale_completed_status(clien
     assert "正在创建 session 并准备基线压测" in js
 
 
+def test_autopilot_pending_round_uses_event_round_not_list_length(client):
+    body = client.get("/").text + client.get("/dashboard.js").text
+    assert "pending.round" in body
+    assert "evRound <= maxCompletedRound" in body
+    assert "'R'+(shownRounds.length)" not in body
+
+
+def test_autopilot_status_poll_failure_keeps_last_frame_briefly(client):
+    js = client.get("/dashboard.js").text
+    assert "pollFailures" in js
+    assert "状态刷新重试中，保留上一帧" in js
+    assert "this.pollFailures < 3" in js
+
+
 def test_autopilot_running_feedback_uses_structured_events(client):
     body = client.get("/").text + client.get("/dashboard.js").text + client.get("/dashboard.css").text
     assert "_pendingFromStatus" in body
