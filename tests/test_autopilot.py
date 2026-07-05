@@ -401,6 +401,46 @@ def test_build_objective():
     assert o.target == "throughput" and o.sla.ttft_p99_ms == 800
 
 
+def test_agent_config_connectivity_probe(monkeypatch):
+    from pping_lang.autopilot import api as ap_api
+
+    assert not ap_api.test_agent_config({"base_url": "http://x", "model": "m"})["ok"]
+
+    class Resp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
+
+        def read(self):
+            return b'{"choices":[{"message":{"content":"ok"}}]}'
+
+    seen = {}
+
+    def fake_urlopen(req, timeout):
+        seen["url"] = req.full_url
+        seen["auth"] = req.headers.get("Authorization")
+        seen["body"] = json.loads(req.data.decode("utf-8"))
+        seen["timeout"] = timeout
+        return Resp()
+
+    monkeypatch.setattr(ap_api.urllib.request, "urlopen", fake_urlopen)
+    out = ap_api.test_agent_config({
+        "base_url": "https://api.moonshot.ai/v1",
+        "api_key": "secret",
+        "model": "kimi-k2.6",
+        "temperature": 0.6,
+        "timeout_s": 9,
+    })
+    assert out["ok"] is True and out["sample"] == "ok"
+    assert seen["url"] == "https://api.moonshot.ai/v1/chat/completions"
+    assert seen["auth"] == "Bearer secret"
+    assert seen["body"]["model"] == "kimi-k2.6"
+    assert seen["body"]["temperature"] == 0.6
+    assert seen["timeout"] == 9
+
+
 # ---- 真 LLM agent(mock HTTP)+ 兜底 ----
 
 def _ctx(cands, bottleneck="A", config=None, tried=None):

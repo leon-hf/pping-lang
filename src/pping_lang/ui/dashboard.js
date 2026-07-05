@@ -1507,6 +1507,7 @@ function autopilotTab() {
     preset: 'openrouter',
     agent: { base_url: 'https://openrouter.ai/api/v1', api_key: '', model: 'anthropic/claude-opus-4' },
     agentTest: '',
+    agentTesting: false,
     advOpen: false,
     showPrompt: false,
     adv: { guidance: '', temperature: 0.4, timeout_s: 30, retries: 2, allowQualityKnobs: false },
@@ -1537,14 +1538,34 @@ function autopilotTab() {
         if (p.temperature != null) this.adv.temperature = p.temperature;
       }
     },
-    testAgent() {
-      this.agentTest = '检查中…';
-      setTimeout(() => {
-        this.agentTest = (this.agent.api_key && this.agent.base_url && this.agent.model)
-          ? '✓ 配置已填'
-          : '需填 Base URL / API Key / Model';
-        setTimeout(() => this.agentTest = '', 2200);
-      }, 400);
+    async testAgent() {
+      if (!this.agent.base_url || !this.agent.api_key || !this.agent.model) {
+        this.agentTest = '需填 Base URL / API Key / Model';
+        setTimeout(() => this.agentTest = '', 2600);
+        return;
+      }
+      this.agentTesting = true;
+      this.agentTest = '连接中…';
+      const body = {
+        agent: Object.assign({}, this.agent, {
+          temperature: this.adv.temperature,
+          timeout_s: this.adv.timeout_s,
+        }),
+      };
+      try {
+        const r = await fetch(this.apiUrl('/api/autopilot/agent-test'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const out = await r.json();
+        this.agentTest = out.ok ? '✓ 连接可用' : ('连接失败: ' + (out.error || `HTTP ${r.status}`)).slice(0, 80);
+      } catch (e) {
+        this.agentTest = '连接失败: ' + String(e).slice(0, 70);
+      } finally {
+        this.agentTesting = false;
+        setTimeout(() => this.agentTest = '', 4500);
+      }
     },
     session: null,
     running: false,

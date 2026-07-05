@@ -1560,7 +1560,7 @@
       <div class="ap-field key"><label>API Key</label><input type="password" x-model="agent.api_key" placeholder="sk-..."></div>
       <div class="ap-field model"><label>Model</label><input x-model="agent.model" placeholder="anthropic/claude-opus-4"></div>
       <div style="display:flex;align-items:flex-end;gap:6px">
-        <button class="ap-test" @click="testAgent()" x-text="agentTest || '检查配置'"></button>
+        <button class="ap-test" @click="testAgent()" :disabled="agentTesting" x-text="agentTest || '测试连接'"></button>
         <div class="ap-adv-toggle" @click="advOpen=!advOpen"><span class="c" x-text="advOpen?'▾':'▸'"></span> 高级</div>
       </div>
       <div class="ap-agent-note">任意 <b style="color:var(--coral-strong)">OpenAI 兼容</b>端点都行（OpenRouter / OpenAI / DeepSeek / Kimi / 本地）。真实调优必须配置 LLM agent；StubAgent 只用于本地 SimSandbox/dev tests,不能驱动真实 GPU 调优。Key 仅本会话用于调 agent，<b>不入诊断热路径、不随轨迹存盘</b>；生产建议走环境变量注入。注意：<b>别用被压测的那个 vLLM 模型当 agent</b>（它在被压、可能太小）。</div>

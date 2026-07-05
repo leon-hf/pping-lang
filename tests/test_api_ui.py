@@ -91,6 +91,14 @@ def test_autopilot_agent_presets_include_kimi(client):
     assert "temperature: 0.6" in body
 
 
+def test_autopilot_agent_test_calls_backend_probe(client):
+    body = client.get("/").text + client.get("/dashboard.js").text
+    assert "/api/autopilot/agent-test" in body
+    assert "连接中…" in body
+    assert "✓ 连接可用" in body
+    assert "配置已填" not in body
+
+
 def test_root_references_marquee_kpi_labels(client):
     """Dashboard 必须把 marquee KPI 标签暴露给用户。
 

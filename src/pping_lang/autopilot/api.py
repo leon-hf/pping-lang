@@ -52,6 +52,52 @@ def build_objective(d: dict) -> ObjectiveSpec:
     )
 
 
+def test_agent_config(cfg: dict | None) -> dict:
+    """Try a minimal OpenAI-compatible chat call for the configured agent.
+
+    This is intentionally server-side: browser-side provider calls usually hit
+    CORS, and the API key should not be sprayed through page logs. The key is
+    used only for this request and never returned.
+    """
+    cfg = cfg or {}
+    base = str(cfg.get("base_url") or "").rstrip("/")
+    key = str(cfg.get("api_key") or "")
+    model = str(cfg.get("model") or "")
+    if not (base and key and model):
+        return {"ok": False, "error": "missing base_url/api_key/model"}
+
+    url = base if base.endswith("/chat/completions") else base + "/chat/completions"
+    payload: dict[str, Any] = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": "Reply with exactly: ok"},
+            {"role": "user", "content": "ok"},
+        ],
+        "max_tokens": 2,
+    }
+    if cfg.get("temperature") is not None:
+        payload["temperature"] = float(cfg["temperature"])
+    data = json.dumps(payload).encode("utf-8")
+    timeout = max(3.0, min(float(cfg.get("timeout_s") or 15), 30.0))
+    req = urllib.request.Request(
+        url, data=data, method="POST",
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {key}",
+        })
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            body = json.loads(r.read().decode("utf-8") or "{}")
+        choice = ((body.get("choices") or [{}])[0] or {})
+        content = ((choice.get("message") or {}).get("content") or "").strip()
+        return {"ok": True, "provider": base, "model": model, "sample": content[:80]}
+    except urllib.error.HTTPError as e:
+        msg = e.read().decode("utf-8", errors="replace")[:400]
+        return {"ok": False, "error": f"HTTP {e.code}: {msg}"}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+
+
 class AutopilotController:
     """持有当前 session 的 store + runner;线程安全。单卡 → 单活动 session。"""
 
@@ -133,6 +179,14 @@ class AutopilotController:
                 return True
             return False
 
+    def test_agent(self, agent_cfg: dict | None) -> dict:
+        if self._bridge_url:
+            try:
+                return self._bridge("POST", "/api/autopilot/agent-test", {"agent": agent_cfg})
+            except Exception as e:  # noqa: BLE001
+                return {"ok": False, "error": f"bridge: {e}"}
+        return test_agent_config(agent_cfg)
+
 
 def register_autopilot_routes(app: Any, *, model: str, sim: bool = True,
                               session_dir: str | Path | None = None,
@@ -161,5 +215,9 @@ def register_autopilot_routes(app: Any, *, model: str, sim: bool = True,
     @app.post("/api/autopilot/stop")
     def ap_stop() -> dict:
         return {"stopped": ctrl.stop()}
+
+    @app.post("/api/autopilot/agent-test")
+    def ap_agent_test(body: dict = Body(...)) -> dict:
+        return ctrl.test_agent(body.get("agent"))
 
     return ctrl
