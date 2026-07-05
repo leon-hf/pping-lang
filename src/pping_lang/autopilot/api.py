@@ -172,7 +172,7 @@ class AutopilotController:
         with self._lock:
             if self._store is not None and self._store.active():
                 raise RuntimeError("a session is already running")  # → 409
-            budget = budget or {"rounds": 6, "minutes": 15}
+            budget = budget or {"rounds": 12, "minutes": 30}
             sid = "ap-" + time.strftime("%Y%m%d-%H%M%S", time.gmtime())
             agent = build_agent(agent_cfg)  # 有 key → 真 LLM(ResilientAgent 兜底);否则 StubAgent
             path = self._session_dir / f"{sid}.jsonl" if self._session_dir else None

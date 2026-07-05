@@ -1610,7 +1610,7 @@
         <button :class="{active: obj.target==='cost'}" @click="obj.target='cost'">性价比</button>
       </div>
       <span>SLA · TTFT p99 ≤ <input type="number" x-model="obj.ttft"> ms · TPOT p99 ≤ <input type="number" x-model="obj.tpot"> ms</span>
-      <span>预算 <input type="number" x-model="budget.rounds"> 轮 / <input type="number" x-model="budget.minutes"> min</span>
+      <span>最多 <input type="number" x-model="budget.rounds"> 轮 / <input type="number" x-model="budget.minutes"> min</span>
     </div>
     <button class="ap-start" @click="start()" :disabled="running">
       <svg x-show="!running" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
@@ -1645,7 +1645,7 @@
           <span class="pulse" x-show="session.state==='running'"></span>
           <span x-text="stateLabel()"></span>
         </span>
-        <span class="round-n">Round <span x-text="shownRounds.length-1 < 0 ? 0 : Math.max(0, shownRounds.length-1)"></span> / <span x-text="budget.rounds"></span></span>
+        <span class="round-n">已评估 <span x-text="shownRounds.length-1 < 0 ? 0 : Math.max(0, shownRounds.length-1)"></span> / 最多 <span x-text="budget.rounds"></span> 轮</span>
         <div class="ap-prog"><i :style="`width:${Math.min(100, (Math.max(0,shownRounds.length-1)/budget.rounds)*100)}%`"></i></div>
         <span class="best">当前最优 <b><span x-text="fmt(best.tps)"></span> tok/s</b></span>
       </div>

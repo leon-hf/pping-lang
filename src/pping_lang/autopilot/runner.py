@@ -28,7 +28,7 @@ from pping_lang.autopilot.repeat import aggregate_scorecards
 from pping_lang.autopilot.search import prepare_search_candidates
 
 BASELINE_CONFIG = {"max_num_seqs": 32, "gpu_memory_utilization": 0.70}
-K_NO_IMPROVE = 2
+K_NO_IMPROVE = 4
 MAX_ILLEGAL = 2          # proposing:连续非法提案上限 → failed(§9.3)
 INCOMPLETE_STATES = {"applying", "warming_up", "benchmarking", "deciding"}
 
@@ -173,8 +173,8 @@ class Runner(threading.Thread):
         self._sb = sandbox
         self._agent = agent
         self._obj = obj
-        self._rounds_budget = int(budget.get("rounds", 6))
-        self._secs_budget = float(budget.get("seconds", budget.get("minutes", 15) * 60))
+        self._rounds_budget = int(budget.get("rounds", 12))
+        self._secs_budget = float(budget.get("seconds", budget.get("minutes", 30) * 60))
         self._model = model
         self._delay = step_delay_s          # UI 逐轮观感(真路由由 bench 时长自然产生)
         self._baseline = dict(baseline_config or BASELINE_CONFIG)   # 可配:压低=造"喂不饱"工况

@@ -82,6 +82,14 @@ def test_autopilot_start_button_uses_execute_label(client):
     assert "重新真实调优" not in js
 
 
+def test_autopilot_budget_is_max_rounds_not_fixed_six(client):
+    body = client.get("/").text + client.get("/dashboard.js").text
+    assert "budget: { rounds: 12, minutes: 30 }" in body
+    assert "Number(this.budget.rounds) || 12" in body
+    assert "最多 <input" in body
+    assert "已评估" in body and "最多 <span x-text=\"budget.rounds\"></span> 轮" in body
+
+
 def test_autopilot_agent_presets_include_kimi(client):
     body = client.get("/").text + client.get("/dashboard.js").text
     assert 'value="kimi"' in body

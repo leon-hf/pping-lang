@@ -3,7 +3,7 @@
     python -m pping_lang.autopilot.run \
         --model Qwen/Qwen2.5-0.5B-Instruct --image <pping-image> \
         --serve-container <主-serve-容器名> --session-dir <落 JSONL 的目录> \
-        --rounds 6 --target throughput --ttft 1000 \
+        --rounds 12 --target throughput --ttft 1000 \
         [--agent-base-url ... --agent-key ... --agent-model ...]
 
 流程:停主 serve 腾卡 → 逐候选 `docker run` 起容器跑真 bench/打分 → teardown →
@@ -76,7 +76,7 @@ def main(argv: list[str] | None = None) -> int:
                    help="P2 搜索模式:agent=旧单步候选,grid=坐标小网格,bo=热启动 BO v1 排序")
     p.add_argument("--search-width", type=int, default=3, help="grid/bo 每个旋钮展开的候选档数")
     p.add_argument("--quality-gate", action="store_true", help="放开 T2 质量类候选(默认只 T1)")
-    p.add_argument("--rounds", type=int, default=6)
+    p.add_argument("--rounds", type=int, default=12)
     p.add_argument("--minutes", type=int, default=30)
     p.add_argument("--target", default="throughput", choices=["throughput", "latency"])
     p.add_argument("--ttft", type=float, default=None, help="TTFT p99 SLA(ms)")

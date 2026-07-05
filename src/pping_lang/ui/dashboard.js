@@ -1502,7 +1502,7 @@ function autopilotTab() {
   };
   return {
     obj: { target: 'throughput', ttft: 8000, tpot: 50 },
-    budget: { rounds: 6, minutes: 15 },
+    budget: { rounds: 12, minutes: 30 },
     agentOpen: false,
     preset: 'openrouter',
     agent: { provider: '', base_url: 'https://openrouter.ai/api/v1', api_key: '', model: 'anthropic/claude-opus-4' },
@@ -1618,7 +1618,7 @@ function autopilotTab() {
       }
       const body = {
         objective: { target: this.obj.target, sla: { ttft_p99_ms: Number(this.obj.ttft) || null, tpot_p99_ms: Number(this.obj.tpot) || null } },
-        budget: { rounds: Number(this.budget.rounds) || 6, minutes: Number(this.budget.minutes) || 15 },
+        budget: { rounds: Number(this.budget.rounds) || 12, minutes: Number(this.budget.minutes) || 30 },
         agent: Object.assign({}, this.agent, {
           guidance: this.adv.guidance, temperature: this.adv.temperature,
           timeout_s: this.adv.timeout_s, retries: this.adv.retries,

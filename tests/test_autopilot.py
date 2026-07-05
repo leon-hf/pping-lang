@@ -401,6 +401,18 @@ def test_build_objective():
     assert o.target == "throughput" and o.sla.ttft_p99_ms == 800
 
 
+def test_runner_defaults_allow_deeper_agent_exploration(tmp_path):
+    from pping_lang.autopilot.runner import K_NO_IMPROVE, Runner
+
+    store = SessionStore(tmp_path / "defaults.jsonl")
+    agent = StubAgent()
+    runner = Runner(store=store, sandbox=SimSandbox("M"), agent=agent,
+                    obj=build_objective({"target": "throughput"}), budget={}, model="M")
+    assert runner._rounds_budget == 12
+    assert runner._secs_budget == 30 * 60
+    assert K_NO_IMPROVE == 4
+
+
 def test_agent_config_connectivity_probe(monkeypatch):
     from pping_lang.autopilot import api as ap_api
 
