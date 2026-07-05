@@ -1525,10 +1525,18 @@ function autopilotTab() {
       openrouter: { base_url: 'https://openrouter.ai/api/v1', model: 'anthropic/claude-opus-4' },
       openai:     { base_url: 'https://api.openai.com/v1',    model: 'gpt-4o' },
       deepseek:   { base_url: 'https://api.deepseek.com/v1',  model: 'deepseek-chat' },
+      kimi:       { base_url: 'https://api.moonshot.ai/v1',   model: 'kimi-k2.6', temperature: 0.6 },
       local:      { base_url: 'http://localhost:11434/v1',    model: 'llama3.1' },
       custom:     { base_url: '', model: '' },
     },
-    applyPreset() { const p = this.PRESETS[this.preset]; if (p) { this.agent.base_url = p.base_url; this.agent.model = p.model; } },
+    applyPreset() {
+      const p = this.PRESETS[this.preset];
+      if (p) {
+        this.agent.base_url = p.base_url;
+        this.agent.model = p.model;
+        if (p.temperature != null) this.adv.temperature = p.temperature;
+      }
+    },
     testAgent() {
       this.agentTest = '检查中…';
       setTimeout(() => {

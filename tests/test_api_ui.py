@@ -82,6 +82,15 @@ def test_autopilot_start_button_uses_execute_label(client):
     assert "重新真实调优" not in js
 
 
+def test_autopilot_agent_presets_include_kimi(client):
+    body = client.get("/").text + client.get("/dashboard.js").text
+    assert 'value="kimi"' in body
+    assert "Kimi / Moonshot" in body
+    assert "https://api.moonshot.ai/v1" in body
+    assert "kimi-k2.6" in body
+    assert "temperature: 0.6" in body
+
+
 def test_root_references_marquee_kpi_labels(client):
     """Dashboard 必须把 marquee KPI 标签暴露给用户。
 
