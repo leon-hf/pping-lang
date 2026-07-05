@@ -395,9 +395,9 @@ h2.sec{font-size:clamp(26px,3.5vw,34px);font-weight:800;letter-spacing:-.02em;co
 .ap-tps{font-family:var(--mono);font-size:13px;font-weight:800;color:var(--text-strong);white-space:nowrap}
 .ap-tps small{font-size:10px;color:var(--muted-2);font-weight:600;margin-left:1px}
 .ap-delta{font-family:var(--mono);font-size:11px;font-weight:700;white-space:nowrap}
-.ap-delta.up{color:var(--green)}.ap-delta.down{color:var(--rose)}
+.ap-delta.up{color:var(--green)}.ap-delta.down{color:var(--rose)}.ap-delta.tie{color:var(--amber)}
 .ap-r-verdict{font-size:12px;font-weight:700;text-align:right;white-space:nowrap}
-.ap-r-verdict.kept{color:var(--green)}.ap-r-verdict.rev{color:var(--rose)}.ap-r-verdict.base{color:var(--muted-2)}.ap-r-verdict.stop{color:var(--muted)}
+.ap-r-verdict.kept{color:var(--green)}.ap-r-verdict.rev{color:var(--rose)}.ap-r-verdict.tie{color:var(--amber)}.ap-r-verdict.base{color:var(--muted-2)}.ap-r-verdict.stop{color:var(--muted)}
 .ap-result{padding:18px 20px;background:linear-gradient(180deg,var(--brand-soft),#fff);border-top:1px solid var(--border)}
 .ap-result-headline{font-size:15px;color:var(--text);margin-bottom:11px}
 .ap-result-headline b{color:var(--brand-strong);font-weight:800;font-size:18px}
@@ -483,13 +483,13 @@ footer{border-top:1px solid var(--border);padding:48px 0 60px;margin-top:40px}
     <p class="lede" data-i18n="hero.lede">
       <strong>pping-lang</strong> 把你本来要开 <b>Nsight Compute</b> 才看得到的 kernel 级深度
       （PC sampling / stall reason / SASS / 源码行）做成<strong>常驻、低开销、还附结论</strong>，而且懂 vLLM 语义。
-      旗舰能力 <b>Autopilot</b>（设计中）更进一步：不止诊断，还在沙盒里自动把 vLLM 调到最优。
+      旗舰能力 <b>Autopilot</b> 更进一步：不止诊断，还在沙盒里自动把 vLLM 调到最优；runw 真机已跑出 986 → 6,094 tok/s（×6.18）的验证轨迹。
     </p>
     <div class="badges">
       <span class="badge">PyPI <b>v0.1.0a1</b></span>
       <span class="badge">Python <b>3.10–3.12</b></span>
       <span class="badge">License <b>Apache 2.0</b></span>
-      <span class="badge ok">Tests <b data-i18n="hero.tests">444 通过</b></span>
+      <span class="badge ok">Tests <b data-i18n="hero.tests">514 通过</b></span>
     </div>
     <div class="cta">
       <span class="install"><span class="pfx">$</span> pip install pping-lang <span class="copy" data-i18n="hero.copy" onclick="navigator.clipboard?.writeText('pip install pping-lang');this.textContent='✓'">复制</span></span>
@@ -803,7 +803,7 @@ footer{border-top:1px solid var(--border);padding:48px 0 60px;margin-top:40px}
 <section id="autopilot">
   <div class="wrap">
     <div class="sec-head">
-      <div class="sec-tag" style="display:flex;align-items:center;gap:10px"><span data-i18n="ap.tag">旗舰方向</span><span class="ap-badge" data-i18n="ap.badge">设计中 · 即将到来</span></div>
+      <div class="sec-tag" style="display:flex;align-items:center;gap:10px"><span data-i18n="ap.tag">旗舰方向</span><span class="ap-badge" data-i18n="ap.badge">runw 真机已验证 · M0</span></div>
       <h2 class="sec" data-i18n="ap.h2">Autopilot —— 诊断驱动的自主调优</h2>
       <p class="sec-sub" data-i18n="ap.sub">一条命令起 pping-lang → 点「自动调优」→ Agent 在<b>沙盒</b>里迭代「诊断 → 改一个旋钮 → 压测 → Δ → 留下 / 回滚」→ 给出<b>实测验证过</b>的最优配置 + 全程推理。把 LLM 变成一个会看证据、自己动手、用压测打分的 LLM-serving 性能工程师。</p>
     </div>
@@ -830,63 +830,63 @@ footer{border-top:1px solid var(--border);padding:48px 0 60px;margin-top:40px}
 
     <div class="ap-trace-card">
       <div class="ap-trace-top">
-        <div class="ap-trace-title" data-i18n="ap.goal">目标：吞吐优先 · TTFT p99 ≤ 1000ms · 预算 6 轮</div>
-        <div class="ap-preview-tag" data-i18n="ap.preview">设计预览 · 示意数字（区别于上方真机数据）</div>
+        <div class="ap-trace-title" data-i18n="ap.goal">目标：吞吐优先 · TTFT p99 ≤ 8000ms · 预算 6 轮</div>
+        <div class="ap-preview-tag" data-i18n="ap.preview">runw 真机轨迹 · RTX 5060 Ti · vLLM 0.21 · 2026-07-04</div>
       </div>
       <div class="ap-trace">
         <div class="ap-round base">
           <div class="ap-r-head"><span class="ap-r-n">R0</span><span class="ap-r-tag" data-i18n="ap.basetag">基线</span></div>
-          <div class="ap-r-body"><div class="ap-r-cfg mono">max_num_seqs=32 · chunked_prefill=off · gpu_util=0.70</div></div>
-          <div class="ap-r-tput"><div class="ap-bar" style="width:32%"></div><span class="ap-tps">1,240<small>tok/s</small></span></div>
+          <div class="ap-r-body"><div class="ap-r-cfg mono">max_num_seqs=4 · gpu_util=0.70 · mixed-short/c32</div></div>
+          <div class="ap-r-tput"><div class="ap-bar" style="width:16%"></div><span class="ap-tps">986<small>tok/s</small></span></div>
           <div class="ap-r-verdict base">baseline</div>
         </div>
         <div class="ap-round">
           <div class="ap-r-head"><span class="ap-r-n">R1</span></div>
           <div class="ap-r-body">
-            <div class="ap-r-diag"><b data-i18n="ap.diag">诊断</b><span data-i18n="ap.r1d">MFU/MBU 双低 · running=8≪32 · waiting=0</span></div>
-            <div class="ap-r-hyp"><b data-i18n="ap.hyp">假设</b><span data-i18n="ap.r1h">batch 没拼起来 → enable-chunked-prefill</span></div>
+            <div class="ap-r-diag"><b data-i18n="ap.diag">诊断</b><span data-i18n="ap.r1d">A/喂不饱 · 并发闸太低</span></div>
+            <div class="ap-r-hyp"><b data-i18n="ap.hyp">假设</b><span data-i18n="ap.r1h">max_num_seqs 4→8</span></div>
           </div>
-          <div class="ap-r-tput"><div class="ap-bar" style="width:51%"></div><span class="ap-tps">1,980<small>tok/s</small></span><span class="ap-delta up">+60%</span></div>
+          <div class="ap-r-tput"><div class="ap-bar" style="width:34%"></div><span class="ap-tps">2,066<small>tok/s</small></span><span class="ap-delta up">+109%</span></div>
           <div class="ap-r-verdict kept">✓ kept</div>
         </div>
         <div class="ap-round">
           <div class="ap-r-head"><span class="ap-r-n">R2</span></div>
           <div class="ap-r-body">
-            <div class="ap-r-diag"><b data-i18n="ap.diag">诊断</b><span data-i18n="ap.r2d">running 仍 ≪ max · KV 用量 31%</span></div>
-            <div class="ap-r-hyp"><b data-i18n="ap.hyp">假设</b><span data-i18n="ap.r2h">显存富余 → max_num_seqs 32→128</span></div>
+            <div class="ap-r-diag"><b data-i18n="ap.diag">诊断</b><span data-i18n="ap.r2d">吞吐仍随并发上升 · TTFT 变好</span></div>
+            <div class="ap-r-hyp"><b data-i18n="ap.hyp">假设</b><span data-i18n="ap.r2h">max_num_seqs 8→16</span></div>
           </div>
-          <div class="ap-r-tput"><div class="ap-bar" style="width:90%"></div><span class="ap-tps">3,520<small>tok/s</small></span><span class="ap-delta up">+78%</span></div>
+          <div class="ap-r-tput"><div class="ap-bar" style="width:65%"></div><span class="ap-tps">3,980<small>tok/s</small></span><span class="ap-delta up">+93%</span></div>
           <div class="ap-r-verdict kept">✓ kept</div>
         </div>
         <div class="ap-round">
           <div class="ap-r-head"><span class="ap-r-n">R3</span></div>
           <div class="ap-r-body">
-            <div class="ap-r-hyp"><b data-i18n="ap.hyp">假设</b><span data-i18n="ap.r3h">gpu_util 0.70→0.90 扩 KV 池</span></div>
-            <div class="ap-r-diag"><b data-i18n="ap.measure">实测</b><span data-i18n="ap.r3d">TTFT p99 940ms（逼近 SLA）</span></div>
+            <div class="ap-r-hyp"><b data-i18n="ap.hyp">假设</b><span data-i18n="ap.r3h">max_num_seqs 16→32</span></div>
+            <div class="ap-r-diag"><b data-i18n="ap.measure">实测</b><span data-i18n="ap.r3d">TTFT p99 250ms，仍稳</span></div>
           </div>
-          <div class="ap-r-tput"><div class="ap-bar" style="width:100%"></div><span class="ap-tps">3,910<small>tok/s</small></span><span class="ap-delta up">+11%</span></div>
+          <div class="ap-r-tput"><div class="ap-bar" style="width:90%"></div><span class="ap-tps">5,489<small>tok/s</small></span><span class="ap-delta up">+38%</span></div>
           <div class="ap-r-verdict kept">✓ kept</div>
         </div>
-        <div class="ap-round rev">
+        <div class="ap-round">
           <div class="ap-r-head"><span class="ap-r-n">R4</span></div>
           <div class="ap-r-body">
-            <div class="ap-r-hyp"><b data-i18n="ap.hyp">假设</b><span data-i18n="ap.r4h">max_num_seqs 128→256</span></div>
-            <div class="ap-r-diag"><b data-i18n="ap.measure">实测</b><span data-i18n="ap.r4d">TTFT p99 1,180ms ✗ 破 SLA</span></div>
+            <div class="ap-r-hyp"><b data-i18n="ap.hyp">假设</b><span data-i18n="ap.r4h">max_num_seqs 32→64</span></div>
+            <div class="ap-r-diag"><b data-i18n="ap.measure">实测</b><span data-i18n="ap.r4d">5,598 tok/s，但噪声边界内</span></div>
           </div>
-          <div class="ap-r-tput"><div class="ap-bar" style="width:98%"></div><span class="ap-tps">3,840<small>tok/s</small></span><span class="ap-delta down">−2%</span></div>
-          <div class="ap-r-verdict rev" data-i18n="ap.reverted">↩ reverted</div>
+          <div class="ap-r-tput"><div class="ap-bar" style="width:92%"></div><span class="ap-tps">5,598<small>tok/s</small></span><span class="ap-delta tie">+2%</span></div>
+          <div class="ap-r-verdict tie" data-i18n="ap.tie">≈ tie</div>
         </div>
         <div class="ap-round">
           <div class="ap-r-head"><span class="ap-r-n">R5</span></div>
-          <div class="ap-r-body"><div class="ap-r-note" data-i18n="ap.r5">Agent 判：已近最优（再扩并发破 SLA、屋顶已贴）→ 停</div></div>
-          <div class="ap-r-tput"></div>
-          <div class="ap-r-verdict stop" data-i18n="ap.done">■ done</div>
+          <div class="ap-r-body"><div class="ap-r-note" data-i18n="ap.r5">尝试 performance_mode=throughput，实测留下；再推并发持平 → 停</div></div>
+          <div class="ap-r-tput"><div class="ap-bar" style="width:100%"></div><span class="ap-tps">6,094<small>tok/s</small></span><span class="ap-delta up">+9%</span></div>
+          <div class="ap-r-verdict kept">✓ kept</div>
         </div>
       </div>
       <div class="ap-result">
-        <div class="ap-result-headline"><span data-i18n="ap.res.pre">吞吐</span> <b>1,240 → 3,910 tok/s（×3.15）</b><span data-i18n="ap.res.post">，仍满足 TTFT SLA</span></div>
-        <div class="ap-cmd"><span class="pfx">$</span> vllm serve &lt;model&gt; --enable-chunked-prefill --max-num-seqs 128 --gpu-memory-utilization 0.90</div>
-        <div class="ap-honest" data-i18n="ap.honest">「×3」只在「现实但没调过」的默认基线上成立 —— 那正是大量真实部署的现状（默认 max_num_seqs、chunked-prefill 关着、gpu-util 保守）。已调过的基线则是诚实的边际收益（+5~15%），Agent 会如实报「已近最优」。</div>
+        <div class="ap-result-headline"><span data-i18n="ap.res.pre">吞吐</span> <b>986 → 6,094 tok/s（×6.18）</b><span data-i18n="ap.res.post">，仍满足 TTFT SLA</span></div>
+        <div class="ap-cmd"><span class="pfx">$</span> vllm serve Qwen/Qwen2.5-0.5B-Instruct --max-num-seqs 32 --gpu-memory-utilization 0.7 --performance-mode throughput</div>
+        <div class="ap-honest" data-i18n="ap.honest">这是一次 runw 真机 session：RTX 5060 Ti、vLLM 0.21、Qwen2.5-0.5B、mixed-short/c32。收益来自故意朴素的常见起点；已调过的基线只应期待诚实的边际收益。</div>
       </div>
     </div>
 
@@ -1072,10 +1072,10 @@ footer{border-top:1px solid var(--border);padding:48px 0 60px;margin-top:40px}
       <div class="ap-road-head"><span class="ap-road-flag" data-i18n="road.flag">旗舰能力</span><h3 data-i18n="road.ap.h">Autopilot 自主调优 · 分期</h3></div>
       <div class="road" style="margin-top:8px">
         <div class="rcard now">
-          <span class="badge-now" data-i18n="road.ap.m0tag">下一个里程碑</span>
-          <div class="rv">M0</div><div class="rmode" data-i18n="road.ap.m0mode">demo MVP</div>
-          <h3 data-i18n="road.ap.m0h">沙盒 + 5 旋钮 + LLM loop</h3>
-          <p data-i18n="road.ap.m0p">吞吐-under-SLA 目标 + Autopilot UI，runw 上从朴素基线跑出 ×2~3。不碰源码、不碰生产。前置：基线记分牌。</p>
+          <span class="badge-now" data-i18n="road.ap.m0tag">已验证</span>
+          <div class="rv">M0</div><div class="rmode" data-i18n="road.ap.m0mode">M0</div>
+          <h3 data-i18n="road.ap.m0h">沙盒 + 受守卫旋钮 + LLM loop</h3>
+          <p data-i18n="road.ap.m0p">吞吐-under-SLA 目标 + Autopilot UI，runw 真机跑出 986 → 6,094 tok/s（×6.18）。不碰源码、不碰生产，promote 永远人工确认。</p>
         </div>
         <div class="rcard">
           <div class="rv">M1 / M2</div><div class="rmode" data-i18n="road.ap.m1mode">多目标 / 源码级建议</div>
@@ -1217,7 +1217,7 @@ const I18N_EN = {
   "nav.why":"Why","nav.vs":"vs Nsight","nav.demo":"Live demo","nav.how":"How it works","nav.start":"Get started","nav.compat":"Compatibility","nav.roadmap":"Roadmap",
   "hero.eyebrow":"A live profiler for LLM serving · Nsight-grade depth, always-on + it concludes",
   "hero.title":'More than diagnosing vLLM —<br><span class="accent">Autopilot auto-tunes it, zero interference</span>',
-  "hero.lede":'<strong>pping-lang</strong> takes the kernel-level depth you\'d open <b>Nsight Compute</b> for (PC sampling / stall reasons / SASS / source lines) and makes it <strong>always-on, low-overhead, with a conclusion attached</strong> — and it speaks vLLM. Its flagship <b>Autopilot</b> (in design) goes further: it doesn\'t just diagnose — it auto-tunes vLLM in a sandbox.',
+  "hero.lede":'<strong>pping-lang</strong> takes the kernel-level depth you\'d open <b>Nsight Compute</b> for (PC sampling / stall reasons / SASS / source lines) and makes it <strong>always-on, low-overhead, with a conclusion attached</strong> — and it speaks vLLM. Its flagship <b>Autopilot</b> goes further: it doesn\'t just diagnose — it auto-tunes vLLM in a sandbox; on runw it validated a 986 → 6,094 tok/s trace (×6.18).',
   "pos.tag":"Positioning","pos.h2":"Filling the gap between Nsight and Grafana",
   "pos.sub":"Nsight gives you the deepest evidence — but you capture a window, read it offline, and you\'d better be an expert; Grafana is always-on and live, but can\'t see kernels and won\'t conclude. pping-lang combines both — always-on + Nsight-grade depth + conclusions, and it speaks vLLM.",
   "pos.dim":"Dimension","pos.ns.sub":"Systems / Compute","pos.gf.sub":"+ Prometheus",
@@ -1229,7 +1229,7 @@ const I18N_EN = {
   "pos.r6":"Skill needed","pos.r6n":"high (GPU architecture)","pos.r6g":"medium","pos.r6u":"low (plain-language output)",
   "pos.r7":"Runs in production","pos.r7n":"one-off diagnosis",
   "pos.punch":'<b>Nsight is the lab microscope</b> — pulled out occasionally, read offline, raw evidence; <b>pping-lang is the always-on stethoscope</b> — runs continuously, speaks plainly, and tells you which knob to turn.<span class="pos-note">For exhaustive microarchitectural tuning of a single custom kernel, Nsight Compute is still that precision scalpel; pping-lang owns the continuous, serving-level, conclusion-driven lane.</span>',
-  "hero.tests":"444 passing","hero.copy":"Copy","hero.cta":"See live demo ↓",
+  "hero.tests":"514 passing","hero.copy":"Copy","hero.cta":"See live demo ↓",
   "prob.tag":"The problem","prob.h2":"Metrics are visible — but they don't conclude",
   "prob.sub":"Prometheus + Grafana will chart every vLLM metric, but the moment you ask \"what's the bottleneck right now, which param do I touch\", it's on you. Two concrete gaps:",
   "prob.c1.h":"Ambiguous metric semantics",
@@ -1299,28 +1299,28 @@ const I18N_EN = {
   "compat.gpu.note":"Unrecognized GPUs don't block metric capture — only peak-dependent derived values are skipped. Native on Linux; Windows via WSL2 + Ubuntu.",
   "road.tag":"Roadmap","road.h2":"Flagship is Autopilot, the foundation is diagnosis","road.now":"current",
   "road.flag":"flagship","road.ap.h":"Autopilot auto-tuning · phased",
-  "road.ap.m0tag":"next milestone","road.ap.m0mode":"demo MVP","road.ap.m0h":"Sandbox + 5 knobs + LLM loop","road.ap.m0p":"Throughput-under-SLA objective + Autopilot UI; ×2~3 from a naive baseline on runw. No source edits, no production. Prerequisite: baseline scorecard.",
+  "road.ap.m0tag":"validated","road.ap.m0mode":"M0","road.ap.m0h":"Sandbox + guarded knobs + LLM loop","road.ap.m0p":"Throughput-under-SLA objective + Autopilot UI; runw true session reached 986 → 6,094 tok/s (×6.18). No source edits, no production; promote remains manual.",
   "road.ap.m1mode":"multi-objective / source-level advice","road.ap.m1h":"More knobs + advisory","road.ap.m1p":"More knobs / multi-objective / de-noising / promote-to-prod; M2 adds kernel/source-level advice via PC sampling (advisory only, never auto-applied).",
   "road.ap.m3mode":"data flywheel","road.ap.m3h":"Multi-GPU tuning + learned policy","road.ap.m3p":"TP/PP/EP communication dimensions; every run accrues a \"diagnosis → action → benchmark Δ\" trace → learn a policy, approaching \"one look, optimal config\".",
   "road.deploy":"Deployment modes",
-  "ap.tag":"Flagship direction","ap.badge":"in design · coming",
+  "ap.tag":"Flagship direction","ap.badge":"validated on runw · M0",
   "ap.h2":"Autopilot — diagnosis-driven autonomous tuning",
   "ap.sub":"Start pping-lang with one command → click \"Auto-tune\" → the Agent iterates in a <b>sandbox</b>: diagnose → turn one knob → benchmark → Δ → keep / revert → and hands you an <b>empirically-verified</b> optimal config plus the full reasoning. It turns an LLM into an LLM-serving performance engineer that reads evidence, acts, and scores itself with benchmarks.",
   "ap.s1":"read current diagnosis + config + history","ap.s2":"pick one knob, anchored to a diagnosis","ap.s3":"restart the sandbox with the new flag","ap.s4":"run the same benchmark, score it","ap.s5":"better → keep / breaks SLA → revert",
   "ap.moat.h":"Why only pping-lang can do this",
   "ap.eye1":"👁 Eyes","ap.eye1d":"deep diagnosis","ap.eye2":"✋ Hands","ap.eye2d":"benchmark + serve control","ap.eye3":"📊 Scorecard","ap.eye3d":"baseline / Δ",
   "ap.moat.p":"<b>All three in one process.</b> Other AI-infra agents feed nvidia-smi to GPT and blind-tune; Autopilot is diagnosis-driven (only touches the on-symptom knob) → converges in 3–5 rounds, not dozens of blind trials. Every change must pass a benchmark to stick — the LLM can't claim gains the benchmark didn't confirm.",
-  "ap.goal":"Goal: throughput-first · TTFT p99 ≤ 1000ms · budget 6 rounds",
-  "ap.preview":"design preview · illustrative numbers (distinct from the live data above)",
+  "ap.goal":"Goal: throughput-first · TTFT p99 ≤ 8000ms · budget 6 rounds",
+  "ap.preview":"runw true trace · RTX 5060 Ti · vLLM 0.21 · 2026-07-04",
   "ap.basetag":"baseline","ap.diag":"diag","ap.hyp":"hypo","ap.measure":"measured",
-  "ap.r1d":"MFU/MBU both low · running=8≪32 · waiting=0","ap.r1h":"batch not formed → enable-chunked-prefill",
-  "ap.r2d":"running still ≪ max · KV usage 31%","ap.r2h":"memory headroom → max_num_seqs 32→128",
-  "ap.r3h":"gpu_util 0.70→0.90 to grow KV pool","ap.r3d":"TTFT p99 940ms (approaching SLA)",
-  "ap.r4h":"max_num_seqs 128→256","ap.r4d":"TTFT p99 1,180ms ✗ breaks SLA",
-  "ap.r5":"Agent: near-optimal (more concurrency breaks SLA, roof already hit) → stop",
-  "ap.reverted":"↩ reverted","ap.done":"■ done",
+  "ap.r1d":"A/under-utilized · admission gate too low","ap.r1h":"max_num_seqs 4→8",
+  "ap.r2d":"throughput still climbs with concurrency · TTFT improves","ap.r2h":"max_num_seqs 8→16",
+  "ap.r3h":"max_num_seqs 16→32","ap.r3d":"TTFT p99 250ms, still steady",
+  "ap.r4h":"max_num_seqs 32→64","ap.r4d":"5,598 tok/s, but inside the noise margin",
+  "ap.r5":"Try performance_mode=throughput, measured kept; another concurrency push ties → stop",
+  "ap.reverted":"↩ reverted","ap.tie":"≈ tie","ap.done":"■ done",
   "ap.res.pre":"Throughput","ap.res.post":", still within TTFT SLA",
-  "ap.honest":"\"×3\" only holds on a \"realistic but untuned\" default baseline — which is exactly the state of many real deployments (default max_num_seqs, chunked-prefill off, conservative gpu-util). On an already-tuned baseline it's honest marginal gains (+5~15%), and the Agent reports \"near-optimal\" plainly.",
+  "ap.honest":"This is a true runw session: RTX 5060 Ti, vLLM 0.21, Qwen2.5-0.5B, mixed-short/c32. The gain comes from an intentionally naive but common starting point; already-tuned baselines should expect honest marginal gains.",
   "lvl.h":"Autonomy levels L0–L4 · from \"seeing\" to \"writing its own kernels\"",
   "lvl.sub":"Two orthogonal axes: <b>capability</b> (config → code) and <b>promotion</b> (sandbox-auto / production-human). Auto caps at L3; <b>production is always a human promote</b>.",
   "lvl.0t":"Observe","lvl.0d":"diagnose and conclude, no action — pping-lang today","lvl.0g":"shipped",
