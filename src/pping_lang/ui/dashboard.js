@@ -1579,6 +1579,7 @@ function autopilotTab() {
     expandedRounds: [],
     maxTps: 1,
     _poll: null,
+    activeSessionId: '',
 
     init() { this._sync(); },          // 进页时拉一次:断线重连/已有 session 直接接管直播
     fmt(n) { return (n == null || !isFinite(n)) ? '—' : Number(n).toLocaleString('en-US'); },
@@ -1627,8 +1628,10 @@ function autopilotTab() {
         const r = await fetch(this.apiUrl('/api/autopilot/start'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
         if (r.status === 409) { this.agentTest = '已有 session 在跑'; setTimeout(() => this.agentTest = '', 2500); return; }
         if (!r.ok) { throw new Error(`HTTP ${r.status}`); }
+        const out = await r.json().catch(() => ({}));
         this.running = true; this.shownRounds = []; this.expandedRounds = [];
-        this.session = { state: 'running', rounds: [] };
+        this.activeSessionId = out.session_id || '';
+        this.session = { session_id: this.activeSessionId, state: 'running', rounds: [] };
         this._startPoll();
       } catch (e) { this.agentTest = this.bridgeBase() ? 'host bridge 未连接' : '启动失败'; setTimeout(() => this.agentTest = '', 3500); }
     },
@@ -1647,6 +1650,9 @@ function autopilotTab() {
         return;
       }
       if (!s || s.state === 'idle') { return; }
+      if (this.activeSessionId && s.session_id && s.session_id !== this.activeSessionId) {
+        return;
+      }
       const term = ['done', 'stopped', 'failed'].includes(s.state);
       // Cold-opening the tab should not present the latest completed JSONL as
       // if the user just ran Autopilot. Still attach to active sessions, and
@@ -1657,9 +1663,12 @@ function autopilotTab() {
       this.maxTps = Math.max(1, ...this.shownRounds.map(r => r.tps || 0));
       this.shownRounds.forEach(r => { r.barPct = r.tps ? Math.max(6, (r.tps / this.maxTps) * 100) : 0; });
       const active = !term && this.shownRounds.length > 0 && ['proposing', 'applying', 'warming_up', 'benchmarking'].includes(s.state);
-      this.pending = active ? { hyp: '正在评估下一个真实候选 → 应用配置 → bench 打分…' } : null;
+      this.pending = (!term && (active || this.shownRounds.length === 0)) ? { hyp: '正在准备真实调优 → 写入 session → 跑 baseline…' } : null;
       this.running = !term;
-      if (term && this._poll) { clearInterval(this._poll); this._poll = null; }
+      if (term) {
+        this.activeSessionId = '';
+        if (this._poll) { clearInterval(this._poll); this._poll = null; }
+      }
     },
 
     _map(r) {

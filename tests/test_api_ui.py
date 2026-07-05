@@ -104,6 +104,14 @@ def test_autopilot_agent_test_calls_backend_probe(client):
     assert "配置已填" not in body
 
 
+def test_autopilot_start_tracks_session_id_to_avoid_stale_completed_status(client):
+    js = client.get("/dashboard.js").text
+    assert "activeSessionId" in js
+    assert "out.session_id" in js
+    assert "s.session_id !== this.activeSessionId" in js
+    assert "正在准备真实调优" in js
+
+
 def test_root_references_marquee_kpi_labels(client):
     """Dashboard 必须把 marquee KPI 标签暴露给用户。
 
