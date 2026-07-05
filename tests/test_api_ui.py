@@ -68,6 +68,13 @@ def test_root_references_known_api_endpoints(client):
         assert endpoint in body, f"UI does not reference {endpoint}"
 
 
+def test_autopilot_cold_open_ignores_terminal_history(client):
+    """打开 Autopilot tab 时,历史 done JSONL 不应伪装成刚跑完的当前 session。"""
+    js = client.get("/dashboard.js").text
+    assert "term && !this.session && !this.running" in js
+    assert "latest completed JSONL" in js
+
+
 def test_root_references_marquee_kpi_labels(client):
     """Dashboard 必须把 marquee KPI 标签暴露给用户。
 

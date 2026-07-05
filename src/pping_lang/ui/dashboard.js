@@ -1618,6 +1618,10 @@ function autopilotTab() {
       }
       if (!s || s.state === 'idle') { return; }
       const term = ['done', 'stopped', 'failed'].includes(s.state);
+      // Cold-opening the tab should not present the latest completed JSONL as
+      // if the user just ran Autopilot. Still attach to active sessions, and
+      // keep showing terminal state for sessions started in this page.
+      if (term && !this.session && !this.running) { return; }
       this.session = Object.assign({}, s, { state: s.state === 'failed' ? 'failed' : (term ? 'done' : 'running') });
       this.shownRounds = (s.rounds || []).map(r => this._map(r));
       this.maxTps = Math.max(1, ...this.shownRounds.map(r => r.tps || 0));
