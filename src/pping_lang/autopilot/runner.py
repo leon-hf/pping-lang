@@ -261,22 +261,29 @@ class Runner(threading.Thread):
         self._sb.apply(config)              # 起+就绪(失败抛 LaunchError)
         return self._measure_loaded()
 
-    def _measure_loaded(self) -> Scorecard:
+    def _heartbeat_run(self, phase: str, label: str, fn):
+        """跑 fn(),期间每 15s 发一条 "{label} Xs …" 事件——盲等段(压测 50-80s、
+        LLM 思考+重试最坏可达数分钟)UI 需要活着的信号。"""
         stop_beat = threading.Event()
 
-        def _heartbeat() -> None:                  # bench 50-80s 无输出,UI 需要活着的信号
+        def _beat() -> None:
             t0 = time.monotonic()
             while not stop_beat.wait(15.0):
-                self._event("benchmark", f"压测进行中 {int(time.monotonic() - t0)}s …",
+                self._event(phase, f"{label} {int(time.monotonic() - t0)}s …",
                             round=self._cur_round)
 
-        beat = threading.Thread(target=_heartbeat, name="ap-bench-beat", daemon=True)
+        beat = threading.Thread(target=_beat, name=f"ap-{phase}-beat", daemon=True)
         beat.start()
         try:
-            samples = [self._sb.measure(self._obj) for _ in range(self._bench_repeats)]
+            return fn()
         finally:
             stop_beat.set()
             beat.join(timeout=1.0)
+
+    def _measure_loaded(self) -> Scorecard:
+        samples = self._heartbeat_run(
+            "benchmark", "压测进行中",
+            lambda: [self._sb.measure(self._obj) for _ in range(self._bench_repeats)])
         sc = aggregate_scorecards(samples)
         sc.run_meta["search_mode"] = self._search_mode
         return sc
@@ -427,6 +434,7 @@ class Runner(threading.Thread):
         while (not self._stopping.is_set() and rnd <= self._rounds_budget
                and (time.monotonic() - t0) < self._secs_budget and no_improve < K_NO_IMPROVE):
             deadline = t0 + self._secs_budget
+            self._cur_round = rnd                     # proposing 心跳也要挂对轮号
             self._store.set_state("proposing")
             self._event("observe", "读取当前 best 的诊断证据", round=rnd,
                         detail={"best_config": dict(self._best_cfg)})
@@ -475,7 +483,9 @@ class Runner(threading.Thread):
                 self._event("decide", f"没有对症候选,准备停止并恢复 best({reason})", round=rnd)
                 self._append_stop(rnd, AgentDecision(done=True, reason=reason), diag)
                 break
-            dec = self._propose_valid(ctx)                              # 校验 ∈ 候选 + 防重(2 次非法→failed)
+            dec = self._heartbeat_run(                                  # LLM 思考+网络重试可达数分钟
+                "propose", "等待 agent 决策(LLM 思考/重试中)",
+                lambda: self._propose_valid(ctx))                       # 校验 ∈ 候选 + 防重(2 次非法→failed)
             if dec is None:
                 self._event("decide", "agent 连续给出非法提案,session 标记失败", round=rnd, level="error")
                 self._store.set_state("failed", "agent 连续 2 次非法提案(§9.3)")

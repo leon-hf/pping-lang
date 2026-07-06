@@ -1663,6 +1663,15 @@
         <span class="best">当前最优 <b><span x-text="fmt(best.tps)"></span> tok/s</b></span>
       </div>
 
+      <!-- LLM 兜底警示:用户以为在看 LLM 调优,实际某些轮是确定性启发式 -->
+      <div class="preview-note" x-show="fallbackCount > 0"
+           style="border-color:#fcd34d;background:#fffbeb;color:#92400e">
+        ⚠ 本次有 <b x-text="fallbackCount"></b> 轮 LLM 调用失败,由确定性启发式兜底选择旋钮
+        —— 检查 agent 配置 / 额度 / 网络(点开对应轮的「Agent 推理」看具体错误;带
+        <span style="border:1px solid #fcd34d;border-radius:999px;padding:0 6px;font-size:11px">⚠ 兜底</span>
+        标记的轮不是 LLM 决策)。
+      </div>
+
       <!-- 轨迹 -->
       <div class="ap-trace-card">
         <template x-for="r in shownRounds" :key="r.round">
@@ -1679,7 +1688,11 @@
                 <span class="ap-tps" x-show="r.tps!==null"><span x-text="fmt(r.tps)"></span><small>tok/s</small></span>
                 <span class="ap-delta" :class="r.delta>=0?'up':'down'" x-show="r.delta!==null" x-text="(r.delta>=0?'+':'')+Math.round(r.delta*100)+'%'"></span>
               </div>
-              <div class="ap-verdict" :class="r.vcls" x-text="r.verdict"></div>
+              <div class="ap-verdict" :class="r.vcls">
+                <span x-text="r.verdict"></span>
+                <span class="ap-fb" x-show="r.fallback"
+                      :title="'LLM 调用失败(' + r.fallback + '),本轮由确定性启发式兜底 —— 检查 agent 配置/额度/网络'">⚠ 兜底</span>
+              </div>
             </div>
             <div class="ap-detail" x-show="expandedRounds.includes(r.round)" @click.stop>
               <template x-if="r.snap"><div class="dr-sec"><div class="lab">诊断快照（Agent 看到的事实）</div><div class="val" x-text="r.snap"></div></div></template>

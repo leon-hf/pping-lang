@@ -1587,6 +1587,7 @@ function autopilotTab() {
     get baselineTps() { return (this.session && this.session.baseline_score) || (this.shownRounds[0] || {}).tps || 0; },
     _bestTps() { let b = 0; this.shownRounds.forEach(r => { if (r.decision === 'kept' && r.tps > b) b = r.tps; }); return b || this.baselineTps; },
     get best() { return { tps: this._bestTps(), cmd: (this.session && this.session.recommended_command) || (this.shownRounds.find(r => r.decision === 'kept') || {}).cmd || '' }; },
+    get fallbackCount() { return this.shownRounds.filter(r => r.fallback).length; },
     get promote() { return (this.session && this.session.promote_package) || null; },
     get promoteDiff() { return (this.promote && this.promote.diff && this.promote.diff.changes) || []; },
     get promoteRisks() { return (this.promote && this.promote.risk_notes) || []; },
@@ -1767,6 +1768,7 @@ function autopilotTab() {
       const dg = r.diagnosis || {};
       return {
         round: r.round, kind: r.kind, decision: r.decision, verdict: v.t, vcls: v.c,
+        fallback: (r.action && r.action.llm_fallback) || null,
         diag: (dg.evidence_refs || []).join(' · '),
         hyp: r.rationale || '', rationale: r.rationale || '',
         changed: (r.action && r.action.knob) ? `${r.action.flag} ${r.action.from}→${r.action.to}` : null,
