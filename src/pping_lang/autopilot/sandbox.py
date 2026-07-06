@@ -158,6 +158,19 @@ class DockerSandbox:
         self._spec = bench_spec or BENCH_SPEC
         self._cfg: dict = {}
         self._gpu_baseline_mib: int | None = None
+        self._progress = None            # set_progress(cb):apply 长静默窗内给 UI 喂心跳
+
+    def set_progress(self, cb) -> None:
+        """cb(message: str) —— runner 接到 session 事件流;apply 起容器+等就绪要 2 分钟,
+        没有中间反馈时 UI 是死的。"""
+        self._progress = cb
+
+    def _report(self, msg: str) -> None:
+        if self._progress:
+            try:
+                self._progress(msg)
+            except Exception:  # noqa: BLE001 — 进度反馈绝不打断调优
+                pass
 
     def endpoint(self) -> str:
         return f"http://{self._host}:{self._port}/v1"
@@ -270,6 +283,7 @@ class DockerSandbox:
         if run.returncode != 0:
             raise LaunchError(f"docker run 失败:{(run.stderr or run.stdout).strip()}")
         self._cfg = dict(config)
+        self._report("候选容器已启动,等待 vLLM API 就绪(模型加载 + 显存分配)…")
         self._wait_ready()
 
     def _http_ok(self, url: str, timeout: float) -> bool:
@@ -316,7 +330,9 @@ class DockerSandbox:
 
     def _wait_ready(self) -> None:
         import time
-        deadline = time.monotonic() + self._ready_timeout
+        start = time.monotonic()
+        deadline = start + self._ready_timeout
+        last_report = start
         # 阶段1:API server 起来(/v1/models 200)
         url = f"http://{self._host}:{self._port}/v1/models"
         while not self._http_ok(url, timeout=4):
@@ -324,17 +340,23 @@ class DockerSandbox:
                 logs = self._logs_tail()
                 self.teardown()
                 raise LaunchError(f"候选容器退出(起不来/OOM)。日志尾:\n{logs}")
-            if time.monotonic() >= deadline:
+            now = time.monotonic()
+            if now >= deadline:
                 logs = self._logs_tail()
                 self.teardown()
                 raise LaunchError(f"候选 API 就绪超时({self._ready_timeout:.0f}s)。日志尾:\n{logs}")
+            if now - last_report >= 15:                  # 心跳:长静默窗内 UI 不能死着
+                self._report(f"等待 vLLM API 就绪 {int(now - start)}s / {self._ready_timeout:.0f}s …")
+                last_report = now
             time.sleep(self._poll)
         # 阶段2:真推理探针 —— 确认推理可用 + 跑完首个 JIT(冷引擎首请求慢,否则 bench 0 样本)
+        self._report(f"API 已就绪({int(time.monotonic() - start)}s),推理探针 + kernel JIT 预热中…")
         warm_timeout = min(self._ready_timeout, 180.0)
         if not self._inference_probe(warm_timeout):
             logs = self._logs_tail()
             self.teardown()
             raise LaunchError(f"候选推理探针失败(JIT/推理卡死,{warm_timeout:.0f}s)。日志尾:\n{logs}")
+        self._report("候选就绪,进入压测")
 
     def read_diagnosis(self) -> dict | None:
         """读候选自己的 /api/diagnoses(同一诊断引擎),取最严重的一条 → bottleneck A/B/C/D。

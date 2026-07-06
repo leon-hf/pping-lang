@@ -79,6 +79,24 @@ def diag_block(config: dict, sc: Scorecard) -> dict:
     return diagnose(config, sc)
 
 
+def load_binding(config: dict, diag: dict, sc: Scorecard | None = None) -> bool | None:
+    """准入闸是否真绑定(§4.4 守卫的姊妹判据)。证据 = bench 窗口 running 峰值 vs
+    max_num_seqs + waiting 峰值:waiting>0 → 绑定;running 峰值 ≥80% 上限 → 绑定;
+    远低于上限且无排队 → 没绑定(瓶颈在提供的负载,不在准入闸)。无实测 → None。"""
+    seqs = config.get("max_num_seqs")
+    running = _probe_stat(sc, "running_reqs", "max")
+    if running is None:
+        running = diag.get("running")
+    if running is None or not seqs:
+        return None
+    waiting = _probe_stat(sc, "waiting_reqs", "max")
+    if waiting is None:
+        waiting = diag.get("waiting")
+    if waiting and float(waiting) > 0:
+        return True
+    return float(running) >= 0.8 * float(seqs)
+
+
 def kv_headroom(config: dict, diag: dict, sc: Scorecard | None = None) -> float:
     """KV 余量(§4.4 D 守卫)。优先真证据:bench 窗口 KV 占用峰值(runtime_probe /
     diag.kv_util,0-1)→ 余量 = 1 - 峰值;没有再退准入闸代理(running≈max_num_seqs
@@ -196,6 +214,10 @@ class Runner(threading.Thread):
         self._best_sc: Scorecard | None = None
         self._best_score = float("-inf")
         self._equivalence_golden: list[str] | None = None
+        self._cur_round: int | None = None
+        if hasattr(self._sb, "set_progress"):      # 沙盒 apply 长静默窗 → 心跳进事件流
+            self._sb.set_progress(
+                lambda msg: self._event("apply", msg, round=self._cur_round))
 
     def stop(self) -> None:
         self._stopping.set()
@@ -235,7 +257,21 @@ class Runner(threading.Thread):
         return self._measure_loaded()
 
     def _measure_loaded(self) -> Scorecard:
-        samples = [self._sb.measure(self._obj) for _ in range(self._bench_repeats)]
+        stop_beat = threading.Event()
+
+        def _heartbeat() -> None:                  # bench 50-80s 无输出,UI 需要活着的信号
+            t0 = time.monotonic()
+            while not stop_beat.wait(15.0):
+                self._event("benchmark", f"压测进行中 {int(time.monotonic() - t0)}s …",
+                            round=self._cur_round)
+
+        beat = threading.Thread(target=_heartbeat, name="ap-bench-beat", daemon=True)
+        beat.start()
+        try:
+            samples = [self._sb.measure(self._obj) for _ in range(self._bench_repeats)]
+        finally:
+            stop_beat.set()
+            beat.join(timeout=1.0)
         sc = aggregate_scorecards(samples)
         sc.run_meta["search_mode"] = self._search_mode
         return sc
@@ -354,6 +390,7 @@ class Runner(threading.Thread):
                 "tried": tried, "no_improve": no_improve}
 
     def _run_baseline(self) -> None:
+        self._cur_round = 0
         self._store.set_state("baselining")
         self._event("baseline", "建立基线:启动沙盒并跑第一轮压测",
                     round=0, detail={"config": dict(self._baseline), "bench": self._bench_plan()})
@@ -390,9 +427,16 @@ class Runner(threading.Thread):
                         detail={"best_config": dict(self._best_cfg)})
             effective_cfg = self._effective_config()
             diag = diag_block(effective_cfg, self._best_sc)             # ③ observe(真诊断优先)
+            binding = load_binding(effective_cfg, diag, self._best_sc)
+            if binding is False:            # 负载受限:亮成证据,让 agent/UI/报告都看得见
+                diag.setdefault("evidence_refs", []).append(
+                    f"load_limited:running_peak={_probe_stat(self._best_sc, 'running_reqs', 'max')}"
+                    f"≪max_num_seqs={effective_cfg.get('max_num_seqs')},waiting=0")
+                diag["load_limited"] = True
             cands = propose_candidates(diag["bottleneck"], effective_cfg,
                                        kv_headroom=kv_headroom(effective_cfg, diag, self._best_sc),
-                                       quality_gate=self._quality_gate)   # §4 交集 + D 守卫
+                                       quality_gate=self._quality_gate,
+                                       load_binding=binding)   # §4 交集 + D 守卫 + 准入闸守卫
             cands = prepare_search_candidates(
                 cands, effective_cfg, diag["bottleneck"], history,
                 mode=self._search_mode, max_values_per_knob=self._search_width)
@@ -420,14 +464,22 @@ class Runner(threading.Thread):
                 history=history, tried_configs=tried,
                 best_so_far={"config": dict(self._best_cfg), "scorecard": self._best_sc.to_dict()})
             if not cands:                                                # 无对症候选 → 近最优,停
-                self._event("decide", "没有对症候选,准备停止并恢复 best", round=rnd)
-                self._append_stop(rnd, AgentDecision(done=True, reason="无对症候选 → 近最优"), diag)
+                reason = ("瓶颈在提供的负载(bench 并发喂不满准入闸),server 旋钮无对症动作;"
+                          "提高压测并发或换真实 workload 再调"
+                          if diag.get("load_limited") else "无对症候选 → 近最优")
+                self._event("decide", f"没有对症候选,准备停止并恢复 best({reason})", round=rnd)
+                self._append_stop(rnd, AgentDecision(done=True, reason=reason), diag)
                 break
             dec = self._propose_valid(ctx)                              # 校验 ∈ 候选 + 防重(2 次非法→failed)
             if dec is None:
                 self._event("decide", "agent 连续给出非法提案,session 标记失败", round=rnd, level="error")
                 self._store.set_state("failed", "agent 连续 2 次非法提案(§9.3)")
                 return
+            fb = (dec.candidate_meta or {}).get("llm_fallback")
+            if fb:                          # 兜底要显眼:用户以为在看 LLM 调优,实际是启发式
+                self._event("propose",
+                            f"LLM 调用失败({fb}),本轮由确定性启发式兜底——检查 agent 配置/额度",
+                            round=rnd, level="warn", detail={"llm_fallback": fb})
             if dec.done:
                 self._event("decide", dec.reason or "agent 判断已近最优,准备停止", round=rnd)
                 self._append_stop(rnd, dec, diag)
@@ -455,6 +507,7 @@ class Runner(threading.Thread):
         return None
 
     def _run_candidate(self, rnd: int, dec, diag: dict, *, deadline: float | None = None) -> None:
+        self._cur_round = rnd
         self._store.set_state("benchmarking")
         before_cfg, before_sc, before_score = self._best_cfg, self._best_sc, self._best_score
         self._event(
@@ -495,8 +548,10 @@ class Runner(threading.Thread):
                         score = objective_score(sc, self._obj)
         except Exception as e:               # LaunchError/BenchError → 判负回滚
             sc, score = None, float("-inf")
-            self._event("decide", f"候选失败:{type(e).__name__}", round=rnd, level="warn")
-            dec.rationale += f" [候选失败:{type(e).__name__}]"
+            err = str(e)                     # LaunchError 自带容器日志尾,丢掉 = 用户无从排查
+            self._event("decide", f"候选失败:{type(e).__name__}: {err[:200]}",
+                        round=rnd, level="warn", detail={"error": err[:1200]})
+            dec.rationale += f" [候选失败:{type(e).__name__}: {err[:300]}]"
         decision = decide(score, before_score, self._obj.noise_margin)
         if decision == "kept":
             self._best_cfg, self._best_sc, self._best_score = dict(dec.config), sc, score

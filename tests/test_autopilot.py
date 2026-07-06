@@ -894,6 +894,9 @@ def test_runner_records_p0_pruned_candidates_in_diagnosis(tmp_path):
                                        "runtime_probe": {
                                            "kv_cache_usage": {"max": 0.5},
                                            "running_reqs": {"max": 160},
+                                           # waiting>0 → 准入闸绑定(KV 装不下在排队),
+                                           # max_num_seqs↑ 过 load 守卫,由 P0 KV-fit 解析剪掉
+                                           "waiting_reqs": {"max": 2},
                                        }})
 
     class StopAgent:
@@ -1032,6 +1035,74 @@ def test_runner_t2_equivalence_tolerates_minor_drift(tmp_path):
     cand = [r for r in store.status_dict()["rounds"] if r["kind"] == "candidate"][0]
     assert cand["scorecard_after"] is not None          # 没被等价检查拦下,进了 bench
     assert "equivalence check failed" not in cand["rationale"]
+    store.close()
+
+
+def test_propose_candidates_load_binding_guard():
+    """准入闸没绑定(bench 并发喂不满)→ 提 max_num_seqs 是空转,必须剪掉。"""
+    cfg = {"max_num_seqs": 32, "gpu_memory_utilization": 0.70}
+    with_guard = propose_candidates("A", cfg, load_binding=False)
+    assert all(c["knob"] != "max_num_seqs" for c in with_guard)
+    unknown = propose_candidates("A", cfg, load_binding=None)      # 无实测证据 → 旧行为
+    assert any(c["knob"] == "max_num_seqs" for c in unknown)
+    binding = propose_candidates("A", cfg, load_binding=True)
+    assert any(c["knob"] == "max_num_seqs" for c in binding)
+
+
+def test_load_binding_from_probe():
+    """load_binding 证据链:running 峰值 vs max_num_seqs + waiting。"""
+    from pping_lang.autopilot.runner import load_binding
+    cfg = {"max_num_seqs": 32}
+
+    def sc_with(probe):
+        return Scorecard(output_tps=1000, ttft_p99_ms=100, run_meta={"runtime_probe": probe})
+
+    # 并发 8 压 32 上限:running 峰值 8、无排队 → 没绑定
+    assert load_binding(cfg, {}, sc_with({"running_reqs": {"max": 8.0, "avg": 7.3}})) is False
+    # running 顶到上限 → 绑定
+    assert load_binding(cfg, {}, sc_with({"running_reqs": {"max": 31.0, "avg": 28.0}})) is True
+    # 有排队 → 绑定(不管 running)
+    assert load_binding(cfg, {}, sc_with({"running_reqs": {"max": 8.0, "avg": 7.0},
+                                          "waiting_reqs": {"max": 3.0, "avg": 1.0}})) is True
+    # 无实测 → None(保持旧行为)
+    assert load_binding(cfg, {}, Scorecard(output_tps=1000, ttft_p99_ms=100)) is None
+
+
+def test_resilient_agent_marks_fallback_structurally():
+    """兜底必须结构化标记(candidate_meta.llm_fallback),不能只藏在 rationale 文案。"""
+    from pping_lang.autopilot.agent import ResilientAgent
+
+    class Boom:
+        model = "boom"
+
+        def propose(self, ctx):
+            raise RuntimeError("quota exhausted")
+
+    cands = propose_candidates("A", {"max_num_seqs": 32, "gpu_memory_utilization": 0.70})
+    ctx = _ctx(cands)
+    dec = ResilientAgent(Boom(), StubAgent(), retries=0).propose(ctx)
+    assert dec.candidate_meta.get("llm_fallback") == "RuntimeError"
+    assert "启发式兜底" in dec.rationale
+
+
+def test_runner_emits_fallback_warn_event(tmp_path):
+    from pping_lang.autopilot.agent import ResilientAgent
+
+    class Boom:
+        model = "boom"
+
+        def propose(self, ctx):
+            raise RuntimeError("quota exhausted")
+
+    store = SessionStore(tmp_path / "fb.jsonl")
+    store.new_session("ap-fb", {"target": "throughput"}, {"rounds": 1})
+    Runner(store=store, sandbox=SimSandbox("M"), agent=ResilientAgent(Boom(), StubAgent(), retries=0),
+           obj=OBJ, budget={"rounds": 1, "seconds": 900}, model="M", step_delay_s=0.0).run()
+    st = store.status_dict()
+    warns = [e for e in st["events"] if e.get("level") == "warn" and "兜底" in e.get("message", "")]
+    assert warns, "LLM 兜底必须发 warn 事件让 UI 显眼提示"
+    cand = [r for r in st["rounds"] if r["kind"] == "candidate"][0]
+    assert (cand.get("action") or {}).get("llm_fallback") == "RuntimeError"
     store.close()
 
 

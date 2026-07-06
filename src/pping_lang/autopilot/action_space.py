@@ -179,12 +179,16 @@ def _enabled(value) -> bool:
 
 
 def propose_candidates(bottleneck: str | None, config: dict, *,
-                       kv_headroom: float = 1.0, quality_gate: bool = False) -> list[dict]:
+                       kv_headroom: float = 1.0, quality_gate: bool = False,
+                       load_binding: bool | None = None) -> list[dict]:
     """诊断→动作交集 + D 余量守卫 + 约束图 + 跳过已到位(§4.4)。
 
     交集:`helps ∋ regime ∧ hurts ∌ regime ∧ 值未到位 ∧ 非默认已开 ∧ 约束可行`。
     D 余量守卫:推大-batch 类(`big_batch`)只在 KV 余量足时给(`kv_headroom > 0.15`),
     否则先治 D。质量门关时(默认)只给 T1(output_impact=none)。
+    准入闸绑定守卫(load_binding):bench 窗口实测 running 峰值远低于 max_num_seqs 且
+    waiting=0 时(False),准入闸没绑定——瓶颈在提供的负载,提 max_num_seqs 是空转
+    (真实教训:并发 8 的压测下 32→64 恒 tie)。None=无实测证据,保持旧行为。
     排序:按「主影响 SLO」让对症旋钮靠前(仅排序,不硬筛)。
     """
     bn = bottleneck or "A"             # 无诊断 → 按"喂不饱(双低)"探索
@@ -202,6 +206,8 @@ def propose_candidates(bottleneck: str | None, config: dict, *,
             continue                   # 会恶化当前瓶颈的不选
         if k.big_batch and kv_headroom <= 0.15:
             continue                   # D 余量守卫:KV 快满,先治 D 再推大 batch
+        if k.key == "max_num_seqs" and load_binding is False and bn in ("A", "B"):
+            continue                   # 准入闸没绑定:提并发上限治不了"负载喂不进来"
         if not _feasible(k, config):
             continue                   # 约束图:缺前置/硬冲突
         cur = config.get(k.key, k.default if k.default is not None else k.lo)

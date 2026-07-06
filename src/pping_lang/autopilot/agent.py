@@ -80,9 +80,11 @@ LOCKED_PROMPT = (
 
 # regime playbook(§4.4 两张表按 regime 切片的先验,让 agent 不冷启动)
 REGIME_PLAYBOOK = {
-    "A": "喂不饱:硬件有余、活没喂进去。先提并发(max_num_seqs↑,KV 有余量时)/ 加 step 预算"
-         "(max_num_batched_tokens↑)/ 短 prompt 插队(max_num_partial_prefills↑)。注:chunked-prefill"
-         "/async-sched/cudagraph 0.21 默认已开,别重复打开。",
+    "A": "喂不饱:硬件有余、活没喂进去。**先看 running vs max_num_seqs**:running 峰值远低于"
+         "max_num_seqs 且 waiting=0 → 准入闸没绑定,瓶颈在提供的负载(压测并发/客户端),提"
+         "max_num_seqs 是空转,应 done 并如实说明。闸真绑定(running≈max_num_seqs 或 waiting>0)"
+         "才提并发(max_num_seqs↑,KV 有余量时)/ 加 step 预算(max_num_batched_tokens↑)/ 短 prompt"
+         "插队(max_num_partial_prefills↑)。注:chunked-prefill/async-sched/cudagraph 0.21 默认已开,别重复打开。",
     "B": "带宽墙(decode 本性):提 batch 摊薄权重搬运(先查 D 余量)/ kv-cache fp8 / 投机解码(查接受率防 C 反噬)。",
     "C": "算力墙(长 prompt prefill):attention-backend / fp8 / prefix-caching(仅当有公共前缀)。",
     "D": "容量墙(KV 耗尽→抢占):扩 KV 池(gpu-util↑)/ kv-cache fp8 / 降 max-model-len / cpu-offload。"
@@ -274,4 +276,6 @@ class ResilientAgent:
                 last = e
         dec = self._fallback.propose(ctx)
         dec.rationale = (dec.rationale + f"  [LLM 调用失败({type(last).__name__}),启发式兜底]").strip()
+        # 结构化标记:runner 据此发 warn 事件、round 记录落盘 —— 兜底不能只藏在 rationale 文案里
+        dec.candidate_meta = {**(dec.candidate_meta or {}), "llm_fallback": type(last).__name__}
         return dec
