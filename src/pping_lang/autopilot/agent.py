@@ -171,7 +171,9 @@ class _HTTPAgent:
     model = "http-agent"
     NET_RETRIES = 4          # 成功率 1/3 时 4 发 ≈ 80%,5 发 ≈ 87%
 
-    def __init__(self, guidance: str = "", temperature: float = 0.4, timeout_s: float = 30.0) -> None:
+    def __init__(self, guidance: str = "", temperature: float = 0.4, timeout_s: float = 90.0) -> None:
+        # timeout_s 默认 90:thinking 类模型(K2.7 等)单次响应实测常 >30s,
+        # 30s 超时会让每轮都退化成启发式兜底(真机 ap-20260706-153658 全程 TimeoutError)。
         self.guidance = guidance
         self.temperature = temperature
         self.timeout_s = timeout_s
@@ -179,23 +181,22 @@ class _HTTPAgent:
     def _call(self, system: str, user: str) -> str:  # pragma: no cover - 子类实现
         raise NotImplementedError
 
-    def _call_with_retry(self, system: str, user: str) -> str:
+    def propose(self, ctx: AgentContext) -> AgentDecision:
+        """调用 + JSON 解析整体纳入重试:响应被截断/非 JSON(JSONDecodeError)与网络失败
+        同等对待——一次坏响应不该把整轮打回启发式兜底。"""
         import time as _time
+        system, user = build_messages(ctx, self.guidance)
         last: Exception | None = None
         for attempt in range(self.NET_RETRIES + 1):
             try:
-                return self._call(system, user)
-            except Exception as e:  # noqa: BLE001 — SSL RST/超时/瞬断
+                text = self._call(system, user)
+                out = json.loads(text[text.find("{"):text.rfind("}") + 1])
+                return _decision_from_json(out, ctx)
+            except Exception as e:  # noqa: BLE001 — SSL RST/超时/截断/非 JSON
                 last = e
                 if attempt < self.NET_RETRIES:
                     _time.sleep(min(4.0, 0.5 * (2 ** attempt)))
         raise last  # type: ignore[misc]
-
-    def propose(self, ctx: AgentContext) -> AgentDecision:
-        system, user = build_messages(ctx, self.guidance)
-        text = self._call_with_retry(system, user)
-        out = json.loads(text[text.find("{"):text.rfind("}") + 1])
-        return _decision_from_json(out, ctx)
 
 
 class OpenAIAgent(_HTTPAgent):

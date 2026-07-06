@@ -1510,7 +1510,7 @@ function autopilotTab() {
     agentTesting: false,
     advOpen: false,
     showPrompt: false,
-    adv: { guidance: '', temperature: 0.4, timeout_s: 30, retries: 2, allowQualityKnobs: false },
+    adv: { guidance: '', temperature: 0.4, timeout_s: 90, retries: 2, allowQualityKnobs: false },
     LOCKED_PROMPT:
 `你是一个 LLM-serving 性能工程师(核心合约,不可改):
 ① 每轮只改 1 个旋钮,且只能从「动作范围」里选;
