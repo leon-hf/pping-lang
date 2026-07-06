@@ -1057,10 +1057,13 @@ def test_load_binding_from_probe():
     def sc_with(probe):
         return Scorecard(output_tps=1000, ttft_p99_ms=100, run_meta={"runtime_probe": probe})
 
-    # 并发 8 压 32 上限:running 峰值 8、无排队 → 没绑定
+    # 并发 8 压 32 上限:running 峰值 8、无 waiting 证据 → 没绑定(running 代理)
     assert load_binding(cfg, {}, sc_with({"running_reqs": {"max": 8.0, "avg": 7.3}})) is False
-    # running 顶到上限 → 绑定
+    # waiting 证据缺失时退化用 running 峰值代理:顶到上限 → 绑定
     assert load_binding(cfg, {}, sc_with({"running_reqs": {"max": 31.0, "avg": 28.0}})) is True
+    # 决定性证据:running 顶满但 waiting==0 → 负载恰好吃满,提上限空转 → 没绑定
+    assert load_binding(cfg, {}, sc_with({"running_reqs": {"max": 32.0, "avg": 29.9},
+                                          "waiting_reqs": {"max": 0.0, "avg": 0.0}})) is False
     # 有排队 → 绑定(不管 running)
     assert load_binding(cfg, {}, sc_with({"running_reqs": {"max": 8.0, "avg": 7.0},
                                           "waiting_reqs": {"max": 3.0, "avg": 1.0}})) is True

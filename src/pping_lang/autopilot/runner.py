@@ -80,9 +80,14 @@ def diag_block(config: dict, sc: Scorecard) -> dict:
 
 
 def load_binding(config: dict, diag: dict, sc: Scorecard | None = None) -> bool | None:
-    """准入闸是否真绑定(§4.4 守卫的姊妹判据)。证据 = bench 窗口 running 峰值 vs
-    max_num_seqs + waiting 峰值:waiting>0 → 绑定;running 峰值 ≥80% 上限 → 绑定;
-    远低于上限且无排队 → 没绑定(瓶颈在提供的负载,不在准入闸)。无实测 → None。"""
+    """准入闸是否真绑定(§4.4 守卫的姊妹判据)。
+
+    决定性证据是 **waiting 队列**:提高准入上限只对排队中的需求有用。
+    - waiting>0 → 绑定(有需求被闸住);
+    - waiting==0 → 没绑定 —— 即使 running 顶满上限,也只说明负载恰好吃满配置,
+      再提上限没有排队需求可放进来(真实教训:并发 32 压 max_num_seqs=32,
+      running 峰值=32 但 waiting=0,提到 64 一样空转);
+    - waiting 证据缺失 → 退化用 running 峰值 ≥80% 上限作代理;全无证据 → None。"""
     seqs = config.get("max_num_seqs")
     running = _probe_stat(sc, "running_reqs", "max")
     if running is None:
@@ -92,8 +97,8 @@ def load_binding(config: dict, diag: dict, sc: Scorecard | None = None) -> bool 
     waiting = _probe_stat(sc, "waiting_reqs", "max")
     if waiting is None:
         waiting = diag.get("waiting")
-    if waiting and float(waiting) > 0:
-        return True
+    if waiting is not None:
+        return float(waiting) > 0
     return float(running) >= 0.8 * float(seqs)
 
 
