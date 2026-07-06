@@ -605,6 +605,7 @@ class Runner(threading.Thread):
         self._tick()
 
     def _finalize(self) -> None:
+        self._cur_round = None           # 收尾期心跳不再挂在最后一轮上
         self._store.set_state("finalizing")
         self._event("finalize", "收尾:恢复 best 配置并生成上线包")
         try:                                 # 收尾强制回 best 并验证就绪
