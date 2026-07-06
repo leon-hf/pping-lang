@@ -163,9 +163,13 @@ class StubAgent:
 
 
 class _HTTPAgent:
-    """OpenAI/Anthropic 共用:build_messages → _call → JSON → AgentDecision。子类只实现 _call。"""
+    """OpenAI/Anthropic 共用:build_messages → _call → JSON → AgentDecision。子类只实现 _call。
+
+    网络层带退避重试:真实链路(如 runw → api.kimi.com)实测 TLS 间歇性 RST,单发成功率
+    可低至 ~1/3;不在这里重试,ResilientAgent 会把整个 session 永久打回启发式兜底。"""
 
     model = "http-agent"
+    NET_RETRIES = 4          # 成功率 1/3 时 4 发 ≈ 80%,5 发 ≈ 87%
 
     def __init__(self, guidance: str = "", temperature: float = 0.4, timeout_s: float = 30.0) -> None:
         self.guidance = guidance
@@ -175,9 +179,21 @@ class _HTTPAgent:
     def _call(self, system: str, user: str) -> str:  # pragma: no cover - 子类实现
         raise NotImplementedError
 
+    def _call_with_retry(self, system: str, user: str) -> str:
+        import time as _time
+        last: Exception | None = None
+        for attempt in range(self.NET_RETRIES + 1):
+            try:
+                return self._call(system, user)
+            except Exception as e:  # noqa: BLE001 — SSL RST/超时/瞬断
+                last = e
+                if attempt < self.NET_RETRIES:
+                    _time.sleep(min(4.0, 0.5 * (2 ** attempt)))
+        raise last  # type: ignore[misc]
+
     def propose(self, ctx: AgentContext) -> AgentDecision:
         system, user = build_messages(ctx, self.guidance)
-        text = self._call(system, user)
+        text = self._call_with_retry(system, user)
         out = json.loads(text[text.find("{"):text.rfind("}") + 1])
         return _decision_from_json(out, ctx)
 
