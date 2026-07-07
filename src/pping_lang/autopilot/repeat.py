@@ -35,11 +35,13 @@ def aggregate_scorecards(samples: list[Scorecard]) -> Scorecard:
         }
         for f, v in vals.items()
     }
+    # 延迟 p99 用 median:单次离群(冷 kernel/调度尖刺)会把 mean 拖过 SLA 边界,
+    # 造成同配置 kept/reverted 翻转(真机 tpot 82ms vs 达标 的教训);吞吐/错误率用 mean。
     return Scorecard(
         output_tps=round(meta["repeat_stats"]["output_tps"]["mean"], 1),
-        ttft_p99_ms=round(meta["repeat_stats"]["ttft_p99_ms"]["mean"], 0),
-        tpot_p99_ms=round(meta["repeat_stats"]["tpot_p99_ms"]["mean"], 1),
-        e2e_p99_ms=round(meta["repeat_stats"]["e2e_p99_ms"]["mean"], 0),
+        ttft_p99_ms=round(meta["repeat_stats"]["ttft_p99_ms"]["median"], 0),
+        tpot_p99_ms=round(meta["repeat_stats"]["tpot_p99_ms"]["median"], 1),
+        e2e_p99_ms=round(meta["repeat_stats"]["e2e_p99_ms"]["median"], 0),
         error_rate=meta["repeat_stats"]["error_rate"]["mean"],
         run_meta=meta,
     )
