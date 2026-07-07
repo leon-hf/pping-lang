@@ -296,7 +296,9 @@ class KimiCodingAgent(_HTTPAgent):
     def _call(self, system: str, user: str) -> str:
         import urllib.request
         body = json.dumps({
-            "model": self.model, "max_tokens": 1024,
+            # max_tokens 覆盖 thinking+text:K2.7 思考常吃掉 1000+ tokens,给 1024 会让
+            # text block 缺失(确定性 RuntimeError,重试无用)——真机 ap-20260706-234559 的教训
+            "model": self.model, "max_tokens": 8192,
             "system": system, "messages": [{"role": "user", "content": user}],
         }).encode("utf-8")
         req = urllib.request.Request(
