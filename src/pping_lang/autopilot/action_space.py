@@ -36,6 +36,7 @@ class Knob:
     big_batch: bool = False         # 推大-batch 类 → 选前先查 D 余量(§4.4 守卫)
     needs: tuple[str, ...] = ()     # 约束图前置:这些 flag 必须为真才可行(§4.5)
     conflicts: tuple[str, ...] = ()  # 约束图冲突:与这些同开则不可行(§4.5)
+    unsupported: bool = False       # 当前钉定的 vLLM 版本硬拒非默认值 → 永不提议(烧轮)
 
 
 # === curated 高杠杆旋钮(§4.4 两张表)。default 为 0.21 静态值,introspect 可覆盖。===
@@ -62,9 +63,11 @@ _TUNABLE: tuple[Knob, ...] = (
     Knob("max_num_batched_tokens", "--max-num-batched-tokens", "int", "加大每step预算",
          helps=("A", "C"), hurts=("D",), primary_slo="ttft", default=2048,
          lo=256, hi=65536, big_batch=True),
+    # vLLM 0.21 V1 硬拒任何非默认值:"No Concurrent Partial Prefills so far"
+    # (arg_utils.py:2191 _check_feature_supported)。真机连烧两轮 LaunchError 后钉死。
     Knob("max_num_partial_prefills", "--max-num-partial-prefills", "int", "短prompt插队",
          helps=("A",), hurts=(), primary_slo="ttft", default=1, lo=1, hi=8,
-         needs=("enable_chunked_prefill",)),
+         needs=("enable_chunked_prefill",), unsupported=True),
     Knob("long_prefill_token_threshold", "--long-prefill-token-threshold", "int", "长prompt降级",
          helps=("A",), hurts=(), primary_slo="ttft", default=0, lo=0, hi=8192),
     Knob("gpu_memory_utilization", "--gpu-memory-utilization", "float", "腾容量(扩KV池)",
@@ -194,6 +197,8 @@ def propose_candidates(bottleneck: str | None, config: dict, *,
     bn = bottleneck or "A"             # 无诊断 → 按"喂不饱(双低)"探索
     cands: list[dict] = []
     for k in KNOBS:
+        if k.unsupported:              # 当前 vLLM 版本硬拒非默认值 → 提了必 LaunchError
+            continue
         if k.default_on:               # 分类(一)默认已开,跳过(除非诊断显式点名,M0 不点)
             continue
         if k.output_impact != "none" and not quality_gate:

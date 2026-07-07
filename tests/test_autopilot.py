@@ -194,11 +194,20 @@ def test_kvfit_rejects_max_model_len_below_workload():
     assert "max_model_len" in est.reason
 
 
-def test_propose_constraint_graph_needs():
-    # max_num_partial_prefills 需 chunked-prefill 开;关掉则约束图剪掉它(§4.5)
+def test_propose_skips_unsupported_knob():
+    # vLLM 0.21 硬拒非默认 max_num_partial_prefills(Concurrent Partial Prefill 未支持)
+    # → 永不提议,不管约束图是否满足(真机连烧两轮 LaunchError 的教训)。
     on = {c["knob"] for c in propose_candidates("A", {"max_num_seqs": 8, "enable_chunked_prefill": True})}
-    off = {c["knob"] for c in propose_candidates("A", {"max_num_seqs": 8, "enable_chunked_prefill": False})}
-    assert "max_num_partial_prefills" in on and "max_num_partial_prefills" not in off
+    assert "max_num_partial_prefills" not in on
+
+
+def test_constraint_graph_needs_mechanism():
+    # 约束图 needs 机制本身(§4.5):前置 flag 关着 → 不可行。
+    from pping_lang.autopilot.action_space import Knob, _feasible
+    k = Knob("x", "--x", "int", "test", helps=("A",), hurts=(), primary_slo="ttft",
+             default=1, lo=1, hi=8, needs=("enable_chunked_prefill",))
+    assert _feasible(k, {"enable_chunked_prefill": True})
+    assert not _feasible(k, {"enable_chunked_prefill": False})
 
 
 def test_propose_constraint_graph_conflicts():
@@ -228,9 +237,9 @@ def test_bo_ranking_uses_history_rewards():
                                     "enable_chunked_prefill": True})
     grid = expand_grid_candidates(base, {"max_num_seqs": 32, "gpu_memory_utilization": 0.70,
                                          "enable_chunked_prefill": True}, "A")
-    ranked = bo_rank_candidates(grid, [{"knob": "max_num_partial_prefills", "decision": "kept"},
+    ranked = bo_rank_candidates(grid, [{"knob": "max_num_batched_tokens", "decision": "kept"},
                                        {"knob": "max_num_seqs", "decision": "reverted"}])
-    assert ranked[0]["knob"] == "max_num_partial_prefills"
+    assert ranked[0]["knob"] == "max_num_batched_tokens"
     assert ranked[0]["p2"]["strategy"] == "bo"
     assert ranked[0]["p2"]["acquisition"] > ranked[-1]["p2"]["acquisition"]
 
@@ -935,8 +944,8 @@ def test_runner_uses_effective_config_but_applies_tracked_patch(tmp_path):
 
         def propose(self, ctx):
             assert ctx.current_config["enable_chunked_prefill"] is True
-            cand = next(c for c in ctx.candidates if c["knob"] == "max_num_partial_prefills")
-            return AgentDecision(knob="max_num_partial_prefills", config=cand["config"],
+            cand = next(c for c in ctx.candidates if c["knob"] == "max_num_batched_tokens")
+            return AgentDecision(knob="max_num_batched_tokens", config=cand["config"],
                                  from_val=cand["from"], to_val=cand["to"], flag=cand["flag"],
                                  rationale="use live config")
 
@@ -945,7 +954,7 @@ def test_runner_uses_effective_config_but_applies_tracked_patch(tmp_path):
     Runner(store=store, sandbox=EffectiveSandbox("M"), agent=OneShotAgent(), obj=OBJ,
            budget={"rounds": 1, "seconds": 900}, model="M", step_delay_s=0.0).run()
     # Candidate apply should not replay live default booleans into command/config.
-    assert any("max_num_partial_prefills" in cfg and "enable_chunked_prefill" not in cfg
+    assert any("max_num_batched_tokens" in cfg and "enable_chunked_prefill" not in cfg
                for cfg in applied)
     store.close()
 
