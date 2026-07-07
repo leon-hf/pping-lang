@@ -60,7 +60,8 @@ def validate(dec: AgentDecision, ctx: AgentContext) -> str | None:
     if cand is None:
         return f"knob {dec.knob!r} 不在候选集(只能从 {[c['knob'] for c in ctx.candidates]} 选)"
     tried = {t["hash"]: t.get("decision") for t in ctx.tried_configs}
-    h = config_hash(cand["config"])
+    # 防重按"实际要 apply 的配置"查:LLM 自选 value 时,同旋钮不同值是不同配置,不误挡
+    h = config_hash(dec.config if dec.config else cand["config"])
     if tried.get(h) in ("reverted", "tie"):      # 已试且失败/持平 → 防重硬挡
         return f"配置 {h} 已试过且 {tried[h]},别再提"
     return None
@@ -74,6 +75,9 @@ LOCKED_PROMPT = (
     "① 把改动挂在本轮诊断证据上(evidence_refs,指向 fired_rules / regime / metric);\n"
     "② 接受压测判决——不得声称压测没证实的收益;\n"
     "③ 目标:不破 SLA 前提下最大化主指标。若判断已近最优(再动会破 SLA 或屋顶已贴),done:true。\n"
+    "数值旋钮(kind=int/float)的 value 可在 range 内沿候选方向自选——证据支持时直接一步到位"
+    "(如 waiting 队列明示需求量),不必逐档试;不给 value 或给出非法值则用建议档(to)。"
+    "choice 旋钮用建议值。\n"
     "只输出 JSON:{\"done\":bool, \"reason\":str, \"action\":{\"knob\":str,\"value\":number|str}, "
     "\"rationale\":str, \"expected_effect\":str, \"evidence_refs\":[str], \"guardrail_notes\":str}"
 )
@@ -106,6 +110,7 @@ def build_messages(ctx: AgentContext, guidance: str = "") -> tuple[str, str]:
         "tried_and_failed": [t["hash"] for t in ctx.tried_configs
                              if t.get("decision") in ("reverted", "tie")],
         "candidate_actions": [{"knob": c["knob"], "from": c["from"], "to": c["to"],
+                               "kind": c.get("kind"), "range": c.get("range"),
                                "lever": c.get("lever"), "output_impact": c.get("output_impact"),
                                "p0": c.get("p0"), "p2": c.get("p2")}
                               for c in ctx.candidates],
@@ -113,8 +118,32 @@ def build_messages(ctx: AgentContext, guidance: str = "") -> tuple[str, str]:
     return system, user
 
 
+def _agent_value(cand: dict, value):
+    """LLM 自选值:int/float 在 range 内 clamp,且须沿候选方向(诊断定方向,agent 定跨度);
+    不合法/未给/choice 类 → None(回落候选建议档)。"""
+    if value is None or cand.get("kind") not in ("int", "float"):
+        return None
+    rng = cand.get("range")
+    if not rng or len(rng) != 2:
+        return None
+    try:
+        v = float(value)
+        lo, hi = float(rng[0]), float(rng[1])
+        frm = float(cand["from"])
+        to = float(cand["to"])
+    except (TypeError, ValueError):
+        return None
+    v = min(max(v, lo), hi)
+    if to > frm and v <= frm:                    # 方向须与候选一致(候选方向来自诊断)
+        return None
+    if to < frm and v >= frm:
+        return None
+    return int(round(v)) if cand["kind"] == "int" else round(v, 3)
+
+
 def _decision_from_json(out: dict, ctx: AgentContext) -> AgentDecision:
-    """LLM JSON → AgentDecision。只能从候选按 knob 选,沿用候选预定的安全步长(to/config)。"""
+    """LLM JSON → AgentDecision。knob 只能从候选选;数值旋钮的 value 可在 range 内
+    沿候选方向自选(一步到位省轮次),非法则回落候选建议档。launch-catch + bench 兜底。"""
     if out.get("done"):
         return AgentDecision(done=True, reason=out.get("reason", "已近最优"),
                              rationale=out.get("rationale", out.get("reason", "")),
@@ -126,13 +155,21 @@ def _decision_from_json(out: dict, ctx: AgentContext) -> AgentDecision:
         return AgentDecision(done=False, knob=knob, config=None,
                              rationale=out.get("rationale", ""),
                              evidence_refs=list(out.get("evidence_refs", [])))
+    free_val = _agent_value(cand, act.get("value"))
+    if free_val is not None:
+        to_val, source = free_val, "agent"
+        config = dict(cand["config"])
+        config[knob] = free_val
+    else:
+        to_val, source = cand["to"], "ladder"
+        config = cand["config"]
     return AgentDecision(
-        done=False, knob=knob, config=cand["config"], from_val=cand["from"], to_val=cand["to"],
+        done=False, knob=knob, config=config, from_val=cand["from"], to_val=to_val,
         flag=cand["flag"], rationale=out.get("rationale", ""),
         expected_effect=out.get("expected_effect", ""),
         evidence_refs=list(out.get("evidence_refs", [])),
         guardrail_notes=out.get("guardrail_notes", ""),
-        candidate_meta={"p0": cand.get("p0"), "p2": cand.get("p2")})
+        candidate_meta={"p0": cand.get("p0"), "p2": cand.get("p2"), "value_source": source})
 
 
 # === 实现 ===

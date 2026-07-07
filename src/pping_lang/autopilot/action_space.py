@@ -219,7 +219,11 @@ def propose_candidates(bottleneck: str | None, config: dict, *,
         lever = _lever_for(k, bn, cur, nxt)
         cands.append({"knob": k.key, "flag": k.flag, "from": cur, "to": nxt,
                       "config": new_cfg, "output_impact": k.output_impact,
-                      "primary_slo": k.primary_slo, "lever": lever})
+                      "primary_slo": k.primary_slo, "lever": lever,
+                      # kind/range:LLM 可在值域内沿候选方向自选 value(不必逐档爬梯,
+                      # 证据支持时可一步到位);"to" 只是建议档
+                      "kind": k.kind,
+                      "range": list(k.choices) if k.kind == "choice" else [k.lo, k.hi]})
     # 排序:对症 SLO 在前(throughput 类对 A/B,ttft 类对 prefill,tpot 类对 decode)
     pri = {"A": "throughput", "B": "tpot", "C": "ttft", "D": "throughput"}.get(bn, "throughput")
     cands.sort(key=lambda c: 0 if c["primary_slo"] == pri else 1)

@@ -1038,6 +1038,61 @@ def test_runner_t2_equivalence_tolerates_minor_drift(tmp_path):
     store.close()
 
 
+def test_agent_free_value_within_range():
+    """LLM 自选 value:证据支持时一步到位(4→32),不必逐档爬梯。"""
+    from pping_lang.autopilot.agent import _decision_from_json
+    cands = propose_candidates("A", {"max_num_seqs": 4, "gpu_memory_utilization": 0.70})
+    ctx = _ctx(cands, config={"max_num_seqs": 4, "gpu_memory_utilization": 0.70})
+    dec = _decision_from_json({"action": {"knob": "max_num_seqs", "value": 32},
+                               "rationale": "waiting=28 → 需求约 32,一步到位"}, ctx)
+    assert dec.to_val == 32
+    assert dec.config["max_num_seqs"] == 32
+    assert dec.candidate_meta["value_source"] == "agent"
+
+
+def test_agent_free_value_clamped_to_range():
+    from pping_lang.autopilot.agent import _decision_from_json
+    cands = propose_candidates("A", {"max_num_seqs": 4, "gpu_memory_utilization": 0.70})
+    ctx = _ctx(cands, config={"max_num_seqs": 4, "gpu_memory_utilization": 0.70})
+    dec = _decision_from_json({"action": {"knob": "max_num_seqs", "value": 999999}}, ctx)
+    assert dec.to_val == 2048                       # clamp 到 Knob.hi
+    assert dec.candidate_meta["value_source"] == "agent"
+
+
+def test_agent_free_value_wrong_direction_falls_back():
+    """候选方向来自诊断(A → 提并发);LLM 给反方向值 → 回落建议档,不放行。"""
+    from pping_lang.autopilot.agent import _decision_from_json
+    cands = propose_candidates("A", {"max_num_seqs": 4, "gpu_memory_utilization": 0.70})
+    ctx = _ctx(cands, config={"max_num_seqs": 4, "gpu_memory_utilization": 0.70})
+    dec = _decision_from_json({"action": {"knob": "max_num_seqs", "value": 2}}, ctx)
+    assert dec.to_val == 8                          # 回落预定档 4→8
+    assert dec.candidate_meta["value_source"] == "ladder"
+
+
+def test_agent_free_value_choice_knob_uses_ladder():
+    from pping_lang.autopilot.agent import _decision_from_json
+    cands = propose_candidates("B", {"max_num_seqs": 32, "gpu_memory_utilization": 0.70},
+                               quality_gate=True)
+    cand = next(c for c in cands if c["knob"] == "kv_cache_dtype")
+    ctx = _ctx(cands, bottleneck="B", config={"max_num_seqs": 32})
+    dec = _decision_from_json({"action": {"knob": "kv_cache_dtype", "value": "fp8"}}, ctx)
+    assert dec.to_val == cand["to"]                 # choice 类忽略自由值,走建议档
+    assert dec.candidate_meta["value_source"] == "ladder"
+
+
+def test_validate_dedup_uses_actual_config():
+    """防重按实际 config 查:同旋钮预定档已 reverted,自选不同值仍可提。"""
+    from pping_lang.autopilot.agent import _decision_from_json, config_hash, validate
+    cands = propose_candidates("A", {"max_num_seqs": 4, "gpu_memory_utilization": 0.70})
+    ladder_cfg = next(c for c in cands if c["knob"] == "max_num_seqs")["config"]
+    tried = [{"hash": config_hash(ladder_cfg), "decision": "reverted"}]
+    ctx = _ctx(cands, config={"max_num_seqs": 4, "gpu_memory_utilization": 0.70}, tried=tried)
+    ladder = _decision_from_json({"action": {"knob": "max_num_seqs"}}, ctx)
+    assert validate(ladder, ctx) is not None        # 预定档已失败 → 挡
+    free = _decision_from_json({"action": {"knob": "max_num_seqs", "value": 32}}, ctx)
+    assert validate(free, ctx) is None              # 不同值 = 不同配置 → 放行
+
+
 def test_propose_candidates_load_binding_guard():
     """准入闸没绑定(bench 并发喂不满)→ 提 max_num_seqs 是空转,必须剪掉。"""
     cfg = {"max_num_seqs": 32, "gpu_memory_utilization": 0.70}
