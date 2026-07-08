@@ -55,3 +55,4 @@ _scratch/
 # Deploy tooling for the runw GPU box — kept on disk for the deploy-runw skill,
 # never committed (carries infra topology + tailnet addressing)
 deploy/runw/
+src/pping_lang/ui/_*.html
