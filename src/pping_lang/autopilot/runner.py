@@ -223,6 +223,9 @@ class Runner(threading.Thread):
         if hasattr(self._sb, "set_progress"):      # 沙盒 apply 长静默窗 → 心跳进事件流
             self._sb.set_progress(
                 lambda msg: self._event("apply", msg, round=self._cur_round))
+        if hasattr(self._agent, "set_progress"):   # LLM 网络重试过程亮出来,解释等待时长
+            self._agent.set_progress(
+                lambda msg: self._event("propose", msg, round=self._cur_round, level="warn"))
 
     def stop(self) -> None:
         self._stopping.set()
@@ -261,16 +264,24 @@ class Runner(threading.Thread):
         self._sb.apply(config)              # 起+就绪(失败抛 LaunchError)
         return self._measure_loaded()
 
-    def _heartbeat_run(self, phase: str, label: str, fn):
+    def _heartbeat_run(self, phase: str, label: str, fn, extra=None):
         """跑 fn(),期间每 15s 发一条 "{label} Xs …" 事件——盲等段(压测 50-80s、
-        LLM 思考+重试最坏可达数分钟)UI 需要活着的信号。"""
+        LLM 思考+重试最坏可达数分钟)UI 需要活着的信号。extra() 可选:附加一段
+        实时状态(如候选引擎的 running/KV/MFU),失败静默跳过。"""
         stop_beat = threading.Event()
 
         def _beat() -> None:
             t0 = time.monotonic()
             while not stop_beat.wait(15.0):
-                self._event(phase, f"{label} {int(time.monotonic() - t0)}s …",
-                            round=self._cur_round)
+                msg = f"{label} {int(time.monotonic() - t0)}s"
+                if extra is not None:
+                    try:
+                        line = extra()
+                        if line:
+                            msg += f"(引擎:{line})"
+                    except Exception:  # noqa: BLE001
+                        pass
+                self._event(phase, msg + " …", round=self._cur_round)
 
         beat = threading.Thread(target=_beat, name=f"ap-{phase}-beat", daemon=True)
         beat.start()
@@ -281,9 +292,11 @@ class Runner(threading.Thread):
             beat.join(timeout=1.0)
 
     def _measure_loaded(self) -> Scorecard:
+        live = getattr(self._sb, "live_stats_line", None)     # 诊断证据实时形成(C)
         samples = self._heartbeat_run(
             "benchmark", "压测进行中",
-            lambda: [self._sb.measure(self._obj) for _ in range(self._bench_repeats)])
+            lambda: [self._sb.measure(self._obj) for _ in range(self._bench_repeats)],
+            extra=live)
         sc = aggregate_scorecards(samples)
         sc.run_meta["search_mode"] = self._search_mode
         return sc
@@ -454,6 +467,11 @@ class Runner(threading.Thread):
                 cands, effective_cfg, diag["bottleneck"], history,
                 mode=self._search_mode, max_values_per_knob=self._search_width)
             p0 = evaluate_kvfit(cands, effective_cfg, self._best_sc)      # §5.2 P0:0-eval KV-fit 剪枝
+            for pc in p0.pruned:                       # 漏斗可见:0-eval 预测省掉的轮次亮出来
+                self._event("propose",
+                            f"P0 预测剪枝:{pc['knob']} → {pc['to']}"
+                            f"({(pc.get('p0') or {}).get('reason', '')[:70]})",
+                            round=rnd, detail={"p0": pc.get("p0")})
             cands = p0.candidates
             diag["p0_kvfit"] = p0.summary()
             diag["p2_search"] = {"mode": self._search_mode, "candidates": len(cands)}

@@ -214,6 +214,17 @@ class _HTTPAgent:
         self.guidance = guidance
         self.temperature = temperature
         self.timeout_s = timeout_s
+        self._progress = None            # set_progress(cb):重试过程亮给直播,解释等待时长
+
+    def set_progress(self, cb) -> None:
+        self._progress = cb
+
+    def _report(self, msg: str) -> None:
+        if self._progress:
+            try:
+                self._progress(msg)
+            except Exception:  # noqa: BLE001
+                pass
 
     def _call(self, system: str, user: str) -> str:  # pragma: no cover - 子类实现
         raise NotImplementedError
@@ -232,6 +243,8 @@ class _HTTPAgent:
             except Exception as e:  # noqa: BLE001 — SSL RST/超时/截断/非 JSON
                 last = e
                 if attempt < self.NET_RETRIES:
+                    self._report(f"agent 调用失败({type(e).__name__}),"
+                                 f"第 {attempt + 2}/{self.NET_RETRIES + 1} 次尝试…")
                     _time.sleep(min(4.0, 0.5 * (2 ** attempt)))
         raise last  # type: ignore[misc]
 
@@ -322,6 +335,10 @@ class ResilientAgent:
         self._fallback = fallback
         self._retries = max(0, int(retries))
         self.model = getattr(primary, "model", getattr(fallback, "model", ""))
+
+    def set_progress(self, cb) -> None:
+        if hasattr(self._primary, "set_progress"):
+            self._primary.set_progress(cb)
 
     def propose(self, ctx: AgentContext) -> AgentDecision:
         last = None

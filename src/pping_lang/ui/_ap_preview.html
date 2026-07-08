@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Autopilot tab — UI 预览</title>
+<script defer src="vendor/alpine.min.js"></script>
+<link rel="stylesheet" href="dashboard.css">
+<style>
+/* ===== Autopilot tab —— 复用 dashboard.css 设计 token(--coral 品牌/ --teal 成功 / --rose 失败 / --amber 持平)===== */
+body{background:var(--bg);padding:24px}
+.ap-wrap{max-width:1080px;margin:0 auto;font-family:"Inter",-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;color:var(--text)}
+
+/* Agent(LLM) 配置 —— 自由填任意 OpenAI 兼容端点 */
+.ap-agent{background:var(--surface);border:1px solid var(--border);border-radius:13px;margin-bottom:14px;box-shadow:var(--shadow-sm);overflow:hidden}
+.ap-agent-head{display:flex;align-items:center;gap:10px;padding:12px 18px;cursor:pointer;font-size:13px;user-select:none}
+.ap-agent-head svg{width:16px;height:16px;color:var(--muted)}
+.ap-agent-head b{color:var(--text-strong);font-weight:700}
+.ap-agent-head .cur{margin-left:auto;font-family:ui-monospace,Consolas,monospace;font-size:12px;font-weight:700;color:var(--coral-strong);background:var(--coral-soft);padding:2px 10px;border-radius:6px}
+.ap-agent-head .chev{color:var(--muted-3);font-size:10px}
+.ap-agent-form{display:flex;flex-wrap:wrap;gap:13px 18px;padding:6px 18px 16px;border-top:1px solid var(--border);align-items:flex-end}
+.ap-field{display:flex;flex-direction:column;gap:4px}
+.ap-field label{font-size:11px;color:var(--muted-2);font-weight:600}
+.ap-field input,.ap-field select{font-family:inherit;font-size:13px;border:1px solid var(--border-strong);border-radius:7px;padding:6px 9px;background:var(--surface);color:var(--text-strong)}
+.ap-field.url input,.ap-field.key input,.ap-field.model input{font-family:ui-monospace,Consolas,monospace;font-size:12px}
+.ap-field.url input{width:236px}.ap-field.key input{width:180px}.ap-field.model input{width:210px}
+.ap-test{font-family:inherit;font-size:12.5px;font-weight:600;border:1px solid var(--border-strong);background:var(--surface);color:var(--text-strong);border-radius:8px;padding:7px 13px;cursor:pointer}
+.ap-test:hover{border-color:var(--coral);color:var(--coral-strong)}
+.ap-agent-note{flex-basis:100%;font-size:11.5px;color:var(--muted-2);line-height:1.5;margin-top:2px}
+.ap-agent-note b{color:var(--amber)}
+/* 高级 agent 行为 */
+.ap-adv-toggle{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;font-weight:700;color:var(--coral-strong);cursor:pointer;user-select:none;padding:7px 6px;border-radius:8px}
+.ap-adv-toggle:hover{background:var(--coral-soft)}
+.ap-adv-toggle .c{font-size:9px;color:var(--muted-3)}
+.ap-adv{flex-basis:100%;border-top:1px dashed var(--border-strong);margin-top:8px;padding-top:14px;display:flex;flex-wrap:wrap;gap:14px 18px;align-items:flex-start}
+.ap-field.guide{flex-basis:100%}
+.ap-field.guide textarea{font-family:inherit;font-size:12.5px;border:1px solid var(--border-strong);border-radius:8px;padding:8px 10px;width:100%;min-height:52px;resize:vertical;color:var(--text-strong);line-height:1.5}
+.ap-field.num input{width:74px}
+.ap-scope{flex-basis:100%;display:flex;flex-direction:column;gap:7px}
+.ap-scope > label{font-size:11px;color:var(--muted-2);font-weight:600}
+.ap-deny{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.ap-deny .dl{font-family:ui-monospace,Consolas,monospace;font-size:11px;background:var(--surface-alt);color:var(--muted);border:1px solid var(--border);border-radius:5px;padding:2px 8px}
+.ap-deny .dl.q{background:var(--amber-soft);color:var(--amber);border-color:rgba(183,121,31,.22)}
+.ap-switch{flex-basis:100%;display:inline-flex;align-items:center;gap:9px;cursor:pointer;font-size:13px;color:var(--text);user-select:none}
+.ap-switch .track{width:38px;height:21px;border-radius:99px;background:var(--border-strong);position:relative;transition:.2s;flex:none}
+.ap-switch .track.on{background:var(--coral)}
+.ap-switch .knob{position:absolute;top:2px;left:2px;width:17px;height:17px;border-radius:50%;background:#fff;transition:.2s;box-shadow:0 1px 2px rgba(0,0,0,.2)}
+.ap-switch .track.on .knob{left:19px}
+.ap-linkbtn{font-size:12px;font-weight:600;color:var(--coral-strong);background:none;border:none;cursor:pointer;padding:0}
+.ap-linkbtn:hover{text-decoration:underline}
+.ap-prompt-view{flex-basis:100%;background:var(--surface-alt);border:1px solid var(--border);border-radius:8px;padding:12px 14px;font-size:11.5px;color:var(--muted);line-height:1.7;white-space:pre-wrap;font-family:ui-monospace,Consolas,monospace;margin-top:8px}
+
+/* 目标条 */
+.ap-bar{display:flex;align-items:center;gap:16px;flex-wrap:wrap;background:var(--surface);border:1px solid var(--border);border-radius:13px;padding:14px 18px;box-shadow:var(--shadow-sm);margin-bottom:18px}
+.ap-goal{display:flex;align-items:center;gap:12px;flex-wrap:wrap;font-size:13px;color:var(--muted)}
+.ap-goal b{color:var(--text-strong);font-weight:700}
+.ap-goal select,.ap-goal input{font-family:inherit;font-size:13px;border:1px solid var(--border-strong);border-radius:7px;padding:5px 9px;background:var(--surface);color:var(--text-strong)}
+.ap-goal input{width:62px;text-align:right}
+.ap-seg{display:inline-flex;border:1px solid var(--border-strong);border-radius:8px;overflow:hidden}
+.ap-seg button{font-family:inherit;font-size:12.5px;font-weight:600;padding:5px 12px;background:var(--surface);color:var(--muted);border:none;cursor:pointer}
+.ap-seg button+button{border-left:1px solid var(--border-strong)}
+.ap-seg button.active{background:var(--coral);color:#fff}
+.ap-start{margin-left:auto;display:inline-flex;align-items:center;gap:8px;font-family:inherit;font-size:14px;font-weight:700;color:#fff;background:linear-gradient(135deg,var(--coral) 0%,#7c6cf0 100%);border:none;border-radius:9px;padding:10px 18px;cursor:pointer;box-shadow:var(--shadow-md);transition:.15s}
+.ap-start:hover:not(:disabled){transform:translateY(-1px);box-shadow:var(--shadow-lg)}
+.ap-start:disabled{opacity:.65;cursor:default}
+.ap-start svg{width:16px;height:16px}
+
+/* idle 空态：循环图 + 提示 */
+.ap-idle{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:34px 28px;text-align:center;box-shadow:var(--shadow-sm)}
+.ap-loop{display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap;margin-bottom:18px}
+.ap-loop .st{display:flex;flex-direction:column;align-items:center;gap:6px;min-width:96px}
+.ap-loop .st .n{width:34px;height:34px;border-radius:50%;background:var(--coral-soft);color:var(--coral-strong);display:grid;place-items:center;font-weight:800;font-size:14px;font-family:ui-monospace,Consolas,monospace}
+.ap-loop .st b{font-family:ui-monospace,Consolas,monospace;font-size:12.5px;color:var(--text-strong)}
+.ap-loop .st span{font-size:11px;color:var(--muted-2)}
+.ap-loop .arr{color:var(--muted-3);font-size:18px}
+.ap-idle p{font-size:13.5px;color:var(--muted);max-width:560px;margin:0 auto;line-height:1.6}
+.ap-idle .moat{display:inline-flex;gap:8px;margin-top:16px;font-size:12px;color:var(--muted-2)}
+.ap-idle .moat b{color:var(--coral-strong)}
+
+/* 状态条 */
+.ap-status{display:flex;align-items:center;gap:14px;flex-wrap:wrap;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:13px 18px;margin-bottom:14px;box-shadow:var(--shadow-sm)}
+.ap-state{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;font-weight:700;padding:4px 11px;border-radius:999px}
+.ap-state.running{background:var(--coral-soft);color:var(--coral-strong)}
+.ap-state.done{background:var(--teal-soft);color:var(--teal)}
+.ap-state .pulse{width:7px;height:7px;border-radius:50%;background:currentColor;animation:appulse 1.3s infinite}
+@keyframes appulse{0%{box-shadow:0 0 0 0 rgba(91,91,214,.5)}70%{box-shadow:0 0 0 6px rgba(91,91,214,0)}100%{box-shadow:0 0 0 0 rgba(91,91,214,0)}}
+.ap-status .round-n{font-family:ui-monospace,Consolas,monospace;font-size:13px;font-weight:700;color:var(--text-strong)}
+.ap-prog{flex:1;min-width:120px;height:7px;background:var(--surface-alt);border-radius:99px;overflow:hidden}
+.ap-prog>i{display:block;height:100%;background:linear-gradient(135deg,var(--coral) 0%,#7c6cf0 100%);border-radius:99px;transition:width .5s}
+.ap-status .best{font-size:12.5px;color:var(--muted)}
+.ap-status .best b{font-family:ui-monospace,Consolas,monospace;color:var(--text-strong);font-weight:800}
+
+/* 轨迹 */
+.ap-trace-card{background:var(--surface);border:1px solid var(--border-strong);border-radius:14px;overflow:hidden;box-shadow:var(--shadow-md)}
+.ap-round{display:grid;grid-template-columns:46px 1fr 210px 88px;gap:14px;align-items:center;padding:13px 20px;border-bottom:1px solid var(--border);animation:apin .3s ease;cursor:pointer;transition:background .12s}
+.ap-round:hover{background:var(--surface-alt)}
+.ap-round.open{background:var(--surface-alt);border-bottom-color:transparent}
+.ap-chev{display:inline-block;margin-left:7px;font-size:9px;color:var(--muted-3)}
+.ap-detail{background:var(--surface-tint);border-bottom:1px solid var(--border);padding:8px 22px 16px 60px;animation:apin .22s ease}
+.dr-decide.rev{background:var(--rose-soft)}
+@keyframes apin{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.ap-round:last-child{border-bottom:none}
+.ap-round.base{background:var(--surface-tint)}
+.ap-round.cur{background:linear-gradient(90deg,var(--coral-soft),transparent 70%)}
+.ap-rn{font-family:ui-monospace,Consolas,monospace;font-size:14px;font-weight:800;color:var(--coral-strong)}
+.ap-rtag{display:block;font-size:9px;font-weight:700;color:var(--muted-2);text-transform:uppercase}
+.ap-rbody{min-width:0;font-size:12.5px}
+.ap-rcfg{font-family:ui-monospace,Consolas,monospace;font-size:11.5px;color:var(--muted)}
+.ap-changed{display:inline-block;margin-left:8px;font-family:ui-monospace,Consolas,monospace;font-size:11px;font-weight:700;color:var(--coral-strong);background:var(--coral-soft);border-radius:5px;padding:1px 7px}
+.ap-rcmd{font-family:ui-monospace,Consolas,monospace;font-size:11px;color:var(--muted);background:var(--surface-alt);border:1px solid var(--border);border-radius:6px;padding:4px 9px;margin-top:6px;line-height:1.5;word-break:break-all}
+.ap-rcmd .pfx{color:var(--coral)}
+.ap-rdiag,.ap-rhyp{line-height:1.55}
+.ap-rdiag b{color:var(--teal);font-weight:700;font-size:10px;margin-right:6px;text-transform:uppercase;letter-spacing:.03em}
+.ap-rhyp b{color:var(--coral-strong);font-weight:700;font-size:10px;margin-right:6px;text-transform:uppercase;letter-spacing:.03em}
+.ap-rrun{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:12.5px}
+.ap-rrun .sp{width:13px;height:13px;border:2px solid var(--coral-soft);border-top-color:var(--coral);border-radius:50%;animation:apspin .7s linear infinite}
+@keyframes apspin{to{transform:rotate(360deg)}}
+.ap-rtput{display:flex;align-items:center;gap:9px}
+.ap-rtrack{width:72px;height:8px;background:var(--surface-alt);border-radius:99px;overflow:hidden;flex:none}
+.ap-rfill{height:100%;background:linear-gradient(135deg,var(--coral) 0%,#7c6cf0 100%);border-radius:99px;transition:width .6s ease}
+.ap-round.rev .ap-rfill{background:var(--muted-3)}
+.ap-tps{font-family:ui-monospace,Consolas,monospace;font-size:13px;font-weight:800;color:var(--text-strong);white-space:nowrap}
+.ap-tps small{font-size:9.5px;color:var(--muted-2);font-weight:600;margin-left:1px}
+.ap-delta{font-family:ui-monospace,Consolas,monospace;font-size:11px;font-weight:700;white-space:nowrap}
+.ap-delta.up{color:var(--teal)}.ap-delta.down{color:var(--rose)}
+.ap-verdict{font-size:12px;font-weight:700;text-align:right;white-space:nowrap}
+.ap-verdict.kept{color:var(--teal)}.ap-verdict.rev{color:var(--rose)}.ap-verdict.tie{color:var(--amber)}.ap-verdict.base{color:var(--muted-2)}.ap-verdict.stop{color:var(--muted)}
+
+/* 结果卡 */
+.ap-result{background:linear-gradient(180deg,var(--coral-soft),var(--surface));border:1px solid var(--coral-soft);border-radius:14px;padding:20px 22px;margin-top:16px;box-shadow:var(--shadow-sm)}
+.ap-result .hl{font-size:15px;color:var(--text);margin-bottom:12px}
+.ap-result .hl b{color:var(--coral-strong);font-weight:800;font-size:20px}
+.ap-cmd{display:flex;align-items:center;gap:10px;background:var(--text-strong);border-radius:9px;padding:11px 14px;font-family:ui-monospace,Consolas,monospace;font-size:12px;color:#e8e8f0;overflow-x:auto}
+.ap-cmd .pfx{color:#7c6cf0}
+.ap-cmd .copy{margin-left:auto;flex:none;cursor:pointer;color:var(--muted-3);font-size:11px;border:1px solid #44444f;border-radius:5px;padding:2px 8px}
+.ap-cmd .copy:hover{color:#fff}
+.ap-result .honest{font-size:12px;color:var(--muted);margin-top:11px;line-height:1.55;border-left:2px solid var(--coral-soft);padding-left:12px}
+.ap-result .actions{display:flex;gap:9px;margin-top:13px}
+.ap-result .actions button{font-family:inherit;font-size:12.5px;font-weight:600;border:1px solid var(--border-strong);background:var(--surface);color:var(--text-strong);border-radius:8px;padding:7px 13px;cursor:pointer}
+.ap-result .actions .promote{border-color:var(--coral);color:var(--coral-strong)}
+.preview-note{max-width:1080px;margin:0 auto 16px;font-size:12px;color:var(--amber);background:var(--amber-soft);border-radius:8px;padding:8px 13px;font-family:"Inter",sans-serif}
+
+/* 完整推理轨迹 抽屉 */
+.ap-ov{position:fixed;inset:0;background:rgba(20,20,40,.28);z-index:90}
+.ap-drawer{position:fixed;top:0;right:0;height:100vh;width:min(580px,94vw);background:var(--surface);box-shadow:-14px 0 44px -12px rgba(20,20,40,.25);z-index:91;display:flex;flex-direction:column;animation:drin .28s cubic-bezier(.4,0,.2,1)}
+@keyframes drin{from{transform:translateX(100%)}to{transform:none}}
+.ap-drawer-head{display:flex;align-items:center;gap:10px;padding:16px 22px;border-bottom:1px solid var(--border)}
+.ap-drawer-head svg{width:17px;height:17px;color:var(--coral)}
+.ap-drawer-head h3{font-size:15px;font-weight:800;color:var(--text-strong)}
+.ap-drawer-head .sid{margin-left:auto;font-family:ui-monospace,Consolas,monospace;font-size:11px;color:var(--muted-2)}
+.ap-drawer-head .x{cursor:pointer;width:28px;height:28px;display:grid;place-items:center;border-radius:7px;color:var(--muted);font-size:18px}
+.ap-drawer-head .x:hover{background:var(--surface-alt);color:var(--text-strong)}
+.ap-drawer-body{flex:1;overflow-y:auto;padding:6px 22px}
+.ap-drawer-foot{display:flex;gap:10px;padding:14px 22px;border-top:1px solid var(--border);background:var(--surface-tint)}
+.dr-round{padding:16px 0;border-bottom:1px solid var(--border)}
+.dr-round:last-child{border-bottom:none}
+.dr-rhead{display:flex;align-items:center;gap:11px;margin-bottom:11px}
+.dr-rn{font-family:ui-monospace,Consolas,monospace;font-weight:800;color:var(--coral-strong);font-size:15px}
+.dr-tps{margin-left:auto;font-family:ui-monospace,Consolas,monospace;font-weight:800;font-size:13px;color:var(--text-strong)}
+.dr-sec{margin:10px 0}
+.dr-sec .lab{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--muted-2);margin-bottom:5px}
+.dr-sec .val{font-size:12.5px;color:var(--text);line-height:1.6}
+.dr-chips{display:flex;flex-wrap:wrap;gap:6px}
+.dr-chip{font-family:ui-monospace,Consolas,monospace;font-size:11px;background:var(--coral-soft);color:var(--coral-strong);border-radius:5px;padding:2px 9px;cursor:pointer;border:1px solid rgba(91,91,214,.15)}
+.dr-chip:hover{background:var(--coral);color:#fff}
+.dr-cmd{font-family:ui-monospace,Consolas,monospace;font-size:11px;background:var(--surface-alt);border:1px solid var(--border);border-radius:6px;padding:6px 10px;word-break:break-all;color:var(--muted);line-height:1.5}
+.dr-score{display:grid;grid-template-columns:1.3fr 1fr 1fr .9fr;gap:5px 10px;font-family:ui-monospace,Consolas,monospace;font-size:12px;background:var(--surface-alt);border-radius:7px;padding:9px 12px}
+.dr-score .h{color:var(--muted-2);font-size:10px;font-weight:700;text-transform:uppercase}
+.dr-score .m{color:var(--muted)}
+.dr-score .up{color:var(--teal);font-weight:700}.dr-score .down{color:var(--rose);font-weight:700}
+.dr-decide{font-family:ui-monospace,Consolas,monospace;font-size:12px;color:var(--text);background:var(--coral-soft);border-radius:6px;padding:8px 11px;line-height:1.5}
+.dr-round.rev .dr-decide{background:var(--rose-soft)}
+</style>
+</head>
+<body>
+
+<div class="preview-note">UI 预览 · 数据为 mock 示意（区别于真机）。点「开始自动调优」看逐轮播放效果。</div>
+
+<div class="ap-wrap" x-data="autopilotTab()" x-init="init()">
+
+  <!-- Agent(LLM) 配置：自由填任意 OpenAI 兼容端点 -->
+  <div class="ap-agent">
+    <div class="ap-agent-head" @click="agentOpen=!agentOpen">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      <b>Agent（出主意的 LLM）</b>
+      <span class="cur" x-text="agent.model || '未配置'"></span>
+      <span class="chev" x-text="agentOpen ? '▲' : '▼'"></span>
+    </div>
+    <div class="ap-agent-form" x-show="agentOpen">
+      <div class="ap-field"><label>预设</label>
+        <select x-model="preset" @change="applyPreset()">
+          <option value="openrouter">OpenRouter</option>
+          <option value="openai">OpenAI</option>
+          <option value="deepseek">DeepSeek</option>
+          <option value="local">本地 (Ollama / vLLM)</option>
+          <option value="custom">自定义</option>
+        </select>
+      </div>
+      <div class="ap-field url"><label>Base URL</label><input x-model="agent.base_url" placeholder="https://.../v1"></div>
+      <div class="ap-field key"><label>API Key</label><input type="password" x-model="agent.api_key" placeholder="sk-..."></div>
+      <div class="ap-field model"><label>Model</label><input x-model="agent.model" placeholder="anthropic/claude-opus-4"></div>
+      <div style="display:flex;align-items:flex-end;gap:6px">
+        <button class="ap-test" @click="testAgent()" x-text="agentTest || '测试连接'"></button>
+        <div class="ap-adv-toggle" @click="advOpen=!advOpen"><span class="c" x-text="advOpen?'▾':'▸'"></span> 高级</div>
+      </div>
+      <div class="ap-agent-note">任意 <b style="color:var(--coral-strong)">OpenAI 兼容</b>端点都行（OpenRouter / OpenAI / DeepSeek / 本地）。Key 仅本会话用于调 agent，<b>不入诊断热路径、不随轨迹存盘</b>；生产建议走环境变量注入。注意：<b>别用被压测的那个 vLLM 模型当 agent</b>（它在被压、可能太小）。</div>
+
+      <!-- 高级：agent 行为（展开区） -->
+      <div class="ap-adv" x-show="advOpen">
+        <div class="ap-field guide">
+          <label>额外指引（追加到系统 prompt 之后，塞业务约束 / 偏好）</label>
+          <textarea x-model="adv.guidance" placeholder="如：本集群 gpu-util 不超 0.85；优先 chunked-prefill 而非提并发；延迟敏感业务，TTFT 优先…"></textarea>
+        </div>
+        <div class="ap-field num"><label>temperature</label><input type="number" step="0.1" min="0" max="2" x-model="adv.temperature"></div>
+        <div class="ap-field num"><label>超时 (s)</label><input type="number" x-model="adv.timeout_s"></div>
+        <div class="ap-field num"><label>重试</label><input type="number" x-model="adv.retries"></div>
+
+        <div class="ap-scope">
+          <label>动作范围 · vLLM 全量 − 身份(~7) − 硬件收窄</label>
+          <div class="ap-deny">
+            <span class="dl">model / host / port（身份,~7）</span>
+            <span class="dl">tensor / pipeline-parallel（按卡数收窄）</span>
+            <template x-if="!adv.allowQualityKnobs"><span class="dl q">quantization（待开质量门）</span></template>
+            <template x-if="!adv.allowQualityKnobs"><span class="dl q">kv-cache-dtype（待开质量门）</span></template>
+          </div>
+          <div class="ap-agent-note" style="margin-top:0">这 ~250 个里大半 vLLM 启动时已自调到最优（KV block 数 / attention backend / 兼容门）；agent 实际只动 <b style="color:var(--coral-strong)">max-num-seqs / max-num-batched-tokens / gpu-util / performance_mode</b> 这一小撮 + 诊断点名的对症旋钮。安全不靠黑名单,靠 launch-catch + 一次性容器兜底。</div>
+        </div>
+        <label class="ap-switch" @click="adv.allowQualityKnobs=!adv.allowQualityKnobs">
+          <span class="track" :class="{on: adv.allowQualityKnobs}"><span class="knob"></span></span>
+          开「质量门」· 纳入 quantization / kv-cache-dtype（T2,加等价闸）
+        </label>
+        <div class="ap-agent-note" x-show="adv.allowQualityKnobs" style="color:var(--amber);margin-top:0">⚠ 已纳入 → 记分牌自动加<b>质量门(等价闸)</b>：每个候选额外跑固定 prompt 比对基线输出，质量掉超阈值即判负（防 Agent 靠降质量刷吞吐）。</div>
+
+        <div style="flex-basis:100%">
+          <button class="ap-linkbtn" @click="showPrompt=!showPrompt" x-text="showPrompt ? '收起核心 prompt 合约' : '查看核心 prompt 合约（只读 · 不可改）'"></button>
+          <div class="ap-prompt-view" x-show="showPrompt" x-text="LOCKED_PROMPT"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 目标条 -->
+  <div class="ap-bar">
+    <div class="ap-goal">
+      <b>目标</b>
+      <div class="ap-seg">
+        <button :class="{active: obj.target==='throughput'}" @click="obj.target='throughput'">吞吐优先</button>
+        <button :class="{active: obj.target==='latency'}" @click="obj.target='latency'">延迟优先</button>
+        <button :class="{active: obj.target==='cost'}" @click="obj.target='cost'">性价比</button>
+      </div>
+      <span>SLA · TTFT p99 ≤ <input type="number" x-model="obj.ttft"> ms · TPOT p99 ≤ <input type="number" x-model="obj.tpot"> ms</span>
+      <span>预算 <input type="number" x-model="budget.rounds"> 轮 / <input type="number" x-model="budget.minutes"> min</span>
+    </div>
+    <button class="ap-start" @click="start()" :disabled="running">
+      <svg x-show="!running" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+      <svg x-show="running" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="9" stroke-opacity=".3"/><path d="M21 12a9 9 0 0 0-9-9"/></svg>
+      <span x-text="running ? '调优中…' : (session ? '重新调优' : '开始自动调优')"></span>
+    </button>
+  </div>
+
+  <!-- 空态 -->
+  <div class="ap-idle" x-show="!session">
+    <div class="ap-loop">
+      <div class="st"><span class="n">1</span><b>observe</b><span>读诊断</span></div>
+      <span class="arr">→</span>
+      <div class="st"><span class="n">2</span><b>hypothesize</b><span>挂诊断选旋钮</span></div>
+      <span class="arr">→</span>
+      <div class="st"><span class="n">3</span><b>act</b><span>沙盒重启</span></div>
+      <span class="arr">→</span>
+      <div class="st"><span class="n">4</span><b>measure</b><span>压测打分</span></div>
+      <span class="arr">→</span>
+      <div class="st"><span class="n">5</span><b>decide</b><span>留下/回滚</span></div>
+    </div>
+    <p>点「开始自动调优」，Agent 会在<b>沙盒</b>里诊断驱动地迭代调旋钮、用压测打分，每步改动只有压测证实才留下，破 SLA 自动回滚。<b>零干扰</b>：不碰生产、不改源码。</p>
+    <div class="moat"><b>👁 眼睛</b>(深度诊断) + <b>✋ 手</b>(压测+serve控制) + <b>📊 记分牌</b>(基线/Δ) 同进程</div>
+  </div>
+
+  <!-- session -->
+  <template x-if="session">
+    <div>
+      <!-- 状态条 -->
+      <div class="ap-status">
+        <span class="ap-state" :class="session.state">
+          <span class="pulse" x-show="session.state==='running'"></span>
+          <span x-text="session.state==='running' ? '调优进行中' : '已完成'"></span>
+        </span>
+        <span class="round-n">Round <span x-text="shownRounds.length-1 < 0 ? 0 : Math.max(0, shownRounds.length-1)"></span> / <span x-text="budget.rounds"></span></span>
+        <div class="ap-prog"><i :style="`width:${Math.min(100, (Math.max(0,shownRounds.length-1)/budget.rounds)*100)}%`"></i></div>
+        <span class="best">当前最优 <b><span x-text="fmt(best.tps)"></span> tok/s</b></span>
+      </div>
+
+      <!-- 轨迹 -->
+      <div class="ap-trace-card">
+        <template x-for="r in shownRounds" :key="r.round">
+          <div>
+            <div class="ap-round" :class="{base: r.kind==='baseline', rev: r.decision==='reverted', open: expandedRounds.includes(r.round)}" @click="toggleRow(r.round)" title="单击展开本轮完整推理">
+              <div><span class="ap-rn" x-text="'R'+r.round"></span><span class="ap-chev" x-text="expandedRounds.includes(r.round)?'▾':'▸'"></span></div>
+              <div class="ap-rbody">
+                <template x-if="r.diag"><div class="ap-rdiag"><b>诊断</b><span x-text="r.diag"></span></div></template>
+                <template x-if="r.hyp"><div class="ap-rhyp"><b>假设</b><span x-text="r.hyp"></span><span class="ap-changed" x-show="r.changed" x-text="r.changed"></span></div></template>
+                <template x-if="r.cmd"><div class="ap-rcmd"><span class="pfx">$</span> <span x-text="r.cmd"></span></div></template>
+              </div>
+              <div class="ap-rtput">
+                <div class="ap-rtrack" x-show="r.tps!==null"><div class="ap-rfill" :style="`width:${r.barPct}%`"></div></div>
+                <span class="ap-tps" x-show="r.tps!==null"><span x-text="fmt(r.tps)"></span><small>tok/s</small></span>
+                <span class="ap-delta" :class="r.delta>=0?'up':'down'" x-show="r.delta!==null" x-text="(r.delta>=0?'+':'')+Math.round(r.delta*100)+'%'"></span>
+              </div>
+              <div class="ap-verdict" :class="r.vcls" x-text="r.verdict"></div>
+            </div>
+            <div class="ap-detail" x-show="expandedRounds.includes(r.round)" @click.stop>
+              <template x-if="r.snap"><div class="dr-sec"><div class="lab">诊断快照（Agent 看到的事实）</div><div class="val" x-text="r.snap"></div></div></template>
+              <template x-if="r.rationale"><div class="dr-sec"><div class="lab">Agent 推理</div><div class="val" x-text="r.rationale"></div></div></template>
+              <template x-if="r.evidence"><div class="dr-sec"><div class="lab">证据引用</div><div class="dr-chips"><template x-for="ev in r.evidence" :key="ev"><span class="dr-chip" x-text="ev"></span></template></div></div></template>
+              <template x-if="r.expected"><div class="dr-sec"><div class="lab">预期效果</div><div class="val" x-text="r.expected"></div></div></template>
+              <template x-if="r.scoreAfter"><div class="dr-sec"><div class="lab">压测打分</div>
+                <div class="dr-score">
+                  <span class="h">指标</span><span class="h">before</span><span class="h">after</span><span class="h">Δ</span>
+                  <span>output_tps</span>
+                  <span class="m" x-text="r.scoreBefore ? fmt(r.scoreBefore.tps) : '—'"></span>
+                  <span x-text="fmt(r.scoreAfter.tps)"></span>
+                  <span :class="dlt(r,'tps')>=0 ? 'up' : 'down'" x-text="r.scoreBefore ? ((dlt(r,'tps')>=0?'+':'')+Math.round(dlt(r,'tps')/r.scoreBefore.tps*100)+'%') : '—'"></span>
+                  <span>ttft_p99</span>
+                  <span class="m" x-text="r.scoreBefore ? r.scoreBefore.ttft+'ms' : '—'"></span>
+                  <span x-text="r.scoreAfter.ttft+'ms'"></span>
+                  <span class="m" x-text="r.scoreBefore ? ((dlt(r,'ttft')>=0?'+':'')+dlt(r,'ttft')+'ms') : '—'"></span>
+                  <span>tpot_p99</span>
+                  <span class="m" x-text="r.scoreBefore ? r.scoreBefore.tpot+'ms' : '—'"></span>
+                  <span x-text="r.scoreAfter.tpot+'ms'"></span>
+                  <span class="m" x-text="r.scoreBefore ? ((dlt(r,'tpot')>=0?'+':'')+dlt(r,'tpot')+'ms') : '—'"></span>
+                </div></div></template>
+              <template x-if="r.decideLogic"><div class="dr-sec"><div class="lab">判定</div><div class="dr-decide" :class="{rev: r.decision==='reverted'}" x-text="r.decideLogic"></div></div></template>
+            </div>
+          </div>
+        </template>
+        <!-- 进行中的候选 -->
+        <div class="ap-round cur" x-show="running && pending">
+          <div><span class="ap-rn" x-text="'R'+(shownRounds.length)"></span></div>
+          <div class="ap-rbody">
+            <div class="ap-rhyp" x-show="pending && pending.hyp"><b>假设</b><span x-text="pending ? pending.hyp : ''"></span></div>
+            <div class="ap-rrun"><span class="sp"></span><span x-text="pendingPhase"></span></div>
+          </div>
+          <div class="ap-rtput"></div>
+          <div class="ap-verdict"></div>
+        </div>
+      </div>
+
+      <!-- 结果卡 -->
+      <template x-if="session.state==='done'">
+        <div class="ap-result">
+          <div class="hl">吞吐 <b><span x-text="fmt(baselineTps)"></span> → <span x-text="fmt(best.tps)"></span> tok/s（×<span x-text="(best.tps/baselineTps).toFixed(2)"></span>）</b>，仍满足 TTFT SLA</div>
+          <div class="ap-cmd"><span class="pfx">$</span> <span x-text="best.cmd"></span> <span class="copy" @click="copyCmd($event)">复制</span></div>
+          <div class="honest">「×3」只在「现实但没调过」的默认基线上成立 —— 那正是大量真实部署的现状。已调过的基线则是诚实的边际收益（+5~15%），Agent 会如实报「已近最优」。</div>
+          <div class="actions">
+            <button @click="drawerOpen=true">查看完整推理轨迹</button>
+            <button class="promote">promote 到生产（人工确认）</button>
+          </div>
+        </div>
+      </template>
+    </div>
+  </template>
+
+  <!-- 完整推理轨迹 抽屉 -->
+  <template x-if="drawerOpen">
+    <div>
+      <div class="ap-ov" @click="drawerOpen=false"></div>
+      <div class="ap-drawer" @click.stop>
+        <div class="ap-drawer-head">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3 8-8"/><path d="M21 12a9 9 0 1 1-6.2-8.5"/></svg>
+          <h3>完整推理轨迹</h3>
+          <span class="sid" x-text="'ap-2026-06-23-001 · ' + agent.model"></span>
+          <span class="x" @click="drawerOpen=false">✕</span>
+        </div>
+        <div class="ap-drawer-body">
+          <template x-for="r in shownRounds" :key="'dr'+r.round">
+            <div class="dr-round" :class="{rev: r.decision==='reverted'}">
+              <div class="dr-rhead">
+                <span class="dr-rn" x-text="'R'+r.round"></span>
+                <span class="ap-verdict" :class="r.vcls" x-text="r.verdict"></span>
+                <span class="dr-tps" x-show="r.tps" x-text="fmt(r.tps)+' tok/s'"></span>
+              </div>
+              <template x-if="r.snap"><div class="dr-sec"><div class="lab">诊断快照（Agent 看到的事实）</div><div class="val" x-text="r.snap"></div></div></template>
+              <template x-if="r.rationale"><div class="dr-sec"><div class="lab">Agent 推理</div><div class="val" x-text="r.rationale"></div></div></template>
+              <template x-if="r.evidence"><div class="dr-sec"><div class="lab">证据引用</div><div class="dr-chips"><template x-for="ev in r.evidence" :key="ev"><span class="dr-chip" x-text="ev"></span></template></div></div></template>
+              <template x-if="r.expected"><div class="dr-sec"><div class="lab">预期效果</div><div class="val" x-text="r.expected"></div></div></template>
+              <template x-if="r.cmd"><div class="dr-sec"><div class="lab">本轮命令</div><div class="dr-cmd" x-text="r.cmd"></div></div></template>
+              <template x-if="r.scoreAfter"><div class="dr-sec"><div class="lab">压测打分</div>
+                <div class="dr-score">
+                  <span class="h">指标</span><span class="h">before</span><span class="h">after</span><span class="h">Δ</span>
+                  <span>output_tps</span>
+                  <span class="m" x-text="r.scoreBefore ? fmt(r.scoreBefore.tps) : '—'"></span>
+                  <span x-text="fmt(r.scoreAfter.tps)"></span>
+                  <span :class="dlt(r,'tps')>=0 ? 'up' : 'down'" x-text="r.scoreBefore ? ((dlt(r,'tps')>=0?'+':'')+Math.round(dlt(r,'tps')/r.scoreBefore.tps*100)+'%') : '—'"></span>
+                  <span>ttft_p99</span>
+                  <span class="m" x-text="r.scoreBefore ? r.scoreBefore.ttft+'ms' : '—'"></span>
+                  <span x-text="r.scoreAfter.ttft+'ms'"></span>
+                  <span class="m" x-text="r.scoreBefore ? ((dlt(r,'ttft')>=0?'+':'')+dlt(r,'ttft')+'ms') : '—'"></span>
+                  <span>tpot_p99</span>
+                  <span class="m" x-text="r.scoreBefore ? r.scoreBefore.tpot+'ms' : '—'"></span>
+                  <span x-text="r.scoreAfter.tpot+'ms'"></span>
+                  <span class="m" x-text="r.scoreBefore ? ((dlt(r,'tpot')>=0?'+':'')+dlt(r,'tpot')+'ms') : '—'"></span>
+                </div></div></template>
+              <template x-if="r.decideLogic"><div class="dr-sec"><div class="lab">判定</div><div class="dr-decide" x-text="r.decideLogic"></div></div></template>
+            </div>
+          </template>
+        </div>
+        <div class="ap-drawer-foot">
+          <button class="ap-test" @click="copyTrace($event)">复制 Markdown</button>
+          <button class="ap-test" @click="downloadTrace()">下载 JSON</button>
+        </div>
+      </div>
+    </div>
+  </template>
+</div>
+
+<script>
+function autopilotTab() {
+  // mock 轨迹(对齐设计 §6 / §13)；真后端来时换成 /api/autopilot/status 轮询
+  const MODEL = 'Qwen/Qwen2.5-0.5B-Instruct';
+  const MOCK = [
+    { round:0, kind:'baseline', tps:1240, delta:null, decision:'baseline', verdict:'基线', vcls:'base',
+      changed:null, cmd:`vllm serve ${MODEL} --max-num-seqs 32 --gpu-memory-utilization 0.70`,
+      snap:'mfu 4% · mbu 38% · running 8 · waiting 0 · kv 18% · regime A 喂不饱(双低)',
+      scoreAfter:{tps:1240,ttft:380,tpot:22}, decideLogic:'设为初始 best（基准线，后续候选都跟它 + best-so-far 比）' },
+    { round:1, diag:'MFU/MBU 双低 · running=8≪32 · waiting=0 · KV 18%', hyp:'喂不饱:并发被 max-num-seqs 卡死,且 KV 有富余', changed:'--max-num-seqs (32→128)',
+      tps:2980, delta:1.40, decision:'kept', verdict:'✓ 保留', vcls:'kept',
+      cmd:`vllm serve ${MODEL} --max-num-seqs 128 --gpu-memory-utilization 0.70`,
+      snap:'regime A 喂不饱 · 触发 D3a(MFU/MBU 双低) D2b(并发偏小) · mfu 3% · mbu 41% · running 8 · waiting 0 · kv 18%',
+      rationale:'两个屋顶都没贴近 + running 远小于上限 + 无排队 → 不是显存/排队瓶颈,是并发被 max-num-seqs=32 卡住。KV 只用 18% 有富余,直接提并发上限把更多请求拼进同一批,摊薄权重搬运。(chunked-prefill 在 0.21 默认已开,不必再动)',
+      evidence:['D3a','D2b','regime:A','metric:waiting=0','metric:kv_util=0.18'], expected:'output_tps 大幅↑,TTFT 略升',
+      scoreBefore:{tps:1240,ttft:380,tpot:22}, scoreAfter:{tps:2980,ttft:540,tpot:28},
+      decideLogic:'objective_score 2,980 > best 1,240 ×1.03 (=1,277) 且 sla_ok → 保留,设为新 best' },
+    { round:2, diag:'regime 转 B 带宽墙 · MBU↑ · KV 62% · running 升至 ~90', hyp:'并发继续涨需要更大 KV 池(B↔D 一根绳)', changed:'--gpu-memory-utilization (0.70→0.90)',
+      tps:3720, delta:0.25, decision:'kept', verdict:'✓ 保留', vcls:'kept',
+      cmd:`vllm serve ${MODEL} --max-num-seqs 128 --gpu-memory-utilization 0.90`,
+      snap:'regime B 带宽墙 · 触发 D2a(MBU 高) · mbu 67% · running ~90 · kv 62% · TTFT p99 540ms',
+      rationale:'提并发后已贴近带宽屋顶(MBU 高),KV 池随并发吃紧。扩大 gpu_memory_utilization 把 KV 池从 0.70 提到 0.90,给 batch 留更多 KV 空间——推大 batch 前先喂饱 D 容量。',
+      evidence:['D2a','regime:B','metric:mbu=0.67','metric:kv_util=0.62'], expected:'output_tps↑,TTFT 升但仍 < SLA',
+      scoreBefore:{tps:2980,ttft:540,tpot:28}, scoreAfter:{tps:3720,ttft:720,tpot:33},
+      decideLogic:'3,720 > best 2,980 ×1.03 (=3,069) 且 TTFT 720 < SLA 1000 → 保留' },
+    { round:3, diag:'TTFT p99 720ms 仍有余量 · regime B(贴带宽屋顶)', hyp:'再提一档并发试探上限', changed:'--max-num-seqs (128→256)',
+      tps:3650, delta:-0.02, decision:'reverted', verdict:'↩ 回滚', vcls:'rev',
+      cmd:`vllm serve ${MODEL} --max-num-seqs 256 --gpu-memory-utilization 0.90`,
+      snap:'regime B · TTFT p99 720ms · 已贴带宽屋顶,疑似仍有并发空间',
+      rationale:'TTFT 还有 SLA 余量,带宽屋顶尚有疑似空间,再提一档并发试探。但已逼近 D 容量墙,可能触发抢占。',
+      evidence:['regime:B','metric:ttft_p99=720'], expected:'若 TTFT 不破 SLA 则吞吐再↑',
+      scoreBefore:{tps:3720,ttft:720,tpot:33}, scoreAfter:{tps:3650,ttft:1180,tpot:39},
+      decideLogic:'TTFT p99 1,180 > SLA 1,000 → sla_ok=false → objective_score=-∞ → 回滚,保留 R2' },
+    { round:4, kind:'stop', hyp:'已近最优(再扩并发破 SLA、带宽屋顶已贴) → 停',
+      tps:null, delta:null, decision:'done', verdict:'■ 完成', vcls:'stop', changed:null, cmd:null,
+      rationale:'再扩并发会破 SLA(R3 已实测验证),带宽屋顶已贴近(MBU 高),吞吐提升空间耗尽 → 判定已近最优,停机。',
+      decideLogic:'agent done=true(探索逼近物理屋顶且更高并发破 SLA)→ 收尾重启回 best(R2)' },
+  ];
+  const MAXTPS = 3720;
+  return {
+    obj: { target:'throughput', ttft:1000, tpot:50 },
+    budget: { rounds:6, minutes:15 },
+    // Agent(LLM) — 任意 OpenAI 兼容端点,默认 OpenRouter,可自由填
+    agentOpen: false,
+    preset: 'openrouter',
+    agent: { base_url: 'https://openrouter.ai/api/v1', api_key: '', model: 'anthropic/claude-opus-4' },
+    agentTest: '',
+    // 高级 agent 行为配置
+    advOpen: false,
+    showPrompt: false,
+    adv: { guidance: '', temperature: 0.4, timeout_s: 30, retries: 2, allowQualityKnobs: false },
+    LOCKED_PROMPT:
+`你是一个 LLM-serving 性能工程师（核心合约,不可改）：
+① 每轮只改 1 个旋钮,且只能从「动作范围」里选；
+② 必须接受压测判决——不得声称压测没证实的收益；
+③ 必须把改动挂在本轮诊断证据上(evidence_refs)；
+④ 必须按 StructuredOutput schema 输出 {action|done, rationale, evidence_refs}；
+⑤ 目标：不破 SLA 前提下最大化主指标；已近最优则 done:true。
+———
+每轮的 user message 由 runner 自动拼（用户不填）：
+目标 / 预算 / 当前配置 / 蒸馏诊断 / 历史 / 动作范围。
+你的「额外指引」会追加在以上合约之后。`,
+    PRESETS: {
+      openrouter: { base_url: 'https://openrouter.ai/api/v1', model: 'anthropic/claude-opus-4' },
+      openai:     { base_url: 'https://api.openai.com/v1',    model: 'gpt-4o' },
+      deepseek:   { base_url: 'https://api.deepseek.com/v1',  model: 'deepseek-chat' },
+      local:      { base_url: 'http://localhost:11434/v1',    model: 'llama3.1' },
+      custom:     { base_url: '', model: '' },
+    },
+    applyPreset() { const p = this.PRESETS[this.preset]; if (p) { this.agent.base_url = p.base_url; this.agent.model = p.model; } },
+    testAgent() { this.agentTest = '测试中…'; setTimeout(() => { this.agentTest = this.agent.api_key ? '✓ 可用' : '需填 API Key'; setTimeout(() => this.agentTest = '', 2000); }, 600); },
+    session: null,
+    running: false,
+    shownRounds: [],
+    pending: null,
+    pendingPhase: '',
+    drawerOpen: false,
+    expandedRounds: [],
+    _i: 0, _t: null,
+
+    init() {},
+    get baselineTps(){ return (this.shownRounds[0]||{}).tps || 1240; },
+    get best(){
+      let b = { tps:1240, cmd:'vllm serve <model> --max-num-seqs 128 --gpu-memory-utilization 0.90' };
+      this.shownRounds.forEach(r=>{ if(r.decision==='kept' && r.tps>b.tps) b.tps=r.tps; });
+      return b;
+    },
+    fmt(n){ return n==null ? '—' : Number(n).toLocaleString('en-US'); },
+
+    start(){
+      if (this._t) clearInterval(this._t);
+      this.session = { state:'running', rounds:[] };
+      this.shownRounds = [];
+      this.expandedRounds = [];
+      this.running = true;
+      this._i = 0;
+      this._step();
+      this._t = setInterval(()=>this._step(), 1600);
+    },
+    _step(){
+      if (this._i >= MOCK.length) {
+        clearInterval(this._t); this._t=null;
+        this.running = false; this.pending = null;
+        this.session.state = 'done';
+        return;
+      }
+      const r = MOCK[this._i];
+      // 先把它作为"进行中"亮出来(假设+压测中)，再 800ms 后落地为结果
+      if (r.kind === 'baseline') {
+        this.shownRounds.push(this._withBar(r));
+        this._i++;
+        return;
+      }
+      this.pending = r;
+      this.pendingPhase = '应用配置 → 等就绪 → 压测中…';
+      setTimeout(()=>{
+        if (r.kind === 'stop') {
+          this.shownRounds.push(this._withBar(r));
+        } else {
+          this.shownRounds.push(this._withBar(r));
+        }
+        this.pending = null;
+        this._i++;
+      }, 850);
+    },
+    _withBar(r){ return Object.assign({}, r, { barPct: r.tps ? Math.max(6, (r.tps/MAXTPS)*100) : 0 }); },
+    copyCmd(e){ try{ navigator.clipboard.writeText(this.best.cmd);}catch(_){}; e.target.textContent='✓'; },
+    toggleRow(n){ const i = this.expandedRounds.indexOf(n); if (i >= 0) this.expandedRounds.splice(i, 1); else this.expandedRounds.push(n); },
+    dlt(r, f){ return r.scoreBefore ? (r.scoreAfter[f] - r.scoreBefore[f]) : 0; },
+    traceMarkdown(){
+      let md = '# Autopilot 推理轨迹\n\n';
+      this.shownRounds.forEach(r => {
+        md += `## R${r.round} — ${r.verdict}\n`;
+        if (r.snap) md += `- 诊断快照: ${r.snap}\n`;
+        if (r.rationale) md += `- Agent 推理: ${r.rationale}\n`;
+        if (r.evidence) md += `- 证据引用: ${r.evidence.join(', ')}\n`;
+        if (r.cmd) md += `- 本轮命令: \`${r.cmd}\`\n`;
+        if (r.scoreAfter) md += `- 压测: output_tps ${r.scoreBefore ? r.scoreBefore.tps + '→' : ''}${r.scoreAfter.tps}\n`;
+        if (r.decideLogic) md += `- 判定: ${r.decideLogic}\n`;
+        md += '\n';
+      });
+      return md;
+    },
+    copyTrace(e){ try { navigator.clipboard.writeText(this.traceMarkdown()); } catch(_){}; e.target.textContent = '✓ 已复制'; setTimeout(() => e.target.textContent = '复制 Markdown', 2000); },
+    downloadTrace(){
+      const blob = new Blob([JSON.stringify(this.shownRounds, null, 2)], {type: 'application/json'});
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob); a.download = 'autopilot-trace.json'; a.click();
+    },
+  };
+}
+</script>
+</body>
+</html>

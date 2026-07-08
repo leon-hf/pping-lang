@@ -256,6 +256,13 @@ class DockerSandbox:
         r = self._docker("logs", "--tail", str(n), self._container)
         return ((r.stdout or "") + (r.stderr or ""))[-1500:]
 
+    def _find_log_line(self, needle: str, tail: int = 400) -> str | None:
+        r = self._docker("logs", "--tail", str(tail), self._container)
+        for line in (((r.stdout or "") + (r.stderr or "")).splitlines()):
+            if needle in line:
+                return line.strip()
+        return None
+
     def apply(self, config: dict) -> None:
         from pping_lang.autopilot.action_space import render_flags
         self.teardown()                                  # 清掉上一候选
@@ -346,16 +353,30 @@ class DockerSandbox:
                 self.teardown()
                 raise LaunchError(f"候选 API 就绪超时({self._ready_timeout:.0f}s)。日志尾:\n{logs}")
             if now - last_report >= 15:                  # 心跳:长静默窗内 UI 不能死着
-                self._report(f"等待 vLLM API 就绪 {int(now - start)}s / {self._ready_timeout:.0f}s …")
+                stage = self._logs_tail(1).strip().replace("\n", " ")[-90:]  # vLLM 正在干什么
+                self._report(f"等待 vLLM API 就绪 {int(now - start)}s / {self._ready_timeout:.0f}s"
+                             + (f" · {stage}" if stage else " …"))
                 last_report = now
             time.sleep(self._poll)
-        # 阶段2:真推理探针 —— 确认推理可用 + 跑完首个 JIT(冷引擎首请求慢,否则 bench 0 样本)
+        kv_line = self._find_log_line("KV cache size")   # 引擎实测 KV 池,D regime 的关键底数
+        if kv_line:
+            self._report(f"引擎就绪:{kv_line[-110:]}")
+        # 阶段2:真推理探针 —— 确认推理可用 + 跑完首个 JIT(冷引擎首请求慢,否则 bench 0 样本)。
+        # 重试式:Blackwell 首推理时长高方差(实测 26s ~ >180s,JIT/cudagraph 竞争),单发长超时
+        # 会被一次卡死请求挂满;短超时 + 重试,新连接往往立即成功。
         self._report(f"API 已就绪({int(time.monotonic() - start)}s),推理探针 + kernel JIT 预热中…")
-        warm_timeout = min(self._ready_timeout, 180.0)
-        if not self._inference_probe(warm_timeout):
-            logs = self._logs_tail()
-            self.teardown()
-            raise LaunchError(f"候选推理探针失败(JIT/推理卡死,{warm_timeout:.0f}s)。日志尾:\n{logs}")
+        warm_deadline = time.monotonic() + min(self._ready_timeout, 180.0)
+        attempt = 0
+        while True:
+            attempt += 1
+            if self._inference_probe(timeout=60.0):
+                break
+            if time.monotonic() >= warm_deadline:
+                logs = self._logs_tail()
+                self.teardown()
+                raise LaunchError(f"候选推理探针失败(JIT/推理卡死,{attempt} 次尝试)。日志尾:\n{logs}")
+            self._report(f"推理探针第 {attempt} 次未通过,重试(JIT 预热可能仍在进行)…")
+            time.sleep(2.0)
         self._report("候选就绪,进入压测")
 
     def read_diagnosis(self) -> dict | None:
@@ -438,10 +459,45 @@ class DockerSandbox:
             }
         return out
 
+    def _bench_progress(self, p: dict) -> None:
+        """run_static 的运行中快照 → 直播事件:看着分数长出来。"""
+        msg = f"压测 {p['elapsed_s']}s:完成 {p['ok']} req · 瞬时 {p['tps']:g} tok/s"
+        if p.get("ttft_p50_ms") is not None:
+            msg += f" · TTFT p50 {p['ttft_p50_ms']:g}ms"
+        if p.get("errors"):
+            msg += f" · ⚠ 错误 {p['errors']}"
+        self._report(msg)
+
+    def live_stats_line(self) -> str | None:
+        """候选引擎此刻的关键指标一行(诊断证据实时形成)。没发布 dashboard → None。"""
+        if not self._dash_port:
+            return None
+        import json
+        import urllib.request
+        parts: list[str] = []
+        specs = (("running_reqs", "vllm.scheduler.running_reqs", "running {v:g}"),
+                 ("kv", "vllm.scheduler.kv_cache_usage_ratio", "KV {pct:.0f}%"),
+                 ("mfu", "vllm.perf.mfu_ratio", "MFU {pct:.1f}%"))
+        for _, name, fmt in specs:
+            qs = urlencode({"name": name, "seconds": 15, "limit": 5})
+            try:
+                with urllib.request.urlopen(
+                        f"http://{self._host}:{self._dash_port}/api/metrics/recent?{qs}",
+                        timeout=2) as r:
+                    points = (json.loads(r.read()).get("points")) or []
+            except Exception:  # noqa: BLE001
+                continue
+            vals = [float(p["value"]) for p in points if p.get("value") is not None]
+            if vals:
+                v = vals[-1]
+                parts.append(fmt.format(v=v, pct=v * 100))
+        return " · ".join(parts) if parts else None
+
     def measure(self, obj: ObjectiveSpec) -> Scorecard:
         bench_start_ns = time.time_ns()
         sc = bench_scorecard(self.endpoint(), self._model, self._spec,
-                             run_meta={**self._cfg, "container": self._container})
+                             run_meta={**self._cfg, "container": self._container},
+                             on_progress=self._bench_progress)
         bench_end_ns = time.time_ns()
         probe = self._runtime_probe(bench_start_ns, bench_end_ns)
         if probe:

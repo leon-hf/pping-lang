@@ -706,7 +706,7 @@ def test_bench_scorecard_maps_summary(monkeypatch):
                     e2e_ms=LatencyStats(p99=2200.0), output_throughput_tps=1907.0)
     seen = {}
 
-    async def fake(scen, client):
+    async def fake(scen, client, **kw):
         seen["prompt_tokens"] = scen.prompt_tokens
         seen["output_tokens"] = scen.output_tokens
         seen["prompt_source"] = scen.prompt_source
@@ -727,7 +727,7 @@ def test_bench_scorecard_zero_ok_raises(monkeypatch):
     import pping_lang.bench.runner as br
     from pping_lang.bench.measurement import RunSummary
 
-    async def fake(scen, client):
+    async def fake(scen, client, **kw):
         return RunSummary(total=10, ok=0, errors=10)
 
     monkeypatch.setattr(br, "run_static", fake)
@@ -748,7 +748,7 @@ def test_bench_scorecard_scales_client_pool_to_concurrency(monkeypatch):
         async def __aenter__(self): return self
         async def __aexit__(self, *a): return None
 
-    async def fake(scen, client):
+    async def fake(scen, client, **kw):
         return RunSummary(total=1, ok=1, errors=0, duration_s=1,
                           ttft_ms=LatencyStats(p99=1.0),
                           tpot_ms=LatencyStats(p99=1.0),
@@ -1045,6 +1045,43 @@ def test_runner_t2_equivalence_tolerates_minor_drift(tmp_path):
     assert cand["scorecard_after"] is not None          # 没被等价检查拦下,进了 bench
     assert "equivalence check failed" not in cand["rationale"]
     store.close()
+
+
+def test_run_static_streams_progress_snapshots():
+    """bench 直播(反馈密度二期 A):采集期周期回调运行中快照,回调异常不影响压测。"""
+    import asyncio
+    import time as _t
+
+    from pping_lang.bench.measurement import RequestSample
+    from pping_lang.bench.runner import run_static
+    from pping_lang.bench.scenarios.schema import StaticScenario
+
+    class MockClient:
+        async def chat(self, model, prompt, output_tokens):
+            t0 = _t.monotonic_ns()
+            await asyncio.sleep(0.01)
+            now = _t.monotonic_ns()
+            return RequestSample(started_ns=t0, first_token_ns=t0 + 5_000_000,
+                                 finished_ns=now, output_tokens=output_tokens)
+
+        async def completions(self, model, prompt, output_tokens):
+            return await self.chat(model, prompt, output_tokens)
+
+    seen: list[dict] = []
+
+    def on_progress(p):
+        seen.append(p)
+        raise RuntimeError("callback boom")          # 异常必须被吞掉
+
+    scen = StaticScenario(name="t", endpoint="http://x", model="m", concurrency=2,
+                          duration_s=1, warmup_s=0, output_tokens=4,
+                          prompt_text="hi", timeout_s=5)
+    rs = asyncio.run(run_static(scen, MockClient(), on_progress=on_progress,
+                                progress_interval_s=0.1))
+    assert rs.ok > 0
+    assert seen, "采集期应至少回调一次进度快照"
+    snap = seen[-1]
+    assert snap["ok"] > 0 and snap["tps"] > 0 and "elapsed_s" in snap
 
 
 def test_agent_free_value_within_range():

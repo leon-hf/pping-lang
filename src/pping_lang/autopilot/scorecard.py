@@ -28,8 +28,10 @@ class BenchError(RuntimeError):
 
 
 def bench_scorecard(endpoint: str, model: str, spec: dict,
-                    run_meta: dict | None = None) -> Scorecard:
-    """对一个真实 OpenAI 兼容端点跑标准 bench → Scorecard(复用 bench/runner + client)。"""
+                    run_meta: dict | None = None, on_progress=None) -> Scorecard:
+    """对一个真实 OpenAI 兼容端点跑标准 bench → Scorecard(复用 bench/runner + client)。
+
+    on_progress(可选)透传给 run_static:采集期每 ~10s 一份运行中快照,供直播。"""
     import asyncio
 
     from pping_lang.bench.client import OpenAIStreamClient
@@ -50,7 +52,7 @@ def bench_scorecard(endpoint: str, model: str, spec: dict,
         # higher concurrency to fill vLLM's running queue.
         async with OpenAIStreamClient(endpoint, timeout_s=timeout,
                                       max_keepalive=max(64, scen.concurrency)) as c:
-            return await run_static(scen, c)
+            return await run_static(scen, c, on_progress=on_progress)
 
     rs = asyncio.run(_run())
     if rs.ok == 0:

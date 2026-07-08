@@ -50,11 +50,17 @@ logger = logging.getLogger(__name__)
 async def run_static(
     scenario: StaticScenario,
     client: Any,
+    on_progress: Any = None,
+    progress_interval_s: float = 10.0,
 ) -> RunSummary:
     """Execute one static scenario against `client`. Returns aggregated summary.
 
     `client` must implement async `chat(model, prompt, output_tokens)` and
     `completions(model, prompt, output_tokens)` returning `RequestSample`.
+
+    `on_progress`(可选): 采集期每 `progress_interval_s` 秒回调一次运行中快照
+    {elapsed_s, ok, errors, tps, ttft_p50_ms} —— 长压测窗把分数"长出来"的过程
+    喂给上层直播,而非憋到最后只出总分。回调异常不影响压测。
     """
     scenario.validate()
 
@@ -123,6 +129,31 @@ async def run_static(
                 state["stop"] = True
                 return
 
+    async def _reporter() -> None:
+        while not state["collect"] and not state["stop"]:
+            await asyncio.sleep(0.2)
+        t0 = time.monotonic()
+        while not state["stop"]:
+            await asyncio.sleep(progress_interval_s)
+            if state["stop"]:
+                return
+            oks = [s for s in samples if s.ok]
+            elapsed = max(0.001, time.monotonic() - t0)
+            toks = sum(s.output_tokens for s in oks)
+            ttfts = sorted(s.ttft_ms for s in oks if s.ttft_ms is not None)
+            try:
+                on_progress({
+                    "elapsed_s": int(round(elapsed)),
+                    "ok": len(oks),
+                    "errors": len(samples) - len(oks),
+                    "tps": round(toks / elapsed, 1),
+                    "ttft_p50_ms": round(ttfts[len(ttfts) // 2], 1) if ttfts else None,
+                })
+            except Exception:  # noqa: BLE001 — 直播回调绝不打断压测
+                logger.debug("bench progress callback failed", exc_info=True)
+
+    reporter = asyncio.create_task(_reporter()) if on_progress else None
+
     workers = [asyncio.create_task(worker()) for _ in range(scenario.concurrency)]
 
     try:
@@ -150,6 +181,8 @@ async def run_static(
 
     finally:
         state["stop"] = True
+        if reporter is not None and not reporter.done():
+            reporter.cancel()
         # Defensive: any worker still pending gets the signal and exits next loop.
         # We don't cancel — let in-flight requests finish gracefully bounded by
         # `timeout_s`. Tests assert workers have completed before reading samples.
@@ -157,6 +190,8 @@ async def run_static(
             if not w.done():
                 w.cancel()
         await asyncio.gather(*workers, return_exceptions=True)
+        if reporter is not None:
+            await asyncio.gather(reporter, return_exceptions=True)
 
     return aggregate(samples, duration_actual)
 

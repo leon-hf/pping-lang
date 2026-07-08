@@ -1588,6 +1588,17 @@ function autopilotTab() {
     _bestTps() { let b = 0; this.shownRounds.forEach(r => { if (r.decision === 'kept' && r.tps > b) b = r.tps; }); return b || this.baselineTps; },
     get best() { return { tps: this._bestTps(), cmd: (this.session && this.session.recommended_command) || (this.shownRounds.find(r => r.decision === 'kept') || {}).cmd || '' }; },
     get fallbackCount() { return this.shownRounds.filter(r => r.fallback).length; },
+    get etaText() {
+      // 按已完成轮次平均节奏外推的上界(提前收敛/时间预算会更早停)
+      if (!this.running) return '';
+      const ts = this.shownRounds.map(r => Date.parse(r.ts || '')).filter(Number.isFinite);
+      const done = this.shownRounds.filter(r => r.kind === 'candidate').length;
+      const total = Number(this.budget.rounds) || 0;
+      if (ts.length < 2 || !total) return '';
+      const perMin = (ts[ts.length - 1] - ts[0]) / (ts.length - 1) / 60000;
+      const left = Math.max(0, total - done);
+      return left ? `预计剩余 ≤${Math.max(1, Math.round(perMin * left))} min` : '收尾中';
+    },
     get promote() { return (this.session && this.session.promote_package) || null; },
     get promoteDiff() { return (this.promote && this.promote.diff && this.promote.diff.changes) || []; },
     get promoteRisks() { return (this.promote && this.promote.risk_notes) || []; },
@@ -1768,6 +1779,7 @@ function autopilotTab() {
       const dg = r.diagnosis || {};
       return {
         round: r.round, kind: r.kind, decision: r.decision, verdict: v.t, vcls: v.c,
+        ts: r.ts_wall || '',
         fallback: (r.action && r.action.llm_fallback) || null,
         diag: (dg.evidence_refs || []).join(' · '),
         hyp: r.rationale || '', rationale: r.rationale || '',

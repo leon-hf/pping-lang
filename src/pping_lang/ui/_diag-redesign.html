@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>诊断 tab — 样式备选</title>
+<style>
+:root{
+  --bg:#f7f8fa; --surface:#fff; --surface-2:#f4f5f7; --tint:#fafbfc;
+  --border:#e8eaef; --border-2:#dde0e7;
+  --ink:#14162b; --text:#3d4257; --muted:#737a8c; --muted-2:#9aa1b2;
+  --brand:#6366f1; --brand-soft:#eef0fe; --brand-ink:#4f46e5;
+  --info:#5566c4; --info-soft:#eef1fb;
+  --warn:#b27708; --warn-soft:#fbf3df;
+  --crit:#d83a5e; --crit-soft:#fdeef1;
+  --ok:#0e9384; --ok-soft:#e7f6f3;
+  /* regime hues */
+  --A:#0284c7; --A-soft:#e6f4fb;   /* 喂不饱 */
+  --B:#7c5cf0; --B-soft:#efebfe;   /* 带宽墙 */
+  --C:#ea6e1b; --C-soft:#fdefe1;   /* 算力墙 */
+  --D:#d83a5e; --D-soft:#fdeef1;   /* 容量墙 */
+  --N:#64748b; --N-soft:#eef1f5;   /* 症状/其它 */
+  --shadow-sm:0 1px 2px rgba(20,22,43,.05),0 1px 1px rgba(20,22,43,.04);
+  --shadow-md:0 4px 14px -4px rgba(20,22,43,.12),0 2px 6px -2px rgba(20,22,43,.07);
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font-family:"Inter",-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;font-size:14px;line-height:1.5}
+code,.mono{font-family:ui-monospace,"SF Mono",Consolas,monospace}
+.wrap{max-width:1120px;margin:0 auto;padding:0 24px 80px}
+
+/* ── sticky variant nav ── */
+.topnav{position:sticky;top:0;z-index:20;background:rgba(247,248,250,.85);backdrop-filter:blur(8px);
+  border-bottom:1px solid var(--border);margin-bottom:8px}
+.topnav-inner{max-width:1120px;margin:0 auto;padding:12px 24px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.topnav b{color:var(--ink);font-weight:800;font-size:15px}
+.topnav .sp{flex:1}
+.jump{display:inline-flex;gap:6px}
+.jump a{font-size:12.5px;font-weight:600;color:var(--muted);text-decoration:none;padding:5px 11px;border:1px solid var(--border-2);border-radius:8px;background:var(--surface)}
+.jump a:hover{color:var(--brand-ink);border-color:var(--brand);background:var(--brand-soft)}
+
+/* ── variant section frame ── */
+.variant{margin-top:34px}
+.vhead{display:flex;align-items:flex-start;gap:14px;margin-bottom:16px}
+.vnum{flex:none;width:30px;height:30px;border-radius:9px;background:var(--ink);color:#fff;display:grid;place-items:center;font-weight:800;font-size:14px}
+.vtitle h2{margin:0 0 3px;font-size:17px;font-weight:800;color:var(--ink)}
+.vtitle p{margin:0;font-size:12.5px;color:var(--muted);max-width:760px}
+.vtitle .fit{display:inline-block;margin-top:5px;font-size:11px;font-weight:700;color:var(--ok);background:var(--ok-soft);padding:2px 9px;border-radius:6px}
+
+/* shared atoms */
+.sev-dot{width:8px;height:8px;border-radius:50%;flex:none}
+.sev-dot.critical{background:var(--crit)} .sev-dot.warning{background:var(--warn)} .sev-dot.info{background:var(--info)}
+.pill{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:700;padding:3px 9px;border-radius:999px;white-space:nowrap}
+.pill.critical{color:var(--crit);background:var(--crit-soft)} .pill.warning{color:var(--warn);background:var(--warn-soft)} .pill.info{color:var(--info);background:var(--info-soft)}
+.rid{font-family:ui-monospace,Consolas,monospace;font-size:11px;font-weight:700;color:var(--muted);background:var(--surface-2);padding:2px 7px;border-radius:5px}
+.rtag{font-size:10.5px;font-weight:800;padding:2px 8px;border-radius:6px;letter-spacing:.02em}
+.rtag.A{color:var(--A);background:var(--A-soft)} .rtag.B{color:var(--B);background:var(--B-soft)}
+.rtag.C{color:var(--C);background:var(--C-soft)} .rtag.D{color:var(--D);background:var(--D-soft)} .rtag.N{color:var(--N);background:var(--N-soft)}
+.ev{display:inline-flex;align-items:baseline;gap:4px;font-family:ui-monospace,Consolas,monospace;font-size:11px;
+  background:var(--tint);border:1px solid var(--border);border-radius:6px;padding:2px 8px;color:var(--muted)}
+.ev b{color:var(--ink);font-weight:700}
+.lab{font-size:9.5px;font-weight:800;text-transform:uppercase;letter-spacing:.05em}
+.lab.fact{color:var(--ok)} .lab.infer{color:var(--brand-ink)} .lab.rx{color:var(--warn)}
+.ts{font-size:11px;color:var(--muted-2);font-family:ui-monospace,Consolas,monospace}
+
+/* ════════ Variant 1 — 证据 Feed(精炼卡)════════ */
+.v1 .card{position:relative;background:var(--surface);border:1px solid var(--border);border-radius:13px;
+  padding:15px 18px 15px 22px;margin-bottom:12px;box-shadow:var(--shadow-sm);overflow:hidden}
+.v1 .card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px}
+.v1 .card.critical::before{background:var(--crit)} .v1 .card.warning::before{background:var(--warn)} .v1 .card.info::before{background:var(--info)}
+.v1 .top{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-bottom:9px}
+.v1 .name{font-size:15px;font-weight:800;color:var(--ink)}
+.v1 .top .sp{flex:1}
+.v1 .block{display:flex;gap:9px;margin-top:7px}
+.v1 .block .body{font-size:13px;color:var(--text);line-height:1.55}
+.v1 .block .lab{flex:none;width:34px;padding-top:2px}
+.v1 .rx{background:var(--warn-soft);border-radius:8px;padding:8px 11px;margin-top:9px}
+.v1 .rx .body{color:#7a5410}
+.v1 .evrow{display:flex;flex-wrap:wrap;gap:6px;margin-top:11px}
+
+/* ════════ Variant 2 — 按瓶颈分组(regime lanes)════════ */
+.v2 .lanes{display:grid;grid-template-columns:repeat(5,1fr);gap:12px}
+.v2 .lane{background:var(--surface);border:1px solid var(--border);border-radius:13px;overflow:hidden;box-shadow:var(--shadow-sm);display:flex;flex-direction:column}
+.v2 .lane-h{padding:11px 13px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px}
+.v2 .lane-h .roof{flex:none}
+.v2 .lane-h .nm{font-size:12.5px;font-weight:800;color:var(--ink)}
+.v2 .lane-h .ct{margin-left:auto;font-size:11px;font-weight:800;color:var(--muted);background:var(--surface-2);border-radius:99px;padding:1px 8px;min-width:20px;text-align:center}
+.v2 .lane-h.A{background:var(--A-soft)} .v2 .lane-h.B{background:var(--B-soft)} .v2 .lane-h.C{background:var(--C-soft)} .v2 .lane-h.D{background:var(--D-soft)} .v2 .lane-h.N{background:var(--N-soft)}
+.v2 .lane-body{padding:10px;display:flex;flex-direction:column;gap:9px;flex:1}
+.v2 .mini{border:1px solid var(--border);border-radius:9px;padding:9px 10px;background:var(--tint)}
+.v2 .mini .mh{display:flex;align-items:center;gap:6px;margin-bottom:5px}
+.v2 .mini .nm{font-size:12.5px;font-weight:700;color:var(--ink);line-height:1.35}
+.v2 .mini .hy{font-size:11.5px;color:var(--muted);line-height:1.5}
+.v2 .mini .ev{margin-top:6px;font-size:10px;padding:1px 6px}
+.v2 .empty{font-size:11px;color:var(--muted-2);text-align:center;padding:14px 0}
+
+/* ════════ Variant 3 — 密集表(ops table,点行展开详情+证据)════════ */
+.v3 .tbl{background:var(--surface);border:1px solid var(--border);border-radius:13px;overflow:hidden;box-shadow:var(--shadow-sm)}
+.v3 .row{display:grid;grid-template-columns:30px 1.4fr 92px 1.6fr 20px;gap:14px;align-items:center;
+  padding:12px 16px;border-bottom:1px solid var(--border);cursor:pointer}
+.v3 .row>span{min-width:0}            /* 让 fr 列能收窄到内容以下 → nowrap 文本省略号截断、各行列对齐 */
+.v3 .row.head{background:var(--surface-2);font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);cursor:default;padding:9px 16px}
+.v3 .row:hover:not(.head){background:var(--tint)}
+.v3 .row.open{background:var(--tint)}
+.v3 .row .nm{font-weight:700;color:var(--ink);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.v3 .row .hy{font-size:11px;color:var(--muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.v3 .row .sug{font-size:12px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.v3 .row .sug.none{color:var(--muted-2);font-style:italic}
+.v3 .chev{font-size:9px;color:var(--muted-2);text-align:center;transition:transform .15s}
+.v3 .row.open .chev{transform:rotate(90deg);color:var(--brand)}
+/* 展开的详情:全文 + 证据 chips + 处方 + 触发条件 */
+.v3 .detail{background:var(--tint);border-bottom:1px solid var(--border);padding:4px 18px 16px 60px;animation:v3in .18s ease}
+@keyframes v3in{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+.v3 .detail .sec{margin-top:13px}
+.v3 .detail .body{font-size:13px;color:var(--text);line-height:1.6;margin-top:4px}
+.v3 .detail .rx{background:var(--warn-soft);border-radius:8px;padding:9px 12px;margin-top:4px}
+.v3 .detail .rx .body{color:#7a5410;margin-top:0}
+.v3 .detail .evrow{display:flex;flex-wrap:wrap;gap:7px;margin-top:6px}
+.v3 .detail .cond{font-family:ui-monospace,Consolas,monospace;font-size:11.5px;color:var(--muted);background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:8px 11px;margin-top:4px}
+
+/* ════════ Variant 4 — 主从(master-detail)════════ */
+.v4 .split{display:grid;grid-template-columns:300px 1fr;gap:16px;background:var(--surface);border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow-md);overflow:hidden;min-height:340px}
+.v4 .list{border-right:1px solid var(--border);background:var(--tint);padding:8px;overflow:auto}
+.v4 .li{display:flex;align-items:center;gap:9px;padding:11px 12px;border-radius:9px;cursor:pointer;margin-bottom:2px}
+.v4 .li:hover{background:var(--surface)}
+.v4 .li.active{background:var(--surface);box-shadow:var(--shadow-sm)}
+.v4 .li .nm{font-size:12.5px;font-weight:700;color:var(--ink);line-height:1.3}
+.v4 .li .meta{font-size:10.5px;color:var(--muted-2);margin-top:1px}
+.v4 .li .sp{flex:1}
+.v4 .detail{padding:22px 26px}
+.v4 .detail .dh{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:4px}
+.v4 .detail h3{margin:6px 0 0;font-size:20px;font-weight:800;color:var(--ink)}
+.v4 .detail .sec{margin-top:18px}
+.v4 .detail .sec .body{font-size:13.5px;color:var(--text);line-height:1.6;margin-top:5px}
+.v4 .detail .rx{background:var(--warn-soft);border-radius:10px;padding:12px 15px;margin-top:6px}
+.v4 .detail .rx .body{color:#7a5410;margin-top:0}
+.v4 .detail .evrow{display:flex;flex-wrap:wrap;gap:7px;margin-top:7px}
+.v4 .detail .cond{font-family:ui-monospace,Consolas,monospace;font-size:11.5px;color:var(--muted);background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:8px 11px;margin-top:6px}
+
+.note{font-size:12px;color:var(--muted);background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--brand);border-radius:8px;padding:11px 14px;margin:10px 0 0;line-height:1.6}
+</style>
+</head>
+<body>
+
+<div class="topnav"><div class="topnav-inner">
+  <b>诊断 tab · 样式备选</b>
+  <span class="ts">mock 数据示意</span>
+  <span class="sp"></span>
+  <span class="jump">
+    <a href="#v1">① Feed 卡</a><a href="#v2">② 瓶颈分组</a><a href="#v3">③ 密集表</a><a href="#v4">④ 主从</a>
+  </span>
+</div></div>
+
+<div class="wrap">
+  <div class="note">四套布局都贯彻产品内核:<b>事实(规则名)→ 署名推断 → 处方</b> 三层分明,证据(metric 实测值)可见,瓶颈用 4 regime(A 喂不饱 / B 带宽墙 / C 算力墙 / D 容量墙)上色。挑一套,或说"①的卡 + ②的分组"我再合。</div>
+
+  <!-- ① Feed -->
+  <section class="variant v1" id="v1">
+    <div class="vhead"><div class="vnum">1</div><div class="vtitle">
+      <h2>证据 Feed(精炼卡)</h2>
+      <p>竖向卡片流,左侧严重度色条;一眼读到「事实 → 推断 → 处方」三段 + 证据 chips。最贴近现状但更克制、更有层次。</p>
+      <span class="fit">适合:默认视图 · 信息密度适中 · 改动最小</span>
+    </div></div>
+    <div id="feed"></div>
+  </section>
+
+  <!-- ② Regime lanes -->
+  <section class="variant v2" id="v2">
+    <div class="vhead"><div class="vnum">2</div><div class="vtitle">
+      <h2>按瓶颈分组(regime 泳道)</h2>
+      <p>把诊断按 4 个瓶颈处境分列,每列一个 roofline 小图标 + 计数。一眼看出「系统现在卡在哪类墙上」—— 这是只有本产品讲得出的心智模型,适合做卖点。</p>
+      <span class="fit">适合:讲故事 / 教学 / 突出 4-regime 模型</span>
+    </div></div>
+    <div class="lanes" id="lanes"></div>
+  </section>
+
+  <!-- ③ Dense table -->
+  <section class="variant v3" id="v3">
+    <div class="vhead"><div class="vnum">3</div><div class="vtitle">
+      <h2>密集表(ops 风)</h2>
+      <p>一行一条:严重度 · 规则 · 事实/推断 · regime · 处方。信息密度最高,像 SRE 的告警面板,适合规则多、要快速扫的场景。点行展开看全文。</p>
+      <span class="fit">适合:高密度 · 规则多 · 运维视角</span>
+    </div></div>
+    <div class="tbl" id="tbl"></div>
+  </section>
+
+  <!-- ④ Master-detail -->
+  <section class="variant v4" id="v4">
+    <div class="vhead"><div class="vnum">4</div><div class="vtitle">
+      <h2>主从(列表 + 详情)</h2>
+      <p>左列扫一眼全部命中,右侧看选中那条的完整推理链:事实 → 署名推断 → 证据 → 处方 → 触发条件。适合要给每条诊断「亮全证据」的深读场景。</p>
+      <span class="fit">适合:深读 · 证据×推理完整呈现 · 规则少而精</span>
+    </div></div>
+    <div class="split"><div class="list" id="m-list"></div><div class="detail" id="m-detail"></div></div>
+  </section>
+</div>
+
+<script>
+const DIAGS = [
+  {id:'D4a', sev:'critical', regime:'D', rn:'容量墙', name:'KV 用量高且发生抢占',
+   hyp:'KV 池将满并已触发抢占。', sug:'KV 量化(FP8) / 降 max_model_len / KV offload。',
+   ev:{kv_util:'96%','preempt/it':'3'}, ts:'12:04:31',
+   cond:'avg(kv_cache_usage_ratio) ≥ 0.90 · sum(preempted_reqs) > 0'},
+  {id:'D2a', sev:'warning', regime:'B', rn:'带宽墙', name:'MBU 接近峰值',
+   hyp:'贴近带宽屋顶(访存受限)。', sug:'投机解码(看接受率,防 compute 反噬)/ KV 量化(FP8)/ 换更高带宽 GPU。',
+   ev:{mbu:'88%',tpot_p99:'58ms'}, ts:'12:04:30',
+   cond:'avg(mem_bw_util) > 85% · 前置 S2(TPOT 超 SLA)'},
+  {id:'D3a', sev:'info', regime:'A', rn:'喂不饱', name:'MFU、MBU 双低',
+   hyp:'两个屋顶都没贴近 —— 算力、带宽都有富余,瓶颈不在硬件(batch 没拼 / launch 开销 / 算子没融合)。',
+   sug:'提 max-num-seqs / chunked-prefill 的 partial-prefills 子旋钮。注:CB、CUDA Graph、chunked-prefill 在 0.21 默认已开,先确认没被 enforce-eager 关,别重复打开(空轮)。',
+   ev:{mfu:'8.7%',mbu:'42%',running:'8'}, ts:'12:04:28',
+   cond:'avg(mfu) < 20% AND avg(mem_bw_util) < 50%'},
+  {id:'S1', sev:'warning', regime:null, rn:'症状', name:'TTFT p99 超 SLA',
+   hyp:'首 Token 慢(相对该业务 SLA)。', sug:'',
+   ev:{ttft_p99:'920ms',sla:'1000ms'}, ts:'12:04:27',
+   cond:'p99(ttft_ms) > sla_ttft_p99_ms'},
+  {id:'D3c', sev:'info', regime:null, rn:'效率', name:'前缀缓存命中率低',
+   hyp:'前缀缓存命中低(有公共前缀则有复用空间;否则正常)。',
+   sug:'检查 prompt 模板有无公共前缀。prefix caching 0.21 默认已开;无公共前缀则命中低属正常,非问题。',
+   ev:{prefix_hit:'4%'}, ts:'12:04:25',
+   cond:'avg(prefix_cache_hit_ratio) < 0.10'},
+];
+const SEV={critical:'严重',warning:'警告',info:'提示'};
+const RK=d=>d.regime||'N';
+const evHtml=ev=>Object.entries(ev).map(([k,v])=>`<span class="ev">${k} <b>${v}</b></span>`).join('');
+
+/* ① Feed */
+document.getElementById('feed').innerHTML = DIAGS.map(d=>`
+  <div class="card ${d.sev}">
+    <div class="top">
+      <span class="name">${d.name}</span>
+      <span class="sp"></span>
+      <span class="rtag ${RK(d)}">${d.regime?d.regime+' '+d.rn:d.rn}</span>
+      <span class="rid">${d.id}</span>
+      <span class="pill ${d.sev}"><span class="sev-dot ${d.sev}"></span>${SEV[d.sev]}</span>
+      <span class="ts">${d.ts}</span>
+    </div>
+    <div class="block"><span class="lab infer">推断</span><span class="body">${d.hyp}</span></div>
+    ${d.sug?`<div class="rx"><div class="block" style="margin:0"><span class="lab rx">处方</span><span class="body">${d.sug}</span></div></div>`:''}
+    <div class="evrow">${evHtml(d.ev)}</div>
+  </div>`).join('');
+
+/* ② Regime lanes */
+const LANES=[['A','喂不饱'],['B','带宽墙'],['C','算力墙'],['D','容量墙'],['N','症状/其它']];
+const roof=c=>`<svg class="roof" width="20" height="16" viewBox="0 0 20 16"><path d="M2 14 L10 3 L18 14" fill="none" stroke="var(--${c})" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/></svg>`;
+document.getElementById('lanes').innerHTML = LANES.map(([k,nm])=>{
+  const items=DIAGS.filter(d=>RK(d)===k);
+  return `<div class="lane">
+    <div class="lane-h ${k}">${roof(k)}<span class="nm">${k!=='N'?k+' '+nm:nm}</span><span class="ct">${items.length}</span></div>
+    <div class="lane-body">
+      ${items.length?items.map(d=>`
+        <div class="mini">
+          <div class="mh"><span class="sev-dot ${d.sev}"></span><span class="rid">${d.id}</span></div>
+          <div class="nm">${d.name}</div>
+          <div class="hy">${d.hyp}</div>
+          ${Object.entries(d.ev).slice(0,2).map(([a,b])=>`<span class="ev">${a} <b>${b}</b></span>`).join(' ')}
+        </div>`).join(''):'<div class="empty">— 无 —</div>'}
+    </div>
+  </div>`;
+}).join('');
+
+/* ③ Dense table */
+function renderTable(){
+  document.getElementById('tbl').innerHTML =
+    `<div class="row head"><span></span><span>事实 / 推断</span><span>瓶颈</span><span>处方</span><span></span></div>` +
+    DIAGS.map((d,i)=>`
+    <div class="rowwrap">
+      <div class="row" id="r-${i}" onclick="toggleRow(${i})" title="点击展开详情 + 证据">
+        <span class="sev-dot ${d.sev}" title="${SEV[d.sev]}"></span>
+        <span><div class="nm">${d.name}</div><div class="hy">${d.hyp}</div></span>
+        <span><span class="rtag ${RK(d)}">${d.rn}</span></span>
+        <span class="sug ${d.sug?'':'none'}">${d.sug||'— 无需动作 —'}</span>
+        <span class="chev">▶</span>
+      </div>
+      <div class="detail" id="d-${i}" style="display:none">
+        <div class="sec"><span class="lab infer">推断</span><div class="body">${d.hyp}</div></div>
+        <div class="sec"><span class="lab fact">证据(实测)</span><div class="evrow">${evHtml(d.ev)}</div></div>
+        ${d.sug
+          ? `<div class="sec"><span class="lab rx">处方</span><div class="rx"><div class="body">${d.sug}</div></div></div>`
+          : `<div class="sec"><span class="lab fact">处方</span><div class="body" style="color:var(--muted-2);font-style:italic">— 无需动作 —</div></div>`}
+        <div class="sec"><span class="lab" style="color:var(--muted)">触发条件</span><div class="cond">${d.cond}</div></div>
+      </div>
+    </div>`).join('');
+}
+function toggleRow(i){
+  const row=document.getElementById('r-'+i), det=document.getElementById('d-'+i);
+  const open=det.style.display==='none';
+  det.style.display=open?'block':'none';
+  row.classList.toggle('open',open);
+}
+renderTable();
+
+/* ④ Master-detail */
+let sel=0;
+function renderMaster(){
+  document.getElementById('m-list').innerHTML = DIAGS.map((d,i)=>`
+    <div class="li ${i===sel?'active':''}" onclick="sel=${i};renderMaster()">
+      <span class="sev-dot ${d.sev}"></span>
+      <span><div class="nm">${d.name}</div><div class="meta">${d.id} · ${d.regime?d.regime+' '+d.rn:d.rn}</div></span>
+      <span class="sp"></span><span class="ts">${d.ts}</span>
+    </div>`).join('');
+  const d=DIAGS[sel];
+  document.getElementById('m-detail').innerHTML = `
+    <div class="dh">
+      <span class="pill ${d.sev}"><span class="sev-dot ${d.sev}"></span>${SEV[d.sev]}</span>
+      <span class="rtag ${RK(d)}">${d.regime?d.regime+' '+d.rn:d.rn}</span>
+      <span class="rid">${d.id}</span><span class="ts">${d.ts}</span>
+    </div>
+    <h3>${d.name}</h3>
+    <div class="sec"><span class="lab infer">署名推断</span><div class="body">${d.hyp}</div></div>
+    <div class="sec"><span class="lab fact">证据(实测)</span><div class="evrow">${evHtml(d.ev)}</div></div>
+    ${d.sug?`<div class="sec"><span class="lab rx">处方</span><div class="rx"><div class="body">${d.sug}</div></div></div>`:'<div class="sec"><span class="lab fact">处方</span><div class="body" style="color:var(--muted-2);font-style:italic">— 无需动作 —</div></div>'}
+    <div class="sec"><span class="lab" style="color:var(--muted)">触发条件</span><div class="cond">${d.cond}</div></div>`;
+}
+renderMaster();
+</script>
+</body>
+</html>
