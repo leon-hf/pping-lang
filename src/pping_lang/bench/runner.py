@@ -122,6 +122,9 @@ async def run_static(
 
             sample = await call_once()
 
+            if sample.error:                 # 失败退避:候选死透时防空转风暴
+                await asyncio.sleep(0.5)
+
             if is_collect_iter:
                 samples.append(sample)
 
@@ -152,7 +155,21 @@ async def run_static(
             except Exception:  # noqa: BLE001 — 直播回调绝不打断压测
                 logger.debug("bench progress callback failed", exc_info=True)
 
+    async def _error_storm_watchdog() -> None:
+        while not state["collect"] and not state["stop"]:
+            await asyncio.sleep(0.2)
+        t0 = time.monotonic()
+        while not state["stop"]:
+            await asyncio.sleep(1.0)
+            errs = sum(1 for x in samples if not x.ok)
+            oks = len(samples) - errs
+            if time.monotonic() - t0 >= 5.0 and oks == 0 and errs >= 200:
+                logger.warning("[bench] all-error storm (%d errors, 0 ok) — aborting early", errs)
+                state["stop"] = True
+                return
+
     reporter = asyncio.create_task(_reporter()) if on_progress else None
+    watchdog = asyncio.create_task(_error_storm_watchdog())
 
     workers = [asyncio.create_task(worker()) for _ in range(scenario.concurrency)]
 
@@ -172,7 +189,9 @@ async def run_static(
         )
 
         if scenario.duration_s is not None:
-            await asyncio.sleep(scenario.duration_s)
+            deadline = time.monotonic() + scenario.duration_s
+            while time.monotonic() < deadline and not state["stop"]:
+                await asyncio.sleep(min(0.5, max(0.0, deadline - time.monotonic())))
             state["stop"] = True
 
         # Wait for workers — either they exhaust num_requests, hit stop, or fail_fast
@@ -183,6 +202,8 @@ async def run_static(
         state["stop"] = True
         if reporter is not None and not reporter.done():
             reporter.cancel()
+        if not watchdog.done():
+            watchdog.cancel()
         # Defensive: any worker still pending gets the signal and exits next loop.
         # We don't cancel — let in-flight requests finish gracefully bounded by
         # `timeout_s`. Tests assert workers have completed before reading samples.
@@ -192,6 +213,7 @@ async def run_static(
         await asyncio.gather(*workers, return_exceptions=True)
         if reporter is not None:
             await asyncio.gather(reporter, return_exceptions=True)
+        await asyncio.gather(watchdog, return_exceptions=True)
 
     return aggregate(samples, duration_actual)
 

@@ -596,6 +596,13 @@ class Runner(threading.Thread):
         except Exception as e:               # LaunchError/BenchError → 判负回滚
             sc, score = None, float("-inf")
             err = str(e)                     # LaunchError 自带容器日志尾,丢掉 = 用户无从排查
+            if "日志尾" not in err and hasattr(self._sb, "_logs_tail"):
+                try:                          # BenchError(压测期死亡)也要能看到候选临终日志
+                    tail = self._sb._logs_tail()
+                    if tail:
+                        err += "\n容器日志尾:\n" + tail
+                except Exception:  # noqa: BLE001
+                    pass
             self._event("decide", f"候选失败:{type(e).__name__}: {err[:200]}",
                         round=rnd, level="warn", detail={"error": err[:1200]})
             dec.rationale += f" [候选失败:{type(e).__name__}: {err[:300]}]"

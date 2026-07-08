@@ -1138,6 +1138,33 @@ def test_run_static_streams_progress_snapshots():
     assert snap["ok"] > 0 and snap["tps"] > 0 and "elapsed_s" in snap
 
 
+def test_run_static_aborts_all_error_storm():
+    """候选死透(全错)时熔断:5s 后 0 成功即提前终止,不空烧整个压测窗口。"""
+    import asyncio
+    import time as _t
+
+    from pping_lang.bench.measurement import RequestSample
+    from pping_lang.bench.runner import run_static
+    from pping_lang.bench.scenarios.schema import StaticScenario
+
+    class DeadClient:
+        async def chat(self, model, prompt, output_tokens):
+            now = _t.monotonic_ns()
+            return RequestSample(started_ns=now, finished_ns=now, error="conn_refused")
+
+        async def completions(self, model, prompt, output_tokens):
+            return await self.chat(model, prompt, output_tokens)
+
+    scen = StaticScenario(name="t", endpoint="http://x", model="m", concurrency=64,
+                          duration_s=60, warmup_s=0, output_tokens=4,
+                          prompt_text="hi", timeout_s=5)
+    t0 = _t.monotonic()
+    rs = asyncio.run(run_static(scen, DeadClient()))
+    elapsed = _t.monotonic() - t0
+    assert rs.ok == 0 and rs.total > 0
+    assert elapsed < 20, f"全错风暴应在数秒内熔断,实际 {elapsed:.0f}s"
+
+
 def test_agent_free_value_within_range():
     """LLM 自选 value:证据支持时一步到位(4→32),不必逐档爬梯。"""
     from pping_lang.autopilot.agent import _decision_from_json
