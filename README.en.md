@@ -10,10 +10,12 @@
 [![Python](https://img.shields.io/badge/python-3.10%20|%203.11%20|%203.12-4c8bf5)](https://pypi.org/project/pping-lang/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-43a047)](LICENSE)
 [![Status](https://img.shields.io/badge/status-pre--alpha-fb8c00)](#project-status)
-[![Tests](https://img.shields.io/badge/tests-442%20passing-43a047)](tests/)
+[![Tests](https://img.shields.io/badge/tests-514%20passing-43a047)](tests/)
 [![Live Demo](https://img.shields.io/badge/%F0%9F%8C%90%20Live%20Demo-online-5b5bd6)](https://leon-hf.github.io/pping-lang/)
 
-**[🌐 Live Demo →](https://leon-hf.github.io/pping-lang/)** — see the dashboard captured from a live GPU box right in your browser (Live / Kernel / Rules / Bench, bilingual)
+**[🌐 Live Demo →](https://leon-hf.github.io/pping-lang/)** — see the dashboard captured from a live GPU box right in your browser (Live / Kernel / Rules / Bench / Autopilot, bilingual)
+
+**Autopilot is now a real closed loop**: on runw (RTX 5060 Ti, vLLM 0.21, Qwen2.5-0.5B), the Agent ran in a sandbox and iterated diagnosis → one knob → benchmark → keep/revert, raising throughput from **986 → 6,094 tok/s (×6.18)** and producing a manual-promote `vllm serve` recommendation.
 
 [Live Demo](https://leon-hf.github.io/pping-lang/) · [Quick Start](#quick-start) · [Dashboard](#dashboard) · [Compatibility](#compatibility) · [Architecture](#architecture) · [Roadmap](#roadmap)
 
@@ -23,6 +25,7 @@
 
 ## Latest News
 
+- **2026-07** — Autopilot M0: the diagnosis-driven auto-tuning agent is wired into the dashboard and host-side sandbox orchestration; a true runw session reached `986 → 6,094 tok/s (×6.18)`, changing one vLLM knob per round and keeping only benchmark-verified wins, while production promotion remains manual
 - **2026-06** — Fact-rule diagnosis engine: diagnosis is upgraded from a flat if-else into two layers, "facts + attributed inference" — the rule name is the objective fact (what was measured), while root causes and prescriptions are listed separately as attributed inference; thresholds are centralized into a single SLA config that can be hot-reloaded into the running engine from the dashboard, with support for adding and removing custom rules
 - **2026-06** — Metric persistence drops DuckDB: the in-process DuckDB is replaced with sequential append-only JSONL (AppendLog), eliminating the per-iteration INSERT and its contention for the GIL/IO with colocated serving; the retention window becomes time-based (`PPING_LANG_RETENTION_SECONDS`, default 2h), rolling by volume with bounded disk usage
 - **2026-06** — Dual-path real-time read architecture: the live panel migrates from the DuckDB SQL path to an in-memory ring buffer, cutting KPI visibility latency after a bench starts from 20s down to 2s

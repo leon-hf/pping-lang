@@ -35,6 +35,9 @@ htmlcov/
 # Claude Code local config — all of it stays out of git
 .claude/
 
+# Codex project-local handoff/secrets — machine-private, never committed
+.codex/
+
 # pping-lang runtime data
 *.duckdb
 *.duckdb.wal

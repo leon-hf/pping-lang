@@ -1,15 +1,15 @@
-"""诊断规则:每条规则 = 客观事实判断 + 触发守卫(precondition)+ 署名根因/处方。
+"""诊断规则:只围绕 4 个瓶颈(A 双低 / B 带宽墙 / C 算力墙 / D 容量墙)。
 
-铁律(本文件强制):
-1. **规则名/条件只描述客观事实**(测到了什么),绝不写根因结论。
-2. **根因(`hypothesis`)+ 处方(`suggestion`)是推断**,单独字段、署名,不当判决。
-3. **阈值引 `DiagnosisConfig` 字段(`threshold_ref`),不内嵌魔数**;固定值(如 preempt>0)用 `threshold`。
-4. **`precondition` = 前置规则 id(OR:任一触发即满足守卫)** —— 让规则"知道自己在什么前提下才成立",
-   仅此而已,不是什么结构。
+每个瓶颈有**多条独立检测手段**(`Detector`),分布在不同测量层(L1 roofline 实测 / L2 内核 stall /
+L3 调度态),**任一手段命中即认该瓶颈**(OR)—— 多手段 = 三角互证(几条同时中 = 高置信)+ 优雅降级
+(某层探针缺失仍能诊断)。一条 `Detector` = 一组 `FactCheck` 的 AND(全成立该手段才算命中)。
 
-注:`regime-classify`(算术强度 vs 脊点 → 访存/计算受限)是分类器规则,引擎特殊计算、无 `checks`;
-其它规则用 `requires_regime` 引用它的结果。
-`D4b 权重占显存` / `D4c 并发撑爆 KV` / `D2c 通信受限` 机制不同(静态/派生/多卡),暂不收,见尾部 DEFERRED。
+铁律:
+1. 规则名/手段条件只描述客观事实;根因(hypothesis)+ 处方(suggestion)是署名推断。
+2. 阈值引 `DiagnosisConfig` 字段(threshold_ref),不内嵌魔数;固定值(如 preempt>0)用 threshold。
+3. 诊断不碰 SLA:是否达标是首页的事。这里只判"卡在哪类硬件墙"。
+
+rule_id 直接就是瓶颈字母(A/B/C/D)。
 """
 from __future__ import annotations
 
@@ -17,12 +17,12 @@ from dataclasses import dataclass, fields
 
 from pping_lang.metrics_catalog import ALLOWED_METRICS
 from pping_lang.rules.diagnosis_config import DiagnosisConfig
-from pping_lang.rules.schema import Claim, Op, Severity
+from pping_lang.rules.schema import Op, Severity
 
-# FactCheck 允许的聚合:含派生比值 p99_over_p50(尾部发散,引擎算)
-FactAgg = ("avg", "p50", "p95", "p99", "max", "min", "sum", "count", "p99_over_p50")
-Regime = ("memory_bound", "compute_bound")
-RuleKind = ("classifier", "symptom", "fact")
+FactAgg = ("avg", "p50", "p95", "p99", "max", "min", "sum", "count")
+RuleKind = ("fact",)
+# 测量层:L1 roofline 实测(perf_stats)/ L2 内核 stall(CUPTI)/ L3 调度态(永远在)/ L4 时延 / L5 NVML
+LAYERS = ("L1", "L2", "L3", "L4", "L5")
 
 _CONFIG_FIELDS = frozenset(f.name for f in fields(DiagnosisConfig))
 
@@ -40,123 +40,100 @@ class FactCheck:
 
 
 @dataclass(frozen=True)
-class FactRule:
-    """一条诊断规则。名字=事实;根因/处方=署名推断。"""
+class Detector:
+    """一条独立检测手段:一组 check 的 AND;命名 + 标注测量层。全成立 → 该手段命中。"""
 
-    id: str
-    name: str                              # 纯事实,如 "等待队列偏长"
-    kind: str = "fact"                     # classifier | symptom | fact
-    checks: tuple[FactCheck, ...] = ()     # 多个 = 复合
-    match: str = "all"                     # all | any(S4 用 any)
-    precondition: tuple[str, ...] = ()     # 前置规则 id(OR:任一触发即满足守卫)
-    requires_regime: str | None = None     # 还需处于某 regime
-    claim: Claim = "derived"
-    severity: Severity = "info"            # 展示用;症状 warning、抢占 critical、其余 info
-    hypothesis: str = ""                   # 根因推断(署名,非判决)
+    key: str            # 短标识(同一瓶颈内唯一)
+    name: str           # 人话:这条手段叫什么
+    layer: str          # 测量层 L1..L5(看独立性/可用性)
+    checks: tuple[FactCheck, ...]
+
+
+@dataclass(frozen=True)
+class FactRule:
+    """一个瓶颈。多条 detector,任一命中即触发(OR);名字=事实,根因/处方=署名推断。"""
+
+    id: str                                # = 瓶颈字母 A/B/C/D
+    name: str                              # 纯事实
+    kind: str = "fact"
+    detectors: tuple[Detector, ...] = ()
+    severity: Severity = "info"
+    hypothesis: str = ""                   # 根因推断(署名)
     suggestion: str = ""                   # 处方
 
 
-# ── 分类器规则(regime,其它规则用 requires_regime 引用)──────────────────
-_REGIME = FactRule(
-    id="regime-classify",
-    name="算术强度 vs 脊点(Roofline 定位)",
-    kind="classifier",
-    claim="derived",
-    hypothesis="AI < 脊点 → 访存受限;否则计算受限(定义性派生)。memory-bound 且 SM util 高时:"
-               "util 虚高是物理极限,非优化空间。",
+# ── A 双低:有在途请求,但算力、带宽两上限都未逼近。两条独立手段(都带空载守卫)──
+_A = FactRule(
+    id="A", name="双低(算力、带宽均有余量)", severity="info",
+    detectors=(
+        Detector("roofline", "算力/带宽双低(MFU 低 + HBM 控制器空闲)", "L1", (
+            FactCheck("vllm.scheduler.running_reqs", ">", "min_running_reqs", None, 30, "avg"),
+            FactCheck("vllm.perf.mfu_ratio", "<", "mfu_low_ratio", None, 60, "avg"),
+            FactCheck("gpu.mem_util_pct", "<", "mbu_low_pct", None, 30, "avg"),
+        )),
+        Detector("kernel_slack", "内核 scheduler_slack(warp 就绪未发射)", "L2", (
+            FactCheck("vllm.scheduler.running_reqs", ">", "min_running_reqs", None, 30, "avg"),
+            FactCheck("kernel.stall.scheduler_slack_pct", ">", "stall_scheduler_slack_pct", None, 60, "avg"),
+        )),
+    ),
+    hypothesis="存在在途请求,但 GPU 未饱和 —— 算力与带宽均有余量,瓶颈不在硬件"
+               "(可能为批处理规模不足 / kernel launch 开销 / 小算子未融合)。空载守卫:无在途请求时不触发。",
+    suggestion="提高 max-num-seqs(并发未填满)/ 调整 chunked-prefill 的 partial-prefills。"
+               "注:Continuous Batching、CUDA Graph、chunked-prefill 在 0.21 默认启用,"
+               "请先确认未被 enforce-eager 等关闭,避免重复启用(无效操作)。",
+)
+# ── B 带宽墙:三条独立手段(L1 实测 + 两条 L2 内核)──
+_B = FactRule(
+    id="B", name="带宽墙(逼近显存带宽上限)", severity="warning",
+    detectors=(
+        Detector("hbm_busy", "HBM 控制器占用(NVML mem-util)", "L5", (
+            FactCheck("gpu.mem_util_pct", ">", "mbu_high_pct", None, 30, "avg"),
+        )),
+        Detector("kernel_throttle", "内核访存管线 throttle(LSU 饱和)", "L2", (
+            FactCheck("kernel.stall.memory_throttle_pct", ">", "stall_memory_throttle_pct", None, 60, "avg"),
+        )),
+        Detector("kernel_memdep", "内核访存延迟(long_scoreboard 等待访存)", "L2", (
+            FactCheck("kernel.stall.memory_dependency_pct", ">", "stall_memory_dep_pct", None, 60, "avg"),
+        )),
+    ),
+    hypothesis="访存受限:decode 每步重新读取权重与 KV,带宽为上限。"
+               "NVML HBM 控制器占用 / 内核 memory_throttle(访存管线饱和)/ memory_dependency(等待访存)交叉印证。"
+               "(注:perf 实测 MBU 在小模型上因 L2 复用 >1,故不作为阈值,仅用于 roofline 定位。)",
+    suggestion="投机解码(关注接受率,避免转为计算受限)/ KV 量化(FP8)/ 升级至更高带宽 GPU。",
+)
+# ── C 算力墙:两条独立手段(L1 实测 + L2 内核)──
+_C = FactRule(
+    id="C", name="算力墙(算力饱和)", severity="warning",
+    detectors=(
+        Detector("measured_mfu", "实测 MFU 逼近上限", "L1", (
+            FactCheck("vllm.perf.mfu_ratio", ">", "mfu_high_ratio", None, 60, "avg"),
+        )),
+        Detector("kernel_mathpipe", "内核算力管线饱和(FMA/ALU/Tensor)", "L2", (
+            FactCheck("kernel.stall.math_pipe_pct", ">", "stall_math_pipe_pct", None, 60, "avg"),
+        )),
+    ),
+    hypothesis="计算受限:FLOPs 饱和,算力为上限(长 prompt prefill 的固有特征)。"
+               "实测 MFU 逼近上限 / 内核 math_pipe(计算管线饱和)交叉印证。",
+    suggestion="更换更快的 attention backend(0.21 按硬件自动选择,可用 --attention-backend 覆盖)"
+               "/ 权重量化(FP8/FP4)/ 升级算力更强的 GPU。",
+)
+# ── D 容量墙:两条独立手段(都 L3 调度态,永远在)──
+_D = FactRule(
+    id="D", name="容量墙(KV 耗尽并触发抢占)", severity="critical",
+    detectors=(
+        Detector("kv_pressure", "KV 池接近耗尽", "L3", (
+            FactCheck("vllm.scheduler.kv_cache_usage_ratio", ">=", "kv_pressure_ratio", None, 10, "avg"),
+        )),
+        Detector("preemption", "已发生抢占", "L3", (
+            FactCheck("vllm.iter.preempted_reqs", ">", None, 0.0, 10, "sum"),
+        )),
+    ),
+    hypothesis="显存无法容纳 KV → 并发受限 → 触发抢占。V1 抢占为纯重算(丢弃 KV、从头 re-prefill),"
+               "一旦发生,decode 吞吐急剧下降。",
+    suggestion="KV 量化(FP8)/ 降低 max-model-len / KV offload / 降低 max-num-seqs。",
 )
 
-# ── 入口症状 ───────────────────────────────────────────────────────────
-_S1 = FactRule(
-    id="S1", name="TTFT p99 超 SLA", kind="symptom", severity="warning",
-    checks=(FactCheck("vllm.req.ttft_ms", ">", "sla_ttft_p99_ms", None, 60, "p99"),),
-    hypothesis="首 Token 慢(相对该业务 SLA)。",
-)
-_S2 = FactRule(
-    id="S2", name="TPOT p99 超 SLA", kind="symptom", severity="warning",
-    checks=(FactCheck("vllm.req.tpot_ms", ">", "sla_tpot_p99_ms", None, 60, "p99"),),
-    hypothesis="出字慢(相对该业务 SLA)。",
-)
-_S4 = FactRule(
-    id="S4", name="KV 用量高或发生抢占", kind="symptom", severity="warning", match="any",
-    checks=(
-        FactCheck("vllm.scheduler.kv_cache_usage_ratio", ">=", "kv_pressure_ratio", None, 10, "avg"),
-        FactCheck("vllm.iter.preempted_reqs", ">", None, 0.0, 10, "sum"),
-    ),
-    hypothesis="显存吃紧 / 已在抢占。",
-)
-_S5 = FactRule(
-    id="S5", name="TTFT p99/p50 偏大", kind="symptom", severity="warning",
-    checks=(FactCheck("vllm.req.ttft_ms", ">", "tail_ratio", None, 60, "p99_over_p50"),),
-    hypothesis="首 Token 时延尾部发散(多数快、少数奇慢)。",
-)
-
-# ── 判别规则(前置 = 父症状)────────────────────────────────────────────
-_D1a = FactRule(
-    id="D1a", name="平均 prompt 偏长", precondition=("S1", "S5"),
-    checks=(FactCheck("vllm.req.prompt_tokens", ">", "long_prompt_tokens", None, 60, "avg"),),
-    hypothesis="长输入 → prefill 重 / 长请求占 token budget,即便分块预填充也会拖尾。",
-    suggestion="PD 分离 / 优先级调度 / 调 max_num_batched_tokens / 限 max_output_tokens。",
-)
-_D1b = FactRule(
-    id="D1b", name="等待队列偏长", precondition=("S1", "S5"),
-    checks=(FactCheck("vllm.scheduler.waiting_reqs", ">", "waiting_reqs", None, 30, "avg"),),
-    hypothesis="请求在排队。",
-    suggestion="扩 prefill 容量 / 降 max_num_seqs / 检查上游限流。",
-)
-_D1c = FactRule(
-    id="D1c", name="MFU 偏低", precondition=("S1",), requires_regime="compute_bound",
-    checks=(FactCheck("vllm.perf.mfu_ratio", "<", "mfu_low_ratio", None, 60, "avg"),),
-    hypothesis="处于计算受限区但算力没打满(prefill 算力不足)。",
-    suggestion="升级算力卡 / FP8→FP4 / 启用 FlashAttention-3。",
-)
-_D2a = FactRule(
-    id="D2a", name="MBU 接近峰值", precondition=("S2",),
-    checks=(FactCheck("gpu.mem_util_pct", ">", "mbu_high_pct", None, 30, "avg"),),
-    hypothesis="贴近带宽屋顶(访存受限)。",
-    suggestion="投机解码 / KV 量化(FP8) / 换更高带宽 GPU。",
-)
-_D2b = FactRule(
-    id="D2b", name="并发(running)偏小", precondition=("S2",),
-    checks=(FactCheck("vllm.scheduler.running_reqs", "<=", "batch_small_reqs", None, 30, "avg"),),
-    hypothesis="并发太低,没摊薄权重搬运。",
-    suggestion="提高客户端并发 / 调 max_num_seqs。",
-)
-_D3a = FactRule(
-    id="D3a", name="MFU、MBU 双低",
-    checks=(
-        FactCheck("vllm.perf.mfu_ratio", "<", "mfu_low_ratio", None, 60, "avg"),
-        FactCheck("gpu.mem_util_pct", "<", "mbu_low_pct", None, 30, "avg"),
-    ),
-    hypothesis="两个屋顶都没贴近 —— 算力、带宽都有富余,瓶颈不在硬件(可能是 batch 没拼起来 / "
-               "launch 开销 / 小算子未融合)。",
-    suggestion="检查 batch 是否拼起来 / Continuous Batching / CUDA Graph / 算子融合。",
-)
-_D3c = FactRule(
-    id="D3c", name="前缀缓存命中率低",
-    checks=(FactCheck("vllm.scheduler.prefix_cache_hit_ratio", "<", "prefix_hit_low", None, 60, "avg"),),
-    hypothesis="前缀缓存命中低(若 workload 有公共前缀,则有复用空间;否则正常)。",
-    suggestion="检查 prompt 模板公共前缀 / 开 enable_prefix_caching / RadixAttention。",
-)
-_D4a = FactRule(
-    id="D4a", name="KV 用量高且发生抢占", severity="critical", precondition=("S4",),
-    checks=(
-        FactCheck("vllm.scheduler.kv_cache_usage_ratio", ">=", "kv_pressure_ratio", None, 10, "avg"),
-        FactCheck("vllm.iter.preempted_reqs", ">", None, 0.0, 10, "sum"),
-    ),
-    hypothesis="KV 池将满并已触发抢占。",
-    suggestion="KV 量化(FP8) / 降 max_model_len / KV offload。",
-)
-
-DIAGNOSIS_RULES: tuple[FactRule, ...] = (
-    _REGIME,
-    _S1, _S2, _S4, _S5,
-    _D1a, _D1b, _D1c, _D2a, _D2b, _D3a, _D3c, _D4a,
-)
-# DEFERRED(机制不同,本表暂不收):
-#   D4b 权重占显存比例高 —— 静态:model 权重字节 / HBM,启动期算一次,非窗口指标。
-#   D4c 并发×KV 撑爆     —— 派生:running × 单请求 KV / 池容量。
-#   D2c TPOT·通信受限    —— comm kernel 占比,仅多卡有数(kernel.time_share.comm_pct)。
+DIAGNOSIS_RULES: tuple[FactRule, ...] = (_A, _B, _C, _D)
 
 
 def validate_rules(rules: tuple[FactRule, ...] = DIAGNOSIS_RULES) -> None:
@@ -164,31 +141,27 @@ def validate_rules(rules: tuple[FactRule, ...] = DIAGNOSIS_RULES) -> None:
     ids = [r.id for r in rules]
     if len(ids) != len(set(ids)):
         raise ValueError(f"duplicate rule ids: {ids}")
-    idset = set(ids)
     for r in rules:
         if r.kind not in RuleKind:
             raise ValueError(f"{r.id}: bad kind {r.kind!r}")
-        if r.match not in ("all", "any"):
-            raise ValueError(f"{r.id}: bad match {r.match!r}")
-        if r.requires_regime is not None and r.requires_regime not in Regime:
-            raise ValueError(f"{r.id}: bad requires_regime {r.requires_regime!r}")
-        for p in r.precondition:
-            if p not in idset:
-                raise ValueError(f"{r.id}: precondition {p!r} not a known rule")
-        if r.kind == "classifier":
-            if r.checks:
-                raise ValueError(f"{r.id}: classifier 不应有 checks(引擎特殊计算)")
-            continue
-        if not r.checks:
-            raise ValueError(f"{r.id}: 非 classifier 必须有至少一个 check")
-        for c in r.checks:
-            if c.metric not in ALLOWED_METRICS:
-                raise ValueError(f"{r.id}: unknown metric {c.metric!r}")
-            if (c.threshold_ref is None) == (c.threshold is None):
-                raise ValueError(f"{r.id}: check 须恰好给 threshold_ref 或 threshold 之一")
-            if c.threshold_ref is not None and c.threshold_ref not in _CONFIG_FIELDS:
-                raise ValueError(f"{r.id}: threshold_ref {c.threshold_ref!r} 不是 DiagnosisConfig 字段")
-            if c.aggregation not in FactAgg:
-                raise ValueError(f"{r.id}: bad aggregation {c.aggregation!r}")
-            if c.window_seconds <= 0:
-                raise ValueError(f"{r.id}: window_seconds must be > 0")
+        if not r.detectors:
+            raise ValueError(f"{r.id}: 必须有至少一条 detector")
+        keys = [d.key for d in r.detectors]
+        if len(keys) != len(set(keys)):
+            raise ValueError(f"{r.id}: detector key 重复 {keys}")
+        for det in r.detectors:
+            if det.layer not in LAYERS:
+                raise ValueError(f"{r.id}/{det.key}: bad layer {det.layer!r}")
+            if not det.checks:
+                raise ValueError(f"{r.id}/{det.key}: 必须有至少一个 check")
+            for c in det.checks:
+                if c.metric not in ALLOWED_METRICS:
+                    raise ValueError(f"{r.id}/{det.key}: unknown metric {c.metric!r}")
+                if (c.threshold_ref is None) == (c.threshold is None):
+                    raise ValueError(f"{r.id}/{det.key}: check 须恰好给 threshold_ref 或 threshold 之一")
+                if c.threshold_ref is not None and c.threshold_ref not in _CONFIG_FIELDS:
+                    raise ValueError(f"{r.id}/{det.key}: threshold_ref {c.threshold_ref!r} 不是 DiagnosisConfig 字段")
+                if c.aggregation not in FactAgg:
+                    raise ValueError(f"{r.id}/{det.key}: bad aggregation {c.aggregation!r}")
+                if c.window_seconds <= 0:
+                    raise ValueError(f"{r.id}/{det.key}: window_seconds must be > 0")

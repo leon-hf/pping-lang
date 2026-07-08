@@ -10,7 +10,7 @@
 </head>
 <body>
 
-<div x-data="dashboard()" x-init="init()">
+<div x-data="dashboard()" x-init="init()" @goto-tab.window="tab = $event.detail">
 
   <header>
     <div class="brand">
@@ -61,6 +61,10 @@
       <span x-text="t('nav.bench')"></span>
       <span x-show="benchRunning > 0" class="tab-badge"
             x-text="benchRunning"></span>
+    </button>
+    <button :class="{ active: tab === 'autopilot' }" @click="tab = 'autopilot'">
+      <span x-text="t('nav.autopilot')"></span>
+      <span class="tab-badge" style="background: var(--amber-soft); color: var(--amber);" x-text="t('nav.preview')"></span>
     </button>
   </nav>
 
@@ -116,6 +120,75 @@
           <div class="label">TTFT p99</div>
           <div class="val"><span x-text="fmt(kpis.ttft_p99_ms, 0)"></span><span class="unit">ms</span></div>
         </div>
+      </div>
+
+      <!-- ===== SLO 达标监控:选业务形态 → SLA → 当前 p99 是否达标(阈值改这里热生效)===== -->
+      <div class="slo-monitor" x-data="sloPanel()" x-init="init()">
+        <div class="cfg-bar">
+          <div class="cfg-bar-main">
+            <div class="cfg-seg">
+              <span class="cfg-lbl" x-text="t('slo.form')"></span>
+              <select x-model="cfgDraft.workload_form" @change="onFormChange($event.target.value)">
+                <template x-for="f in workloadForms" :key="f"><option :value="f" x-text="f"></option></template>
+              </select>
+            </div>
+            <div class="cfg-seg">
+              <span class="cfg-lbl">TTFT p99 SLA</span>
+              <span class="cfg-unit"><input type="number" step="any" x-model.number="cfgDraft.sla_ttft_p99_ms"><i>ms</i></span>
+            </div>
+            <div class="cfg-seg">
+              <span class="cfg-lbl">TPOT p99 SLA</span>
+              <span class="cfg-unit"><input type="number" step="any" x-model.number="cfgDraft.sla_tpot_p99_ms"><i>ms</i></span>
+            </div>
+            <div class="cfg-spacer"></div>
+            <div class="cfg-acts">
+              <button class="cfg-adv-toggle" :class="{ open: advancedOpen }" @click="advancedOpen = !advancedOpen">
+                <span class="chev">›</span><span x-text="t('slo.thresholds')"></span> <span x-text="`(${advKeys().length})`"></span>
+              </button>
+              <button class="btn secondary btn-sm" @click="resetConfig()" :disabled="!dirty()" x-text="t('common.reset')"></button>
+              <button class="btn primary btn-sm" @click="saveConfig()" :disabled="!dirty() || saving" x-text="saving ? t('common.saving') : t('common.save')"></button>
+            </div>
+          </div>
+          <div class="cfg-adv" x-show="advancedOpen" x-cloak>
+            <div class="cfg-adv-head" x-text="active ? t('cfg.hintActive') : t('cfg.hintInactive')"></div>
+            <div class="form-grid cfg-adv-grid">
+              <template x-for="k in advKeys()" :key="k">
+                <label>
+                  <span x-text="t(advLabels[k][0])"></span> <span class="hint-inline" x-text="`(${advLabels[k][1]})`"></span>
+                  <input type="number" step="any" x-model.number="cfgDraft[k]">
+                </label>
+              </template>
+            </div>
+          </div>
+        </div>
+        <!-- 达标:当前 p99(实时)vs SLA -->
+        <div class="slo-cards">
+          <div class="slo-card" :class="{ ok: slaPass(kpis.ttft_p99_ms, cfgDraft.sla_ttft_p99_ms) === true, bad: slaPass(kpis.ttft_p99_ms, cfgDraft.sla_ttft_p99_ms) === false }">
+            <div class="slo-card-head">
+              <span class="slo-card-name">TTFT p99</span>
+              <span class="slo-badge" x-show="slaPass(kpis.ttft_p99_ms, cfgDraft.sla_ttft_p99_ms) !== null"
+                    x-text="slaPass(kpis.ttft_p99_ms, cfgDraft.sla_ttft_p99_ms) ? t('slo.pass') : t('slo.fail')"></span>
+            </div>
+            <div class="slo-card-val"><span x-text="fmt(kpis.ttft_p99_ms, 0)"></span><i>ms</i>
+              <span class="slo-card-sla">/ SLA <span x-text="fmt(cfgDraft.sla_ttft_p99_ms, 0)"></span>ms</span></div>
+          </div>
+          <div class="slo-card" :class="{ ok: slaPass(kpis.tpot_p99_ms, cfgDraft.sla_tpot_p99_ms) === true, bad: slaPass(kpis.tpot_p99_ms, cfgDraft.sla_tpot_p99_ms) === false }">
+            <div class="slo-card-head">
+              <span class="slo-card-name">TPOT p99</span>
+              <span class="slo-badge" x-show="slaPass(kpis.tpot_p99_ms, cfgDraft.sla_tpot_p99_ms) !== null"
+                    x-text="slaPass(kpis.tpot_p99_ms, cfgDraft.sla_tpot_p99_ms) ? t('slo.pass') : t('slo.fail')"></span>
+            </div>
+            <div class="slo-card-val"><span x-text="fmt(kpis.tpot_p99_ms, 0)"></span><i>ms</i>
+              <span class="slo-card-sla">/ SLA <span x-text="fmt(cfgDraft.sla_tpot_p99_ms, 0)"></span>ms</span></div>
+          </div>
+        </div>
+        <div x-show="toast" x-cloak class="toast" :class="{ error: toastError }" x-text="toast"></div>
+      </div>
+
+      <!-- 压测入口(dashboard 作用域,可切 tab)-->
+      <div class="slo-bench-cta">
+        <span x-text="t('slo.benchHint')"></span>
+        <button class="btn secondary btn-sm" @click="tab='bench'" x-text="t('slo.benchBtn')"></button>
       </div>
 
       <!-- 启动信息 modal -->
@@ -1059,263 +1132,120 @@
     <!-- ===== 规则 tab ===== -->
     <div x-show="tab === 'rules'" x-data="rulesTab()" x-init="init()">
 
-      <!-- ===== 诊断配置:常驻顶部上下文条(业务形态 + SLA 常显;10 个阈值折进高级)===== -->
-      <div class="cfg-bar">
-        <div class="cfg-bar-main">
-          <div class="cfg-seg">
-            <span class="cfg-lbl" x-text="t('cfg.form')"></span>
-            <select x-model="cfgDraft.workload_form" @change="onFormChange($event.target.value)">
-              <template x-for="f in workloadForms" :key="f"><option :value="f" x-text="f"></option></template>
-            </select>
-          </div>
-          <div class="cfg-seg">
-            <span class="cfg-lbl">TTFT p99 SLA</span>
-            <span class="cfg-unit"><input type="number" step="any" x-model.number="cfgDraft.sla_ttft_p99_ms"><i>ms</i></span>
-          </div>
-          <div class="cfg-seg">
-            <span class="cfg-lbl">TPOT p99 SLA</span>
-            <span class="cfg-unit"><input type="number" step="any" x-model.number="cfgDraft.sla_tpot_p99_ms"><i>ms</i></span>
-          </div>
-          <div class="cfg-spacer"></div>
-          <div class="cfg-acts">
-            <button class="cfg-adv-toggle" :class="{ open: advancedOpen }" @click="advancedOpen = !advancedOpen">
-              <span class="chev">›</span><span x-text="t('cfg.advanced')"></span> <span x-text="`(${advKeys().length})`"></span>
-            </button>
-            <button class="btn secondary btn-sm" @click="resetConfig()" :disabled="!dirty()" x-text="t('common.reset')"></button>
-            <button class="btn primary btn-sm" @click="saveConfig()" :disabled="!dirty() || saving" x-text="saving ? t('common.saving') : t('common.save')"></button>
-          </div>
-        </div>
-        <div class="cfg-adv" x-show="advancedOpen" x-cloak>
-          <div class="cfg-adv-head" x-text="active ? t('cfg.hintActive') : t('cfg.hintInactive')"></div>
-          <div class="form-grid cfg-adv-grid">
-            <template x-for="k in advKeys()" :key="k">
-              <label>
-                <span x-text="t(cfgLabels[k][0])"></span> <span class="hint-inline" x-text="`(${cfgLabels[k][1]})`"></span>
-                <input type="number" step="any" x-model.number="cfgDraft[k]">
-              </label>
-            </template>
-          </div>
-        </div>
-      </div>
-
-      <!-- Currently triggered diagnoses (parent dashboard() scope) -->
+      <!-- 诊断 = 内置 4 瓶颈目录:每个瓶颈多条独立检测手段(跨测量层);命中即高亮(几条互证)-->
       <div class="section-head" style="margin-top: 0;">
-        <h2><span x-text="diagnosesStale ? t('rules.diagRecent') : t('rules.diagCurrent')"></span><span class="count" x-text="`(${diagnoses.length})`"></span></h2>
-        <span class="hint" x-show="diagnoses.length > 0" x-text="diagnosesStale ? t('rules.staleHint') : t('rules.freshHint')"></span>
+        <h2><span x-text="t('rules.builtinTitle')"></span><span class="count" x-text="`(${diagnoses.length}/${rules.length})`"></span></h2>
+        <span class="hint" x-text="diagnoses.length > 0 ? (diagnosesStale ? t('rules.staleHint') : t('rules.hitHint', {n: diagnoses.length})) : t('rules.noneHint')"></span>
       </div>
-      <div class="diagnoses" style="margin-bottom: 32px;">
-        <template x-if="diagnoses.length === 0">
-          <div class="empty">
-            <div class="check">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-            </div>
-            <div class="title" x-text="t('rules.allGood')"></div>
-            <div x-text="t('rules.none')"></div>
-          </div>
-        </template>
-        <template x-for="d in diagnoses" :key="d.rule_id">
-          <div class="diag" :class="d.severity">
-            <div class="icon">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-                <line x1="12" y1="9" x2="12" y2="13"/>
-                <line x1="12" y1="17" x2="12.01" y2="17"/>
-              </svg>
-            </div>
-            <div class="diag-body">
-              <div class="diag-title-row">
-                <div class="diag-title">
-                  <h3 x-text="ruleName(d.rule_id)"></h3>
-                  <div class="diag-meta">
-                    <code x-text="d.rule_id"></code>
-                    <span class="meta-sep"></span>
-                    <span class="diag-cat" x-text="ruleCategory(d.rule_id) || '—'"></span>
-                  </div>
-                </div>
-                <span class="sev-pill" :class="d.severity" x-text="d.severity"></span>
-              </div>
-              <div class="diag-msg" x-text="ruleI18n(d.rule_id, 'name', d.message)"></div>
-              <div class="diag-sug">
-                <div class="diag-sug-label" x-text="t('common.suggestion')"></div>
-                <div class="diag-sug-text" x-text="diagSuggestion(d)"></div>
-              </div>
-            </div>
-          </div>
-        </template>
-      </div>
-
-      <!-- 工具条:诊断配置(弹框)+ 新建自定义规则(弹框)-->
-      <div class="rules-toolbar">
-        <div class="section-head" style="margin: 0;">
-          <h2><span x-text="t('rules.title')"></span><span class="count" x-text="`(${rules.length + customRules.length})`"></span></h2>
-          <span class="hint" x-text="t('rules.hint')"></span>
-        </div>
-        <div style="display:flex; gap:8px;">
-          <button class="btn primary" @click="newRule()" :disabled="!customEditable" :title="customEditable ? '' : t('rules.newRuleDisabled')" x-text="t('rules.newRule')"></button>
-        </div>
-      </div>
-
-      <!-- 策展事实规则(引擎实跑;只读 —— 阈值改诊断配置)-->
-      <div class="rules-list">
+      <div class="dtbl" x-show="rules.length > 0" style="margin-bottom: 32px;">
+        <div class="drow head"><span></span><span x-text="t('rules.colBottleneck')"></span><span x-text="t('rules.colStatus')"></span><span x-text="t('rules.colMethods')"></span><span></span></div>
         <template x-for="r in rules" :key="r.id">
-          <div class="rule-row">
-            <div class="rule-row-main">
-              <div class="rule-row-head">
-                <h3 class="rule-row-name" x-text="ruleI18n(r.id, 'name', r.name)"></h3>
-                <span class="sev-pill" :class="r.severity" x-text="r.severity"></span>
-                <span class="badge default" x-text="t('kind.'+r.kind)"></span>
-                <template x-if="r.requires_regime"><span class="badge" x-text="t('rules.onlyRegime')+r.requires_regime"></span></template>
-              </div>
-              <div class="rule-row-meta">
-                <code x-text="r.id"></code>
-                <template x-if="r.precondition.length">
-                  <span><span class="meta-sep"></span><span x-text="t('rules.precondition')"></span><span x-text="r.precondition.join(' / ')"></span></span>
+          <div>
+            <div class="drow" :class="{open: expandedDiag.includes(r.id), miss: !firedFor(r.id, diagnoses)}" @click="toggleDiag(r.id)" :title="t('rules.clickExpand')">
+              <span class="sdot" :class="firedFor(r.id, diagnoses) ? r.severity : 'idle'" :title="r.severity"></span>
+              <span><div class="dnm" x-text="ruleName(r.id)"></div><div class="dhy"><span class="rg" :class="diagRegime(r.id).k" x-text="diagRegime(r.id).label"></span></div></span>
+              <span><span class="hit-badge" :class="firedFor(r.id, diagnoses) ? 'hit' : 'miss'" x-text="firedFor(r.id, diagnoses) ? t('rules.hitN', {n: hitCount(r, diagnoses), m: r.detectors.length}) : t('rules.miss')"></span></span>
+              <span class="detchips">
+                <template x-for="det in r.detectors" :key="det.key">
+                  <span class="layer" :class="[det.layer, detFired(det, firedFor(r.id, diagnoses)) ? 'lit' : '']" x-text="det.layer" :title="det.name"></span>
                 </template>
-                <template x-if="r.checks.length > 1">
-                  <span><span class="meta-sep"></span><span x-text="r.match === 'any' ? t('rules.matchAny') : t('rules.matchAll')"></span></span>
-                </template>
-              </div>
-              <div class="rule-row-cond" style="flex-wrap:wrap; gap:8px;">
-                <template x-for="(c, i) in r.checks" :key="i">
-                  <span class="cond-pill">
-                    <span x-text="c.aggregation + '(' + c.metric + ')'"></span>
-                    <span class="op" x-text="c.op"></span>
-                    <span x-text="c.threshold"></span>
-                    <template x-if="c.threshold_ref"><span class="cond-agg" x-text="'← '+c.threshold_ref"></span></template>
-                    <span class="cond-agg" x-text="c.window_seconds + 's'"></span>
-                  </span>
-                </template>
-                <template x-if="r.kind === 'classifier'"><span class="cond-agg" x-text="t('rules.classifierNote')"></span></template>
-              </div>
-              <template x-if="r.hypothesis">
-                <div class="diag-sug" style="margin-top:10px;">
-                  <div class="diag-sug-label" x-text="t('common.inference')"></div>
-                  <div class="diag-sug-text" x-text="ruleI18n(r.id, 'hypothesis', r.hypothesis)"></div>
+              </span>
+              <span class="dchev">▶</span>
+            </div>
+            <div class="ddetail" x-show="expandedDiag.includes(r.id)" @click.stop>
+              <div class="dsec"><span class="dlab infer" x-text="t('common.inference')"></span><div class="dbody" x-text="ruleHyp(r)"></div></div>
+              <div class="dsec">
+                <span class="dlab fact" x-text="t('rules.detectors', {n: r.detectors.length})"></span>
+                <div class="detlist">
+                  <template x-for="det in r.detectors" :key="det.key">
+                    <div class="detrow" :class="{lit: detFired(det, firedFor(r.id, diagnoses))}">
+                      <span class="layer" :class="det.layer" x-text="det.layer" :title="t('layer.'+det.layer)"></span>
+                      <span class="detname" x-text="det.name"></span>
+                      <span class="detcond" x-text="detCond(det)"></span>
+                      <span class="detmark" x-show="detFired(det, firedFor(r.id, diagnoses))" x-text="'✓ ' + (detValue(det, firedFor(r.id, diagnoses)) || '')"></span>
+                    </div>
+                  </template>
                 </div>
-              </template>
-              <template x-if="r.suggestion">
-                <div class="diag-sug" style="margin-top:8px;">
-                  <div class="diag-sug-label" x-text="t('common.suggestion')"></div>
-                  <div class="diag-sug-text" x-text="ruleI18n(r.id, 'suggestion', r.suggestion)"></div>
-                </div>
-              </template>
+              </div>
+              <template x-if="ruleSug(r)"><div class="dsec"><span class="dlab rx" x-text="t('common.suggestion')"></span><div class="drx"><div class="dbody" x-text="ruleSug(r)"></div></div></div></template>
             </div>
           </div>
         </template>
       </div>
 
-      <!-- 自定义规则(你建的;和策展规则同一引擎评、同一面板冒)-->
-      <div class="section-head" style="margin-top: 28px;">
-        <h2><span x-text="t('rules.customTitle')"></span><span class="count" x-text="`(${customRules.length})`"></span></h2>
-        <span class="hint" x-text="customEditable ? t('rules.customHintActive') : t('rules.customHintInactive')"></span>
+      <!-- ===== 当前操作点:离三面墙有多远(实测,瓶颈判据的原始证据)===== -->
+      <div class="section-head">
+        <h2 x-text="t('rules.opTitle')"></h2>
+        <span class="hint" x-text="t('rules.opHint')"></span>
       </div>
-      <div class="rules-list">
-        <template x-if="customRules.length === 0">
-          <div class="rule-row" style="display:block; color: var(--text-dim);" x-text="t('rules.customEmpty')"></div>
-        </template>
-        <template x-for="r in customRules" :key="r.id">
-          <div class="rule-row">
-            <div class="rule-row-main">
-              <div class="rule-row-head">
-                <h3 class="rule-row-name" x-text="ruleI18n(r.id, 'name', r.name)"></h3>
-                <span class="sev-pill" :class="r.severity" x-text="r.severity"></span>
-                <span class="badge" x-text="t('kind.custom')"></span>
-              </div>
-              <div class="rule-row-meta"><code x-text="r.id"></code></div>
-              <div class="rule-row-cond">
-                <span class="cond-pill">
-                  <span x-text="r.aggregation + '(' + r.metric + ')'"></span>
-                  <span class="op" x-text="r.op"></span>
-                  <span x-text="r.threshold"></span>
-                  <span class="cond-agg" x-text="r.window_seconds + 's'"></span>
-                </span>
-              </div>
-              <template x-if="r.hypothesis">
-                <div class="diag-sug" style="margin-top:10px;">
-                  <div class="diag-sug-label" x-text="t('common.inference')"></div>
-                  <div class="diag-sug-text" x-text="ruleI18n(r.id, 'hypothesis', r.hypothesis)"></div>
-                </div>
-              </template>
-              <template x-if="r.suggestion">
-                <div class="diag-sug" style="margin-top:8px;">
-                  <div class="diag-sug-label" x-text="t('common.suggestion')"></div>
-                  <div class="diag-sug-text" x-text="ruleI18n(r.id, 'suggestion', r.suggestion)"></div>
-                </div>
-              </template>
-            </div>
-            <div class="rule-row-actions">
-              <button :title="t('common.edit')" @click="editRule(r)">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
-              </button>
-              <button :title="t('common.delete')" class="danger" @click="deleteRule(r)">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-              </button>
-            </div>
+      <div class="roofcard">
+        <!-- 算力屋顶 MFU → C -->
+        <div class="gauge">
+          <div class="gauge-head">
+            <span class="gl" x-text="t('rules.computeRoof')"></span>
+            <span class="gv" x-text="kpis.mfu == null ? '—' : fmt(kpis.mfu * 100, 0) + '%'"></span>
+            <span class="gtag" :class="roofZone(kpis.mfu, cfg.mfu_low_ratio, cfg.mfu_high_ratio)" x-text="t('rules.zone.' + roofZone(kpis.mfu, cfg.mfu_low_ratio, cfg.mfu_high_ratio))"></span>
           </div>
-        </template>
-      </div>
-
-      <!-- 自定义规则 新建/编辑 弹框 -->
-      <div x-show="editing" x-cloak class="modal-backdrop" @click.self="cancelEdit()" @keydown.escape.window="editing && cancelEdit()">
-        <div class="modal rule-modal" role="dialog" aria-modal="true">
-          <div class="modal-head">
-            <h2 x-text="editingExisting ? t('custom.editTitle.edit') : t('custom.editTitle.new')"></h2>
-            <button class="modal-close" @click="cancelEdit()" :aria-label="t('custom.closeBtn')">×</button>
+          <div class="gtrack">
+            <div class="gfill" :class="roofZone(kpis.mfu, cfg.mfu_low_ratio, cfg.mfu_high_ratio)" :style="`width:${pctClamp(kpis.mfu)}%`"></div>
+            <i class="gtick" :style="`left:${pctClamp(cfg.mfu_low_ratio)}%`" :title="t('cfg.mfu_low')"></i>
+            <i class="gtick hi" :style="`left:${pctClamp(cfg.mfu_high_ratio)}%`" :title="t('cfg.mfu_high')"></i>
           </div>
-          <form @submit.prevent="saveRule()" class="rule-modal-form" x-show="editing">
-            <div class="modal-body">
-              <div class="form-grid">
-                <label class="full"><span x-text="t('custom.name')"></span> <span class="hint-inline" x-text="t('custom.nameHint')"></span>
-                  <input type="text" x-model="editing.name" required>
-                </label>
-                <label class="full" x-text="t('custom.metric')"></label>
-                  <select x-model="editing.metric">
-                    <template x-for="m in availableMetrics" :key="m"><option :value="m" x-text="m"></option></template>
-                  </select>
-                </label>
-                <label x-text="t('custom.operator')"></label>
-                  <select x-model="editing.op">
-                    <option value="<">&lt;</option><option value="<=">&le;</option>
-                    <option value=">">&gt;</option><option value=">=">&ge;</option>
-                    <option value="==">==</option><option value="!=">!=</option>
-                  </select>
-                </label>
-                <label x-text="t('custom.threshold')"></label>
-                  <input type="number" step="any" x-model.number="editing.threshold" required>
-                </label>
-                <label x-text="t('custom.windowSeconds')"></label>
-                  <input type="number" min="1" x-model.number="editing.window_seconds" required>
-                </label>
-                <label x-text="t('custom.aggregation')"></label>
-                  <select x-model="editing.aggregation">
-                    <option value="avg">avg</option><option value="p50">p50</option>
-                    <option value="p95">p95</option><option value="p99">p99</option>
-                    <option value="max">max</option><option value="min">min</option>
-                    <option value="sum">sum</option><option value="count">count</option>
-                  </select>
-                </label>
-                <label x-text="t('custom.severity')"></label>
-                  <select x-model="editing.severity">
-                    <option value="info">info</option><option value="warning">warning</option><option value="critical">critical</option>
-                  </select>
-                </label>
-                <label class="full"><span x-text="t('custom.hypothesis')"></span> <span class="hint-inline" x-text="t('custom.hypothesisHint')"></span>
-                  <textarea x-model="editing.hypothesis" rows="2"></textarea>
-                </label>
-                <label class="full"><span x-text="t('custom.suggestion')"></span> <span class="hint-inline" x-text="t('custom.suggestionHint')"></span>
-                  <textarea x-model="editing.suggestion" rows="2"></textarea>
-                </label>
-              </div>
-            </div>
-            <div class="form-actions">
-              <button type="button" class="btn secondary" @click="cancelEdit()" x-text="t('custom.cancelBtn')"></button>
-              <button type="submit" class="btn primary" x-text="t('custom.saveBtn')"></button>
-            </div>
-          </form>
+          <div class="gfoot" x-text="t('rules.roofC')"></div>
+        </div>
+        <!-- 带宽屋顶:NVML HBM 控制器繁忙%(有界)→ B -->
+        <div class="gauge">
+          <div class="gauge-head">
+            <span class="gl" x-text="t('rules.bwRoof')"></span>
+            <span class="gv" x-text="kpis.gpu_mem_bw_pct == null ? '—' : fmt(kpis.gpu_mem_bw_pct, 0) + '%'"></span>
+            <span class="gtag" :class="roofZone(kpis.gpu_mem_bw_pct, cfg.mbu_low_pct, cfg.mbu_high_pct)" x-text="t('rules.zone.' + roofZone(kpis.gpu_mem_bw_pct, cfg.mbu_low_pct, cfg.mbu_high_pct))"></span>
+          </div>
+          <div class="gtrack">
+            <div class="gfill" :class="roofZone(kpis.gpu_mem_bw_pct, cfg.mbu_low_pct, cfg.mbu_high_pct)" :style="`width:${pctRaw(kpis.gpu_mem_bw_pct)}%`"></div>
+            <i class="gtick" :style="`left:${pctRaw(cfg.mbu_low_pct)}%`" :title="t('cfg.mbu_low')"></i>
+            <i class="gtick hi" :style="`left:${pctRaw(cfg.mbu_high_pct)}%`" :title="t('cfg.mbu_high')"></i>
+          </div>
+          <div class="gfoot" x-text="t('rules.roofB')"></div>
+        </div>
+        <!-- 容量 KV → D -->
+        <div class="gauge">
+          <div class="gauge-head">
+            <span class="gl" x-text="t('rules.capacity')"></span>
+            <span class="gv" x-text="kpis.kv_cache == null ? '—' : fmt(kpis.kv_cache * 100, 0) + '%'"></span>
+            <span class="gtag" :class="roofZone(kpis.kv_cache, cfg.kv_pressure_ratio, cfg.kv_pressure_ratio)" x-text="t('rules.zone.' + roofZone(kpis.kv_cache, cfg.kv_pressure_ratio, cfg.kv_pressure_ratio))"></span>
+          </div>
+          <div class="gtrack">
+            <div class="gfill" :class="roofZone(kpis.kv_cache, cfg.kv_pressure_ratio, cfg.kv_pressure_ratio)" :style="`width:${pctClamp(kpis.kv_cache)}%`"></div>
+            <i class="gtick hi" :style="`left:${pctClamp(cfg.kv_pressure_ratio)}%`" :title="t('cfg.kv')"></i>
+          </div>
+          <div class="gfoot" x-text="t('rules.roofD')"></div>
+        </div>
+        <!-- 空载守卫:在跑请求 -->
+        <div class="idleguard">
+          <span x-text="t('rules.runningNow')"></span>
+          <b x-text="kpis.running_reqs == null ? '—' : fmt(kpis.running_reqs, 1)"></b>
+          <span class="ig-tag" :class="(kpis.running_reqs || 0) > (cfg.min_running_reqs || 0.5) ? 'on' : 'idle'"
+                x-text="(kpis.running_reqs || 0) > (cfg.min_running_reqs || 0.5) ? t('rules.guardArmed') : t('rules.guardIdle')"></span>
         </div>
       </div>
 
-      <div x-show="toast" x-cloak class="toast" :class="{ error: toastError }" x-text="toast"></div>
+      <!-- ===== 检测层图例:L1–L5 徽标含义 ===== -->
+      <div class="section-head">
+        <h2 x-text="t('rules.layersTitle')"></h2>
+        <span class="hint" x-text="t('rules.layersHint')"></span>
+      </div>
+      <div class="layercard">
+        <template x-for="L in ['L1','L2','L3','L4','L5']" :key="L">
+          <div class="layerrow"><span class="layer" :class="L" x-text="L"></span><span class="layerdesc" x-text="t('layer.'+L)"></span></div>
+        </template>
+      </div>
+
+      <!-- 交给 Autopilot 入口($dispatch 跨组件切 tab)-->
+      <div class="slo-bench-cta" style="margin-top:18px;">
+        <span x-text="t('rules.toAutopilotHint')"></span>
+        <button class="btn secondary btn-sm" @click="$dispatch('goto-tab', 'autopilot')" x-text="t('rules.toAutopilotBtn')"></button>
+      </div>
+
     </div>
 
     <!-- ===== 压测 tab ===== -->
@@ -1328,24 +1258,29 @@
 
       <div class="bench-form-card">
         <div class="form-grid">
-          <label x-text="t('bench.name')"></label>
-            <input type="text" x-model="form.name" :placeholder="t('bench.nameePlaceholder')"></input>
+          <label>
+            <span x-text="t('bench.name')"></span>
+            <input type="text" x-model="form.name" :placeholder="t('bench.namePlaceholder')">
           </label>
-          <label x-text="t('bench.api')"></label>
+          <label>
+            <span x-text="t('bench.api')"></span>
             <select x-model="form.api">
               <option value="chat">chat completions</option>
               <option value="completions">completions</option>
             </select>
           </label>
-          <label class="full" x-text="t('bench.endpoint')"></label>
-            <input type="text" x-model="form.endpoint" placeholder="http://localhost:8000" required></input>
+          <label>
+            <span x-text="t('bench.endpoint')"></span>
+            <input type="text" x-model="form.endpoint" placeholder="http://localhost:8000" required>
             <span class="hint" x-text="t('bench.endpointHint')"></span>
           </label>
-          <label class="full"><span x-text="t('bench.modelName')"></span> <span class="hint-inline" x-text="t('bench.modelNameSub')"></span></label>
-            <input type="text" x-model="form.model" placeholder="Qwen/Qwen2.5-0.5B-Instruct" required></input>
+          <label>
+            <span><span x-text="t('bench.modelName')"></span> <span class="hint-inline" x-text="t('bench.modelNameSub')"></span></span>
+            <input type="text" x-model="form.model" placeholder="Qwen/Qwen2.5-0.5B-Instruct" required>
             <span class="hint" x-text="t('bench.modelNameHint')"></span>
           </label>
-          <label class="full" x-text="t('bench.promptSource')"></label>
+          <label>
+            <span x-text="t('bench.promptSource')"></span>
             <select x-model="form.prompt_source" @change="onPromptSourceChange()">
               <template x-for="src in promptSources" :key="src.value">
                 <option :value="src.value" x-text="src.label"></option>
@@ -1353,31 +1288,39 @@
             </select>
             <span class="hint" x-text="currentPromptSourceDescription()"></span>
           </label>
-          <label x-show="currentPromptSourceUsesPromptTokens()" x-text="t('bench.promptTokens')"></label>
+          <label x-show="currentPromptSourceUsesPromptTokens()">
+            <span x-text="t('bench.promptTokens')"></span>
             <input type="number" x-model.number="form.prompt_tokens" min="1">
           </label>
-          <label x-text="t('bench.outputTokens')"></label>
+          <label>
+            <span x-text="t('bench.outputTokens')"></span>
             <input type="number" x-model.number="form.output_tokens" min="1">
           </label>
-          <label x-text="t('bench.concurrency')"></label>
+          <label>
+            <span x-text="t('bench.concurrency')"></span>
             <input type="number" x-model.number="form.concurrency" min="1">
           </label>
-          <label x-text="t('bench.measureMode')"></label>
+          <label>
+            <span x-text="t('bench.measureMode')"></span>
             <select x-model="form.boundedBy">
               <option value="duration" x-text="t('bench.measureByDuration')"></option>
               <option value="requests" x-text="t('bench.measureByRequests')"></option>
             </select>
           </label>
-          <label x-show="form.boundedBy === 'duration'" x-text="t('bench.duration')"></label>
+          <label x-show="form.boundedBy === 'duration'">
+            <span x-text="t('bench.duration')"></span>
             <input type="number" x-model.number="form.duration_s" min="1">
           </label>
-          <label x-show="form.boundedBy === 'requests'" x-text="t('bench.numRequests')"></label>
+          <label x-show="form.boundedBy === 'requests'">
+            <span x-text="t('bench.numRequests')"></span>
             <input type="number" x-model.number="form.num_requests" min="1">
           </label>
-          <label x-text="t('bench.warmup')"></label>
+          <label>
+            <span x-text="t('bench.warmup')"></span>
             <input type="number" x-model.number="form.warmup_s" min="0">
           </label>
-          <label x-text="t('bench.timeout')"></label>
+          <label>
+            <span x-text="t('bench.timeout')"></span>
             <input type="number" step="any" x-model.number="form.timeout_s" min="1">
           </label>
           <div class="full slo-section">
@@ -1583,6 +1526,352 @@
             </div>
           </div>
         </template>
+      </div>
+    </div>
+
+    <!-- ===== Autopilot tab(预览 · mock 数据)===== -->
+    <div x-show="tab === 'autopilot'" x-data="autopilotTab()" x-init="init()">
+      <div class="ap-wrap">
+        <div class="preview-note">
+          <span x-show="hasBridge()">真实模式:Autopilot 会在 runw host 侧停主 serve 腾卡 → 起候选 vLLM 沙盒 → 跑 bench → kept/reverted → 恢复主 serve。若 host bridge 未连接,开始按钮会报错而不是偷偷跑模拟。</span>
+          <span x-show="!hasBridge()">本地/dev 模式:当前没有 host bridge,开始后走 SimSandbox 验证闭环;在 runw dashboard 地址访问时才会启动真实 DockerSandbox 调优。</span>
+        </div>
+
+        <!-- 调优期间主 serve(含本页)会下线:直播由 host 侧 bridge 直连,刷新本页会打不开 -->
+        <div class="preview-note" x-show="running && hasBridge()"
+             style="border-color:#fcd34d;background:#fffbeb;color:#92400e">
+          调优进行中:主 serve 已让位给候选沙盒,<b>本页(:8765)此刻打不开新标签,请勿刷新</b>。
+          本页直播直连 host bridge,不受影响;备用直播页:
+          <a :href="apiUrl('/')" target="_blank" style="color:#92400e;text-decoration:underline" x-text="apiUrl('/')"></a>。
+          调优结束或点「停止」后主 serve 与本页自动恢复。
+        </div>
+
+  <!-- Agent(LLM) 配置：自由填任意 OpenAI 兼容端点 -->
+  <div class="ap-agent">
+    <div class="ap-agent-head" @click="agentOpen=!agentOpen">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      <b>Agent（出主意的 LLM）</b>
+      <span class="cur" x-text="agent.model || '未配置'"></span>
+      <span class="chev" x-text="agentOpen ? '▲' : '▼'"></span>
+    </div>
+    <div class="ap-agent-form" x-show="agentOpen">
+      <div class="ap-field"><label>预设</label>
+        <select x-model="preset" @change="applyPreset()">
+          <option value="openrouter">OpenRouter</option>
+          <option value="openai">OpenAI</option>
+          <option value="deepseek">DeepSeek</option>
+          <option value="kimi_coding">Kimi Coding</option>
+          <option value="kimi">Kimi / Moonshot</option>
+          <option value="local">本地 (Ollama / vLLM)</option>
+          <option value="custom">自定义</option>
+        </select>
+      </div>
+      <div class="ap-field url"><label>Base URL</label><input x-model="agent.base_url" placeholder="https://.../v1"></div>
+      <div class="ap-field key"><label>API Key</label><input type="password" x-model="agent.api_key" placeholder="sk-..."></div>
+      <div class="ap-field model"><label>Model</label><input x-model="agent.model" placeholder="anthropic/claude-opus-4"></div>
+      <div style="display:flex;align-items:flex-end;gap:6px">
+        <button class="ap-test" @click="testAgent()" :disabled="agentTesting" x-text="agentTest || '测试连接'"></button>
+        <div class="ap-adv-toggle" @click="advOpen=!advOpen"><span class="c" x-text="advOpen?'▾':'▸'"></span> 高级</div>
+      </div>
+      <div class="ap-agent-note">OpenRouter / OpenAI / DeepSeek / Moonshot 走 <b style="color:var(--coral-strong)">OpenAI 兼容</b>端点；Kimi Coding 走 Kimi Coding Messages API。真实调优必须配置 LLM agent；StubAgent 只用于本地 SimSandbox/dev tests,不能驱动真实 GPU 调优。Key 仅本会话用于调 agent，<b>不入诊断热路径、不随轨迹存盘</b>；生产建议走环境变量注入。注意：<b>别用被压测的那个 vLLM 模型当 agent</b>（它在被压、可能太小）。</div>
+
+      <!-- 高级：agent 行为（展开区） -->
+      <div class="ap-adv" x-show="advOpen">
+        <div class="ap-field guide">
+          <label>额外指引（追加到系统 prompt 之后，塞业务约束 / 偏好）</label>
+          <textarea x-model="adv.guidance" placeholder="如：本集群 gpu-util 不超 0.85；优先 chunked-prefill 而非提并发；延迟敏感业务，TTFT 优先…"></textarea>
+        </div>
+        <div class="ap-field num"><label>temperature</label><input type="number" step="0.1" min="0" max="2" x-model="adv.temperature"></div>
+        <div class="ap-field num"><label>超时 (s)</label><input type="number" x-model="adv.timeout_s"></div>
+        <div class="ap-field num"><label>重试</label><input type="number" x-model="adv.retries"></div>
+
+        <div class="ap-scope">
+          <label>动作范围 · vLLM 全量 − 身份(~7) − 硬件收窄</label>
+          <div class="ap-deny">
+            <span class="dl">model / host / port（身份,~7）</span>
+            <span class="dl">tensor / pipeline-parallel（按卡数收窄）</span>
+            <template x-if="!adv.allowQualityKnobs"><span class="dl q">quantization（待开质量门）</span></template>
+            <template x-if="!adv.allowQualityKnobs"><span class="dl q">kv-cache-dtype（待开质量门）</span></template>
+          </div>
+          <div class="ap-agent-note" style="margin-top:0">这 ~250 个里大半 vLLM 启动时已自调到最优（KV block 数 / attention backend / 兼容门）；agent 实际只动 <b style="color:var(--coral-strong)">max-num-seqs / max-num-batched-tokens / gpu-util / performance_mode</b> 这一小撮 + 诊断点名的对症旋钮。安全不靠黑名单,靠 launch-catch + 一次性容器兜底。</div>
+        </div>
+        <label class="ap-switch" @click="adv.allowQualityKnobs=!adv.allowQualityKnobs">
+          <span class="track" :class="{on: adv.allowQualityKnobs}"><span class="knob"></span></span>
+          开「质量门」· 纳入 quantization / kv-cache-dtype（T2,加等价闸）
+        </label>
+        <div class="ap-agent-note" x-show="adv.allowQualityKnobs" style="color:var(--amber);margin-top:0">⚠ 已纳入 → 记分牌自动加<b>质量门(等价闸)</b>：每个候选额外跑固定 prompt 比对基线输出，质量掉超阈值即判负（防 Agent 靠降质量刷吞吐）。</div>
+
+        <div style="flex-basis:100%">
+          <button class="ap-linkbtn" @click="showPrompt=!showPrompt" x-text="showPrompt ? '收起核心 prompt 合约' : '查看核心 prompt 合约（只读 · 不可改）'"></button>
+          <div class="ap-prompt-view" x-show="showPrompt" x-text="LOCKED_PROMPT"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 目标条 -->
+  <div class="ap-bar">
+    <div class="ap-goal">
+      <b>目标</b>
+      <div class="ap-seg">
+        <button :class="{active: obj.target==='throughput'}" @click="obj.target='throughput'">吞吐优先</button>
+        <button :class="{active: obj.target==='latency'}" @click="obj.target='latency'">延迟优先</button>
+        <button :class="{active: obj.target==='cost'}" @click="obj.target='cost'">性价比</button>
+      </div>
+      <span>SLA · TTFT p99 ≤ <input type="number" x-model="obj.ttft"> ms · TPOT p99 ≤ <input type="number" x-model="obj.tpot"> ms</span>
+      <span>最多 <input type="number" x-model="budget.rounds"> 轮 / <input type="number" x-model="budget.minutes"> min</span>
+    </div>
+    <button class="ap-start" @click="start()" :disabled="running">
+      <svg x-show="!running" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+      <svg x-show="running" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="9" stroke-opacity=".3"/><path d="M21 12a9 9 0 0 0-9-9"/></svg>
+      <span x-text="startLabel()"></span>
+    </button>
+    <button class="ap-stop" x-show="running" @click="stop()" :disabled="stopping">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 7h10v10H7z"/></svg>
+      <span x-text="stopping ? '停止中…' : '停止调优'"></span>
+    </button>
+  </div>
+
+  <!-- 空态 -->
+  <div class="ap-idle" x-show="!session">
+    <div class="ap-loop">
+      <div class="st"><span class="n">1</span><b>observe</b><span>读诊断</span></div>
+      <span class="arr">→</span>
+      <div class="st"><span class="n">2</span><b>hypothesize</b><span>挂诊断选旋钮</span></div>
+      <span class="arr">→</span>
+      <div class="st"><span class="n">3</span><b>act</b><span>沙盒重启</span></div>
+      <span class="arr">→</span>
+      <div class="st"><span class="n">4</span><b>measure</b><span>压测打分</span></div>
+      <span class="arr">→</span>
+      <div class="st"><span class="n">5</span><b>decide</b><span>留下/回滚</span></div>
+    </div>
+    <p>点开始后，Autopilot 会启动一个调优 session。Agent 在候选集中选一个 vLLM 旋钮,沙盒重启后跑同一套 bench,只有实测更好才 kept,破 SLA 或收益不足就 reverted。真实 runw 模式需要先配置 LLM agent;生产上线仍走人工 promote。</p>
+    <div class="moat"><b>👁 眼睛</b>(深度诊断) + <b>✋ 手</b>(压测+serve控制) + <b>📊 记分牌</b>(基线/Δ) 同进程</div>
+  </div>
+
+  <!-- session -->
+  <template x-if="session">
+    <div>
+      <!-- 状态条 -->
+      <div class="ap-status">
+        <span class="ap-state" :class="session.state">
+          <span class="pulse" x-show="session.state==='running'"></span>
+          <span x-text="stateLabel()"></span>
+        </span>
+        <span class="round-n">已评估 <span x-text="shownRounds.length-1 < 0 ? 0 : Math.max(0, shownRounds.length-1)"></span> / 最多 <span x-text="budget.rounds"></span> 轮</span>
+        <div class="ap-prog"><i :style="`width:${Math.min(100, (Math.max(0,shownRounds.length-1)/budget.rounds)*100)}%`"></i></div>
+        <span class="best">当前最优 <b><span x-text="fmt(best.tps)"></span> tok/s</b></span>
+      </div>
+
+      <!-- LLM 兜底警示:用户以为在看 LLM 调优,实际某些轮是确定性启发式 -->
+      <div class="preview-note" x-show="fallbackCount > 0"
+           style="border-color:#fcd34d;background:#fffbeb;color:#92400e">
+        ⚠ 本次有 <b x-text="fallbackCount"></b> 轮 LLM 调用失败,由确定性启发式兜底选择旋钮
+        —— 检查 agent 配置 / 额度 / 网络(点开对应轮的「Agent 推理」看具体错误;带
+        <span style="border:1px solid #fcd34d;border-radius:999px;padding:0 6px;font-size:11px">⚠ 兜底</span>
+        标记的轮不是 LLM 决策)。
+      </div>
+
+      <!-- 轨迹 -->
+      <div class="ap-trace-card">
+        <template x-for="r in shownRounds" :key="r.round">
+          <div>
+            <div class="ap-round" :class="{base: r.kind==='baseline', rev: r.decision==='reverted', open: expandedRounds.includes(r.round)}" @click="toggleRow(r.round)" title="单击展开本轮完整推理">
+              <div><span class="ap-rn" x-text="'R'+r.round"></span><span class="ap-chev" x-text="expandedRounds.includes(r.round)?'▾':'▸'"></span></div>
+              <div class="ap-rbody">
+                <template x-if="r.diag"><div class="ap-rdiag"><b>诊断</b><span x-text="r.diag"></span></div></template>
+                <template x-if="r.hyp"><div class="ap-rhyp"><b>假设</b><span x-text="r.hyp"></span><span class="ap-changed" x-show="r.changed" x-text="r.changed"></span></div></template>
+                <template x-if="r.cmd"><div class="ap-rcmd"><span class="pfx">$</span> <span x-text="r.cmd"></span></div></template>
+              </div>
+              <div class="ap-rtput">
+                <div class="ap-rtrack" x-show="r.tps!==null"><div class="ap-rfill" :style="`width:${r.barPct}%`"></div></div>
+                <span class="ap-tps" x-show="r.tps!==null"><span x-text="fmt(r.tps)"></span><small>tok/s</small></span>
+                <span class="ap-delta" :class="r.delta>=0?'up':'down'" x-show="r.delta!==null" x-text="(r.delta>=0?'+':'')+Math.round(r.delta*100)+'%'"></span>
+              </div>
+              <div class="ap-verdict" :class="r.vcls">
+                <span x-text="r.verdict"></span>
+                <span class="ap-fb" x-show="r.fallback"
+                      :title="'LLM 调用失败(' + r.fallback + '),本轮由确定性启发式兜底 —— 检查 agent 配置/额度/网络'">⚠ 兜底</span>
+              </div>
+            </div>
+            <div class="ap-detail" x-show="expandedRounds.includes(r.round)" @click.stop>
+              <template x-if="r.snap"><div class="dr-sec"><div class="lab">诊断快照（Agent 看到的事实）</div><div class="val" x-text="r.snap"></div></div></template>
+              <template x-if="r.rationale"><div class="dr-sec"><div class="lab">Agent 推理</div><div class="val" x-text="r.rationale"></div></div></template>
+              <template x-if="r.evidence"><div class="dr-sec"><div class="lab">证据引用</div><div class="dr-chips"><template x-for="ev in r.evidence" :key="ev"><span class="dr-chip" x-text="ev"></span></template></div></div></template>
+              <template x-if="r.expected"><div class="dr-sec"><div class="lab">预期效果</div><div class="val" x-text="r.expected"></div></div></template>
+              <template x-if="r.scoreAfter"><div class="dr-sec"><div class="lab">压测打分</div>
+                <div class="dr-score">
+                  <span class="h">指标</span><span class="h">before</span><span class="h">after</span><span class="h">Δ</span>
+                  <span>output_tps</span>
+                  <span class="m" x-text="r.scoreBefore ? fmt(r.scoreBefore.tps) : '—'"></span>
+                  <span x-text="fmt(r.scoreAfter.tps)"></span>
+                  <span :class="dlt(r,'tps')>=0 ? 'up' : 'down'" x-text="r.scoreBefore ? ((dlt(r,'tps')>=0?'+':'')+Math.round(dlt(r,'tps')/r.scoreBefore.tps*100)+'%') : '—'"></span>
+                  <span>ttft_p99</span>
+                  <span class="m" x-text="r.scoreBefore ? r.scoreBefore.ttft+'ms' : '—'"></span>
+                  <span x-text="r.scoreAfter.ttft+'ms'"></span>
+                  <span class="m" x-text="r.scoreBefore ? ((dlt(r,'ttft')>=0?'+':'')+dlt(r,'ttft')+'ms') : '—'"></span>
+                  <span>tpot_p99</span>
+                  <span class="m" x-text="r.scoreBefore ? r.scoreBefore.tpot+'ms' : '—'"></span>
+                  <span x-text="r.scoreAfter.tpot+'ms'"></span>
+                  <span class="m" x-text="r.scoreBefore ? ((dlt(r,'tpot')>=0?'+':'')+dlt(r,'tpot')+'ms') : '—'"></span>
+                </div></div></template>
+              <template x-if="r.decideLogic"><div class="dr-sec"><div class="lab">判定</div><div class="dr-decide" :class="{rev: r.decision==='reverted'}" x-text="r.decideLogic"></div></div></template>
+            </div>
+          </div>
+        </template>
+        <!-- 进行中的候选 -->
+        <div class="ap-round cur" x-show="running && pending">
+          <div><span class="ap-rn" x-text="'R'+(pending && pending.round != null ? pending.round : shownRounds.length)"></span></div>
+          <div class="ap-rbody">
+            <div class="ap-rhyp" x-show="pending && pending.hyp">
+              <b x-text="pending ? pending.title : '运行中'"></b><span x-text="pending ? pending.hyp : ''"></span>
+              <span class="ap-changed" x-show="pending && pending.action" x-text="pending ? pending.action : ''"></span>
+            </div>
+            <div class="ap-rrun"><span class="sp"></span><span x-text="pending && pending.progress ? pending.progress : '状态心跳中，未改线上 serve'"></span><small x-text="pending && pending.age ? pending.age : ''"></small></div>
+            <div class="ap-events" x-show="pending && pending.events && pending.events.length">
+              <template x-for="ev in pending.events" :key="ev.ts_wall + ev.phase + ev.message">
+                <div class="ap-event" :class="ev.level || 'info'">
+                  <span class="dot"></span><b x-text="ev.label"></b><span x-text="ev.message"></span><em x-text="ev.age"></em>
+                </div>
+              </template>
+            </div>
+          </div>
+          <div class="ap-rtput"></div>
+          <div class="ap-verdict"></div>
+        </div>
+      </div>
+
+      <!-- 结果卡 -->
+      <template x-if="session.state==='done'">
+        <div class="ap-result">
+          <div class="hl">吞吐 <b><span x-text="fmt(baselineTps)"></span> → <span x-text="fmt(best.tps)"></span> tok/s（×<span x-text="(best.tps/baselineTps).toFixed(2)"></span>）</b>，仍满足 TTFT SLA</div>
+          <div class="ap-cmd"><span class="pfx">$</span> <span x-text="best.cmd"></span> <span class="copy" @click="copyCmd($event)">复制</span></div>
+          <div class="honest">「×3」只在「现实但没调过」的默认基线上成立 —— 那正是大量真实部署的现状。已调过的基线则是诚实的边际收益（+5~15%），Agent 会如实报「已近最优」。</div>
+          <div class="actions">
+            <button @click="drawerOpen=true">查看完整推理轨迹</button>
+            <button class="promote" @click="promoteOpen=true" :disabled="!promote">查看上线包（人工确认）</button>
+          </div>
+        </div>
+      </template>
+    </div>
+  </template>
+
+  <!-- Promote package modal: manual-only, never applies production by itself -->
+  <template x-if="promoteOpen && promote">
+    <div class="modal-backdrop" @click.self="promoteOpen=false" @keydown.escape.window="promoteOpen=false">
+      <div class="modal ap-promote-modal" role="dialog" aria-modal="true">
+        <div class="modal-head">
+          <h2>上线包 · <span x-text="promote.state"></span></h2>
+          <button class="modal-close" @click="promoteOpen=false" aria-label="关闭">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="ap-promote-note">
+            Autopilot 已生成可审阅命令，但没有修改生产。上线仍需要人工确认、流量切换和健康检查。
+          </div>
+
+          <div class="modal-section">
+            <div class="section-head-row">
+              <h3>生产命令</h3>
+              <button class="copy-btn" @click="copyText(promote.production_command, $event, '复制')">复制</button>
+            </div>
+            <pre class="cmdline" x-text="promote.production_command || '—'"></pre>
+          </div>
+
+          <div class="modal-section">
+            <div class="section-head-row">
+              <h3>回滚命令</h3>
+              <button class="copy-btn" @click="copyText(promote.rollback_command, $event, '复制')">复制</button>
+            </div>
+            <pre class="cmdline" x-text="promote.rollback_command || '—'"></pre>
+          </div>
+
+          <div class="modal-section" x-show="promoteDiff.length">
+            <h3>配置 diff</h3>
+            <div class="ap-promote-diff">
+              <template x-for="c in promoteDiff" :key="c.key">
+                <div class="ap-promote-change">
+                  <code x-text="c.flag || c.key"></code>
+                  <span><b x-text="c.from"></b> → <b x-text="c.to"></b></span>
+                  <em x-text="c.output_impact || 'none'"></em>
+                </div>
+              </template>
+            </div>
+          </div>
+
+          <div class="modal-section">
+            <h3>风险提示</h3>
+            <ul class="ap-promote-list">
+              <template x-for="r in promoteRisks" :key="r"><li x-text="r"></li></template>
+            </ul>
+          </div>
+
+          <div class="modal-section">
+            <h3>人工确认清单</h3>
+            <ol class="ap-promote-list">
+              <template x-for="item in promoteChecklist" :key="item"><li x-text="item"></li></template>
+            </ol>
+          </div>
+
+          <div class="modal-section" x-show="promote.applies_to">
+            <h3>适用边界</h3>
+            <pre class="cmdline" x-text="JSON.stringify(promote.applies_to, null, 2)"></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  </template>
+
+  <!-- 完整推理轨迹 抽屉 -->
+  <template x-if="drawerOpen">
+    <div>
+      <div class="ap-ov" @click="drawerOpen=false"></div>
+      <div class="ap-drawer" @click.stop>
+        <div class="ap-drawer-head">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3 8-8"/><path d="M21 12a9 9 0 1 1-6.2-8.5"/></svg>
+          <h3>完整推理轨迹</h3>
+          <span class="sid" x-text="'ap-2026-06-23-001 · ' + agent.model"></span>
+          <span class="x" @click="drawerOpen=false">✕</span>
+        </div>
+        <div class="ap-drawer-body">
+          <template x-for="r in shownRounds" :key="'dr'+r.round">
+            <div class="dr-round" :class="{rev: r.decision==='reverted'}">
+              <div class="dr-rhead">
+                <span class="dr-rn" x-text="'R'+r.round"></span>
+                <span class="ap-verdict" :class="r.vcls" x-text="r.verdict"></span>
+                <span class="dr-tps" x-show="r.tps" x-text="fmt(r.tps)+' tok/s'"></span>
+              </div>
+              <template x-if="r.snap"><div class="dr-sec"><div class="lab">诊断快照（Agent 看到的事实）</div><div class="val" x-text="r.snap"></div></div></template>
+              <template x-if="r.rationale"><div class="dr-sec"><div class="lab">Agent 推理</div><div class="val" x-text="r.rationale"></div></div></template>
+              <template x-if="r.evidence"><div class="dr-sec"><div class="lab">证据引用</div><div class="dr-chips"><template x-for="ev in r.evidence" :key="ev"><span class="dr-chip" x-text="ev"></span></template></div></div></template>
+              <template x-if="r.expected"><div class="dr-sec"><div class="lab">预期效果</div><div class="val" x-text="r.expected"></div></div></template>
+              <template x-if="r.cmd"><div class="dr-sec"><div class="lab">本轮命令</div><div class="dr-cmd" x-text="r.cmd"></div></div></template>
+              <template x-if="r.scoreAfter"><div class="dr-sec"><div class="lab">压测打分</div>
+                <div class="dr-score">
+                  <span class="h">指标</span><span class="h">before</span><span class="h">after</span><span class="h">Δ</span>
+                  <span>output_tps</span>
+                  <span class="m" x-text="r.scoreBefore ? fmt(r.scoreBefore.tps) : '—'"></span>
+                  <span x-text="fmt(r.scoreAfter.tps)"></span>
+                  <span :class="dlt(r,'tps')>=0 ? 'up' : 'down'" x-text="r.scoreBefore ? ((dlt(r,'tps')>=0?'+':'')+Math.round(dlt(r,'tps')/r.scoreBefore.tps*100)+'%') : '—'"></span>
+                  <span>ttft_p99</span>
+                  <span class="m" x-text="r.scoreBefore ? r.scoreBefore.ttft+'ms' : '—'"></span>
+                  <span x-text="r.scoreAfter.ttft+'ms'"></span>
+                  <span class="m" x-text="r.scoreBefore ? ((dlt(r,'ttft')>=0?'+':'')+dlt(r,'ttft')+'ms') : '—'"></span>
+                  <span>tpot_p99</span>
+                  <span class="m" x-text="r.scoreBefore ? r.scoreBefore.tpot+'ms' : '—'"></span>
+                  <span x-text="r.scoreAfter.tpot+'ms'"></span>
+                  <span class="m" x-text="r.scoreBefore ? ((dlt(r,'tpot')>=0?'+':'')+dlt(r,'tpot')+'ms') : '—'"></span>
+                </div></div></template>
+              <template x-if="r.decideLogic"><div class="dr-sec"><div class="lab">判定</div><div class="dr-decide" x-text="r.decideLogic"></div></div></template>
+            </div>
+          </template>
+        </div>
+        <div class="ap-drawer-foot">
+          <button class="ap-test" @click="copyTrace($event)">复制 Markdown</button>
+          <button class="ap-test" @click="downloadTrace()">下载 JSON</button>
+        </div>
+      </div>
+    </div>
+  </template>
       </div>
     </div>
 

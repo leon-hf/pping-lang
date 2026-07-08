@@ -10,10 +10,12 @@
 [![Python](https://img.shields.io/badge/python-3.10%20|%203.11%20|%203.12-4c8bf5)](https://pypi.org/project/pping-lang/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-43a047)](LICENSE)
 [![Status](https://img.shields.io/badge/status-pre--alpha-fb8c00)](#项目状态)
-[![Tests](https://img.shields.io/badge/tests-444%20passing-43a047)](tests/)
+[![Tests](https://img.shields.io/badge/tests-514%20passing-43a047)](tests/)
 [![Live Demo](https://img.shields.io/badge/%F0%9F%8C%90%20Live%20Demo-online-5b5bd6)](https://leon-hf.github.io/pping-lang/)
 
-**[🌐 在线演示 Live Demo →](https://leon-hf.github.io/pping-lang/)** —— 浏览器直接看真机采到的仪表盘（实时 / Kernel / 规则 / 压测，中英双语）
+**[🌐 在线演示 Live Demo →](https://leon-hf.github.io/pping-lang/)** —— 浏览器直接看真机采到的仪表盘（实时 / Kernel / 规则 / 压测 / Autopilot，中英双语）
+
+**Autopilot 已跑通真机闭环**：在 runw（RTX 5060 Ti、vLLM 0.21、Qwen2.5-0.5B）上，Agent 在沙盒里按「诊断 → 改一个旋钮 → 压测 → 留下/回滚」自动把吞吐从 **986 → 6,094 tok/s（×6.18）**，最终给出人工 promote 的 `vllm serve` 推荐命令。
 
 [在线演示](https://leon-hf.github.io/pping-lang/) · [快速上手](#快速上手) · [仪表盘](#仪表盘) · [兼容性](#兼容性) · [架构](#架构) · [路线图](#路线图)
 
@@ -23,6 +25,7 @@
 
 ## Latest News
 
+- **2026-07** —— Autopilot M0：诊断驱动的自动调优 Agent 已接入 dashboard 和 host-side 沙盒编排；runw 真机 session 跑出 `986 → 6,094 tok/s（×6.18）`，每轮只改一个 vLLM 旋钮，bench 验证后才 kept，生产上线仍是人工 promote
 - **2026-06** —— 事实规则诊断引擎：诊断从扁平 if-else 升级为「事实 + 署名推断」两层 —— 规则名即客观事实（测出来的），根因与处方作为署名推断单列；阈值集中到一份 SLA 配置，可在仪表盘里热加载进运行中的引擎，并支持增删自定义规则
 - **2026-06** —— 指标持久化去 DuckDB：进程内 DuckDB 改为顺序追加 JSONL（AppendLog），消除每迭代 INSERT 与 colocated serving 抢 GIL/IO；保留窗口改为时间制（`PPING_LANG_RETENTION_SECONDS`，默认 2h），按卷滚动、磁盘有界
 - **2026-06** —— Dual-path 实时读取架构：实时面板从 DuckDB SQL 路径迁移至内存 ring buffer，bench 启动后 KPI 可见性延迟由 20s 降至 2s
