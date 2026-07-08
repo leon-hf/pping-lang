@@ -513,6 +513,20 @@ class Runner(threading.Thread):
                 self._event("propose",
                             f"LLM 调用失败({fb}),本轮由确定性启发式兜底——检查 agent 配置/额度",
                             round=rnd, level="warn", detail={"llm_fallback": fb})
+            thinking = getattr(dec, "thinking", "") or ""
+            if thinking:                    # 思考过程即刻直播(摘要),全文进事件 detail + round
+                self._event("propose", f"agent 思考:…{thinking[-160:]}", round=rnd,
+                            detail={"thinking": thinking[:2400]})
+            if not dec.done and dec.knob:   # 决策到达即刻全文直播,不等 bench 落定
+                self._event("propose",
+                            f"agent 决策:{dec.knob} {dec.from_val}→{dec.to_val} —— "
+                            f"{(dec.rationale or '')[:110]}",
+                            round=rnd,
+                            detail={"rationale": dec.rationale,
+                                    "expected_effect": dec.expected_effect,
+                                    "guardrail_notes": dec.guardrail_notes,
+                                    "evidence_refs": dec.evidence_refs,
+                                    "value_source": (dec.candidate_meta or {}).get("value_source")})
             if dec.done:
                 self._event("decide", dec.reason or "agent 判断已近最优,准备停止", round=rnd)
                 self._append_stop(rnd, dec, diag)
@@ -602,7 +616,8 @@ class Runner(threading.Thread):
             objective_score_before=before_score, objective_score_after=score,
             delta_pct=primary_delta_pct(sc, before_sc, self._obj) if sc and before_sc else None,
             decision=decision, bench_spec=sc.run_meta if sc else {},
-            agent_model=getattr(self._agent, "model", "")))
+            agent_model=getattr(self._agent, "model", ""),
+            agent_thinking=(getattr(dec, "thinking", "") or "")[:4000]))
         if sc:
             msg = (f"判定 {decision}: {before_sc.output_tps:g} → {sc.output_tps:g} tok/s "
                    f"({primary_delta_pct(sc, before_sc, self._obj) or 0:+.2f}%)")
@@ -629,7 +644,8 @@ class Runner(threading.Thread):
         self._store.append_round(Round(
             round=rnd, kind="stop", state_at_record="deciding", decision="done",
             rationale=dec.rationale, evidence_refs=dec.evidence_refs, diagnosis=diag,
-            agent_model=getattr(self._agent, "model", "")))
+            agent_model=getattr(self._agent, "model", ""),
+            agent_thinking=(getattr(dec, "thinking", "") or "")[:4000]))
         self._tick()
 
     def _finalize(self) -> None:

@@ -1697,6 +1697,7 @@
             </div>
             <div class="ap-detail" x-show="expandedRounds.includes(r.round)" @click.stop>
               <template x-if="r.snap"><div class="dr-sec"><div class="lab">诊断快照（Agent 看到的事实）</div><div class="val" x-text="r.snap"></div></div></template>
+              <template x-if="r.thinking"><div class="dr-sec"><div class="lab">Agent 思考过程(原始)</div><div class="val" style="white-space:pre-wrap;max-height:220px;overflow-y:auto" x-text="r.thinking"></div></div></template>
               <template x-if="r.rationale"><div class="dr-sec"><div class="lab">Agent 推理</div><div class="val" x-text="r.rationale"></div></div></template>
               <template x-if="r.evidence"><div class="dr-sec"><div class="lab">证据引用</div><div class="dr-chips"><template x-for="ev in r.evidence" :key="ev"><span class="dr-chip" x-text="ev"></span></template></div></div></template>
               <template x-if="r.expected"><div class="dr-sec"><div class="lab">预期效果</div><div class="val" x-text="r.expected"></div></div></template>
@@ -1842,6 +1843,7 @@
                 <span class="dr-tps" x-show="r.tps" x-text="fmt(r.tps)+' tok/s'"></span>
               </div>
               <template x-if="r.snap"><div class="dr-sec"><div class="lab">诊断快照（Agent 看到的事实）</div><div class="val" x-text="r.snap"></div></div></template>
+              <template x-if="r.thinking"><div class="dr-sec"><div class="lab">Agent 思考过程(原始)</div><div class="val" style="white-space:pre-wrap;max-height:220px;overflow-y:auto" x-text="r.thinking"></div></div></template>
               <template x-if="r.rationale"><div class="dr-sec"><div class="lab">Agent 推理</div><div class="val" x-text="r.rationale"></div></div></template>
               <template x-if="r.evidence"><div class="dr-sec"><div class="lab">证据引用</div><div class="dr-chips"><template x-for="ev in r.evidence" :key="ev"><span class="dr-chip" x-text="ev"></span></template></div></div></template>
               <template x-if="r.expected"><div class="dr-sec"><div class="lab">预期效果</div><div class="val" x-text="r.expected"></div></div></template>

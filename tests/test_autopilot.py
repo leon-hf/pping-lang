@@ -581,6 +581,60 @@ def test_openai_agent_done(monkeypatch):
     assert d.done
 
 
+def test_kimi_agent_captures_thinking(monkeypatch):
+    """思考过程直播:provider 响应里的 thinking block 随决策带出(dec.thinking)。"""
+    from pping_lang.autopilot.agent import KimiCodingAgent
+
+    class Resp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
+
+        def read(self):
+            return json.dumps({"content": [
+                {"type": "thinking", "thinking": "waiting=28 说明需求远超准入闸,一步到位"},
+                {"type": "text", "text": '{"done":false,"action":{"knob":"max_num_seqs","value":32},'
+                                         '"rationale":"提并发","evidence_refs":["A:live"]}'},
+            ]}).encode("utf-8")
+
+    import urllib.request
+    monkeypatch.setattr(urllib.request, "urlopen", lambda req, timeout: Resp())
+    a = KimiCodingAgent(api_key="k")
+    cands = propose_candidates("A", {"max_num_seqs": 4, "gpu_memory_utilization": 0.70})
+    d = a.propose(_ctx(cands, config={"max_num_seqs": 4}))
+    assert d.knob == "max_num_seqs" and d.to_val == 32
+    assert "一步到位" in d.thinking
+
+
+def test_runner_persists_thinking_and_streams_decision(tmp_path):
+    """思考落 round 记录(agent_thinking)+ 决策到达即刻直播(不等 bench 落定)。"""
+    from pping_lang.autopilot.agent import AgentDecision
+
+    class ThinkingAgent:
+        model = "thinker"
+
+        def propose(self, ctx):
+            cand = next(c for c in ctx.candidates if c["knob"] == "max_num_seqs")
+            return AgentDecision(knob="max_num_seqs", config=cand["config"],
+                                 from_val=cand["from"], to_val=cand["to"], flag=cand["flag"],
+                                 rationale="提并发摊薄权重搬运",
+                                 thinking="MFU 双低且 KV 富余,先动准入闸")
+
+    store = SessionStore(tmp_path / "think.jsonl")
+    store.new_session("ap-think", {"target": "throughput"}, {"rounds": 1})
+    Runner(store=store, sandbox=SimSandbox("M"), agent=ThinkingAgent(), obj=OBJ,
+           budget={"rounds": 1, "seconds": 900}, model="M", step_delay_s=0.0).run()
+    st = store.status_dict()
+    cand = [r for r in st["rounds"] if r["kind"] == "candidate"][0]
+    assert "先动准入闸" in cand["agent_thinking"]
+    msgs = [e["message"] for e in st["events"]]
+    assert any(m.startswith("agent 思考:") for m in msgs)
+    assert any(m.startswith("agent 决策:max_num_seqs") for m in msgs)
+    store.close()
+
+
 def test_resilient_agent_falls_back_to_stub():
     from pping_lang.autopilot.agent import ResilientAgent
 

@@ -1780,6 +1780,7 @@ function autopilotTab() {
       return {
         round: r.round, kind: r.kind, decision: r.decision, verdict: v.t, vcls: v.c,
         ts: r.ts_wall || '',
+        thinking: r.agent_thinking || '',
         fallback: (r.action && r.action.llm_fallback) || null,
         diag: (dg.evidence_refs || []).join(' · '),
         hyp: r.rationale || '', rationale: r.rationale || '',

@@ -46,6 +46,7 @@ class AgentDecision:
     evidence_refs: list[str] = field(default_factory=list)
     guardrail_notes: str = ""
     candidate_meta: dict = field(default_factory=dict)
+    thinking: str = ""                           # LLM 思考过程(provider 支持时),直播+落轨迹
 
 
 def config_hash(config: dict) -> str:
@@ -215,6 +216,7 @@ class _HTTPAgent:
         self.temperature = temperature
         self.timeout_s = timeout_s
         self._progress = None            # set_progress(cb):重试过程亮给直播,解释等待时长
+        self._last_thinking = ""         # 最近一次调用的思考文本(provider 支持时)
 
     def set_progress(self, cb) -> None:
         self._progress = cb
@@ -237,9 +239,12 @@ class _HTTPAgent:
         last: Exception | None = None
         for attempt in range(self.NET_RETRIES + 1):
             try:
+                self._last_thinking = ""
                 text = self._call(system, user)
                 out = json.loads(text[text.find("{"):text.rfind("}") + 1])
-                return _decision_from_json(out, ctx)
+                dec = _decision_from_json(out, ctx)
+                dec.thinking = self._last_thinking       # provider 支持时:思考过程随决策带出
+                return dec
             except Exception as e:  # noqa: BLE001 — SSL RST/超时/截断/非 JSON
                 last = e
                 if attempt < self.NET_RETRIES:
@@ -269,7 +274,9 @@ class OpenAIAgent(_HTTPAgent):
             f"{self.base_url}/chat/completions", data=body,
             headers={"Content-Type": "application/json", "Authorization": f"Bearer {self.api_key}"})
         with urllib.request.urlopen(req, timeout=self.timeout_s) as resp:
-            return json.loads(resp.read())["choices"][0]["message"]["content"]
+            msg = json.loads(resp.read())["choices"][0]["message"]
+        self._last_thinking = str(msg.get("reasoning_content") or "")
+        return msg["content"]
 
 
 class ClaudeAgent(_HTTPAgent):
@@ -293,7 +300,12 @@ class ClaudeAgent(_HTTPAgent):
             headers={"Content-Type": "application/json", "x-api-key": self.api_key,
                      "anthropic-version": "2023-06-01"})
         with urllib.request.urlopen(req, timeout=self.timeout_s) as resp:
-            return json.loads(resp.read())["content"][0]["text"]
+            blocks = json.loads(resp.read())["content"]
+        self._last_thinking = "\n".join(
+            str(b.get("thinking") or "") for b in blocks
+            if isinstance(b, dict) and b.get("type") == "thinking")
+        texts = [b["text"] for b in blocks if isinstance(b, dict) and b.get("type") == "text"]
+        return texts[0] if texts else ""
 
 
 class KimiCodingAgent(_HTTPAgent):
@@ -320,6 +332,9 @@ class KimiCodingAgent(_HTTPAgent):
                      "User-Agent": "KimiCLI/0.77"})
         with urllib.request.urlopen(req, timeout=self.timeout_s) as resp:
             content = json.loads(resp.read()).get("content") or []
+        self._last_thinking = "\n".join(
+            str(b.get("thinking") or "") for b in content
+            if isinstance(b, dict) and b.get("type") == "thinking" and b.get("thinking"))
         texts = [str(b.get("text") or "") for b in content
                  if isinstance(b, dict) and b.get("type") == "text" and b.get("text")]
         if texts:

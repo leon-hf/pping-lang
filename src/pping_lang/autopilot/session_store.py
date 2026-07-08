@@ -46,6 +46,7 @@ class Round:
     decision: str = ""                           # baseline | kept | reverted | tie | done
     bench_spec: dict = field(default_factory=dict)
     agent_model: str = ""
+    agent_thinking: str = ""                     # LLM 思考过程(provider 支持时,截断落盘)
 
     def to_dict(self) -> dict:
         return asdict(self)
