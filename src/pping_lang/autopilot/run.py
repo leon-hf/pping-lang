@@ -46,6 +46,10 @@ def main(argv: list[str] | None = None) -> int:
                    help="收尾时在 host 执行的完整恢复命令(shell)。容器主进程是 sleep "
                         "infinity、serve 靠 docker exec 起的部署形态必须给:单纯 docker "
                         "start 只会拉起 sleep,serve/dashboard 不会回来")
+    p.add_argument("--skip-serve-restart", action="store_true",
+                   help="收尾只停不启:恢复主 serve 交给外部编排(bridge watcher)。"
+                        "bridge 接管主面板端口期间,这里的 docker start 会撞端口,"
+                        "把容器打进'跑着但端口没发布'的病态——恢复权必须单一")
     p.add_argument("--session-dir", default=".", help="session JSONL 落盘目录")
     p.add_argument("--session-id", default=None, help="外部指定 session id(bridge 用)")
     p.add_argument("--resume", default=None, help="从已有 session JSONL 恢复并继续跑")
@@ -170,7 +174,9 @@ def main(argv: list[str] | None = None) -> int:
                elapsed_s=elapsed_s).run()                        # 同步跑到底
     finally:
         sandbox.teardown()                                       # 兜底清候选容器
-        if serve_was_up:
+        if serve_was_up and args.skip_serve_restart:
+            print(f"[autopilot] 主 serve '{serve}' 由外部编排恢复(--skip-serve-restart)")
+        elif serve_was_up:
             print(f"[autopilot] 重启主 serve 容器 '{serve}' …")
             _docker("start", serve)
             if args.restore_cmd:                                 # sleep-infinity 形态还需 exec serve
