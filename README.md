@@ -15,9 +15,9 @@
 
 **[🌐 在线演示 Live Demo →](https://leon-hf.github.io/pping-lang/)** —— 浏览器直接看真机采到的仪表盘（实时 / Kernel / 规则 / 压测 / Autopilot，中英双语）
 
-**Autopilot 已跑通真机闭环**：在 runw（RTX 5060 Ti、vLLM 0.21、Qwen2.5-0.5B）上，Agent 在沙盒里按「诊断 → 改一个旋钮 → 压测 → 留下/回滚」自动把吞吐从 **986 → 6,094 tok/s（×6.18）**，最终给出人工 promote 的 `vllm serve` 推荐命令。
+**Autopilot 已跑通真机闭环**：在 runw（RTX 5060 Ti、vLLM 0.21、Qwen2.5-0.5B）上，Agent 在沙盒里按「诊断 → 改一个旋钮 → 压测 → 留下/回滚」自动把吞吐从 **986 → 6,094 tok/s（×6.18）**，最终给出人工 promote 的 `vllm serve` 推荐命令。同样重要的是它**敢回滚、会认账**：另一次 session 里 Agent 一步提并发拿到 ×5.1，但实测 TPOT p99 破 SLA —— 判负回滚，收敛到该 SLA 下的诚实最优；7B-AWQ 上诊断命中带宽墙后，Agent 论证「无对症旋钮」诚实收敛，不编造收益。
 
-[在线演示](https://leon-hf.github.io/pping-lang/) · [快速上手](#快速上手) · [仪表盘](#仪表盘) · [兼容性](#兼容性) · [架构](#架构) · [路线图](#路线图)
+[在线演示](https://leon-hf.github.io/pping-lang/) · [快速上手](#快速上手) · [Autopilot 真机调优 Quickstart](docs/autopilot-quickstart.md) · [仪表盘](#仪表盘) · [兼容性](#兼容性) · [架构](#架构) · [路线图](#路线图)
 
 </div>
 
@@ -25,6 +25,7 @@
 
 ## Latest News
 
+- **2026-07** —— Autopilot 真机加固与验证：九个真实调优 session 打磨出的一批修复 —— Agent 可在旋钮值域内自选跨度（证据支持时一步到位，压测判决兜底）；准入闸绑定守卫（waiting 队列是决定性证据，负载喂不满时诚实说"瓶颈在负载"）；median-of-3 压测去噪（p99 在 SLA 边界不再翻转判定）；LLM 调用失败自动兜底并在 UI 显著标记；调优期间主面板端口由 host 侧 bridge 接管，**刷新页面不再打不开**，结束后自动切回；7B-AWQ 上首次真机命中带宽墙 regime 并诚实收敛
 - **2026-07** —— Autopilot M0：诊断驱动的自动调优 Agent 已接入 dashboard 和 host-side 沙盒编排；runw 真机 session 跑出 `986 → 6,094 tok/s（×6.18）`，每轮只改一个 vLLM 旋钮，bench 验证后才 kept，生产上线仍是人工 promote
 - **2026-06** —— 事实规则诊断引擎：诊断从扁平 if-else 升级为「事实 + 署名推断」两层 —— 规则名即客观事实（测出来的），根因与处方作为署名推断单列；阈值集中到一份 SLA 配置，可在仪表盘里热加载进运行中的引擎，并支持增删自定义规则
 - **2026-06** —— 指标持久化去 DuckDB：进程内 DuckDB 改为顺序追加 JSONL（AppendLog），消除每迭代 INSERT 与 colocated serving 抢 GIL/IO；保留窗口改为时间制（`PPING_LANG_RETENTION_SECONDS`，默认 2h），按卷滚动、磁盘有界

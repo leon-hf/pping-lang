@@ -888,6 +888,18 @@ footer{border-top:1px solid var(--border);padding:48px 0 60px;margin-top:40px}
         <div class="ap-cmd"><span class="pfx">$</span> vllm serve Qwen/Qwen2.5-0.5B-Instruct --max-num-seqs 32 --gpu-memory-utilization 0.7 --performance-mode throughput</div>
         <div class="ap-honest" data-i18n="ap.honest">这是一次 runw 真机 session：RTX 5060 Ti、vLLM 0.21、Qwen2.5-0.5B、mixed-short/c32。收益来自故意朴素的常见起点；已调过的基线只应期待诚实的边际收益。</div>
       </div>
+
+      <!-- 信任时刻:敢回滚、会认账(真机 session,非演绎) -->
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px;margin-top:16px">
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px 18px">
+          <div style="font-weight:800;font-size:13.5px;margin-bottom:6px" data-i18n="ap.t1.h">⚖️ 压测是唯一真相 —— ×5.1 也照样回滚</div>
+          <p style="font-size:12.5px;color:var(--muted);line-height:1.6;margin:0" data-i18n="ap.t1.p">另一次真机 session（2026-07-07）：Agent 引用 waiting 队列证据，一步把 max_num_seqs 4→32，吞吐 ×5.1 —— 但 TPOT p99 实测 82ms，破了 50ms SLA。<b>判负回滚</b>，Agent 收缩到 8，给出该 SLA 下的诚实最优。LLM 提议可以大胆，判决只认数据。</p>
+        </div>
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px 18px">
+          <div style="font-weight:800;font-size:13.5px;margin-bottom:6px" data-i18n="ap.t2.h">🧭 能署名地说「无事可做」—— 7B 带宽墙</div>
+          <p style="font-size:12.5px;color:var(--muted);line-height:1.6;margin:0" data-i18n="ap.t2.p">Qwen2.5-7B-AWQ 真机 session（2026-07-08）：诊断命中带宽墙（HBM 利用 85%），Agent 论证「batch 被 offered load 封顶、扩 KV 池无益」，两轮试探后<b>诚实收敛</b>，推荐保持基线 —— 不编造收益，这和能报 ×6 一样重要。</p>
+        </div>
+      </div>
     </div>
 
     <!-- L0–L4 自主级别阶梯 -->
@@ -1321,6 +1333,10 @@ const I18N_EN = {
   "ap.reverted":"↩ reverted","ap.tie":"≈ tie","ap.done":"■ done",
   "ap.res.pre":"Throughput","ap.res.post":", still within TTFT SLA",
   "ap.honest":"This is a true runw session: RTX 5060 Ti, vLLM 0.21, Qwen2.5-0.5B, mixed-short/c32. The gain comes from an intentionally naive but common starting point; already-tuned baselines should expect honest marginal gains.",
+  "ap.t1.h":"⚖️ The bench is the only truth — even ×5.1 gets reverted",
+  "ap.t1.p":"Another real session (2026-07-07): citing waiting-queue evidence, the agent jumped max_num_seqs 4→32 in one move — ×5.1 throughput, but measured TPOT p99 of 82ms broke the 50ms SLA. <b>Reverted.</b> The agent backed off to 8 and delivered the honest optimum under that SLA. Proposals can be bold; the verdict only trusts data.",
+  "ap.t2.h":"🧭 Saying “nothing to do” with evidence — 7B bandwidth wall",
+  "ap.t2.p":"Qwen2.5-7B-AWQ real session (2026-07-08): diagnosis hit the bandwidth wall (85% HBM utilization). The agent reasoned that batch size was capped by offered load and a larger KV pool would not help, probed twice, then <b>honestly converged</b> and recommended keeping the baseline — refusing to invent gains matters as much as reporting ×6.",
   "lvl.h":"Autonomy levels L0–L4 · from \"seeing\" to \"writing its own kernels\"",
   "lvl.sub":"Two orthogonal axes: <b>capability</b> (config → code) and <b>promotion</b> (sandbox-auto / production-human). Auto caps at L3; <b>production is always a human promote</b>.",
   "lvl.0t":"Observe","lvl.0d":"diagnose and conclude, no action — pping-lang today","lvl.0g":"shipped",
