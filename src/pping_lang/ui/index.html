@@ -1730,6 +1730,19 @@
               <span class="ap-changed" x-show="pending && pending.action" x-text="pending ? pending.action : ''"></span>
             </div>
             <div class="ap-rrun"><span class="sp"></span><span x-text="pending && pending.progress ? pending.progress : '状态心跳中，未改线上 serve'"></span><small x-text="pending && pending.age ? pending.age : ''"></small></div>
+            <!-- 本轮 Agent 推理:常驻(不随心跳滚动被挤走)——从全量事件里取,不受 5 条窗口限制 -->
+            <div class="ap-reasoning" x-show="pending && pending.reasoning" style="margin:8px 0;padding:10px 12px;background:var(--surface-2,#f8f8fb);border-radius:8px;border-left:3px solid var(--coral,#e8604c)">
+              <div style="font-size:11px;font-weight:800;color:var(--muted);margin-bottom:4px">本轮 Agent 推理</div>
+              <div x-show="pending.reasoning.knobLine" style="font-size:12.5px;font-weight:700;margin-bottom:3px" x-text="pending.reasoning.knobLine"></div>
+              <div x-show="pending.reasoning.rationale" style="font-size:12px;line-height:1.55" x-text="pending.reasoning.rationale"></div>
+              <div x-show="pending.reasoning.evidence && pending.reasoning.evidence.length" style="margin-top:5px;display:flex;gap:5px;flex-wrap:wrap">
+                <template x-for="ev in (pending.reasoning.evidence || [])" :key="ev"><span class="dr-chip" x-text="ev"></span></template>
+              </div>
+              <details x-show="pending.reasoning.thinking" style="margin-top:5px">
+                <summary style="font-size:11px;color:var(--muted);cursor:pointer">思考原文</summary>
+                <div style="font-size:11px;color:var(--muted);white-space:pre-wrap;max-height:140px;overflow-y:auto;margin-top:4px" x-text="pending.reasoning.thinking"></div>
+              </details>
+            </div>
             <div class="ap-events" x-show="pending && pending.events && pending.events.length">
               <template x-for="ev in pending.events" :key="ev.ts_wall + ev.phase + ev.message">
                 <div class="ap-event" :class="ev.level || 'info'">

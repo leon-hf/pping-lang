@@ -1649,9 +1649,34 @@ function autopilotTab() {
       const elapsed = Math.max(0, Math.round((Date.now() - this._eventTime(ev)) / 1000));
       return `bench ${Math.min(elapsed, total)}s / ${total}s`;
     },
+    _latestReasoning(allEvents, round) {
+      // 本轮最新的 agent 思考/决策(全量事件里找,不受 5 条滚动窗口影响)——
+      // 心跳(15s 一条)量远大于 propose 事件(每轮 1-2 条),纯"取最新事件"会把
+      // 思考/决策挤出窗口(真机实测:2.5 分钟后被 18+ 条心跳冲掉)。
+      let thinking = null, decision = null;
+      for (let i = allEvents.length - 1; i >= 0; i--) {
+        const e = allEvents[i];
+        if (Number(e.round) !== round) continue;
+        const msg = e.message || '';
+        if (!decision && msg.startsWith('agent 决策:')) decision = e;
+        if (!thinking && msg.startsWith('agent 思考:')) thinking = e;
+        if (decision && thinking) break;
+      }
+      if (!decision && !thinking) return null;
+      const d = (decision && decision.detail) || {};
+      return {
+        knobLine: decision ? decision.message.replace(/^agent 决策:/, '').trim() : '',
+        rationale: d.rationale || '',
+        expectedEffect: d.expected_effect || '',
+        guardrailNotes: d.guardrail_notes || '',
+        evidence: (d.evidence_refs || []).slice(0, 4),
+        thinking: (thinking && thinking.detail && thinking.detail.thinking) || '',
+      };
+    },
     _pendingFromStatus(s, term) {
       if (term) return null;
-      const events = (s.events || []).slice(-5);
+      const allEvents = s.events || [];
+      const events = allEvents.slice(-5);
       const ev = events[events.length - 1] || null;
       if (!ev) {
         return { phase: 'baseline', round: 0, title: '启动真实调优', hyp: '正在创建 session 并准备基线压测', events: [], progress: '' };
@@ -1665,14 +1690,16 @@ function autopilotTab() {
       const evidence = (detail.evidence_refs || []).slice(0, 3).join(' · ');
       let hyp = ev.message || this._phaseLabel(ev.phase);
       if (evidence) hyp += ` · ${evidence}`;
+      const curRound = Number.isFinite(evRound) ? evRound : maxCompletedRound + 1;
       return {
         phase: ev.phase,
-        round: Number.isFinite(evRound) ? evRound : maxCompletedRound + 1,
+        round: curRound,
         title: this._phaseLabel(ev.phase),
         hyp,
         action,
         progress: this._benchProgress(ev),
         age: this._eventAge(ev),
+        reasoning: this._latestReasoning(allEvents, curRound),   // 常驻,不被心跳挤走
         events: events.slice().reverse().map(x => Object.assign({}, x, {
           label: this._phaseLabel(x.phase),
           age: this._eventAge(x),
