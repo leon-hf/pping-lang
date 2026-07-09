@@ -2063,7 +2063,8 @@
   @keyframes apin{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
   .ap-round:last-child{border-bottom:none}
   .ap-round.base{background:var(--surface-tint)}
-  .ap-round.cur{background:linear-gradient(90deg,var(--coral-soft),transparent 70%)}
+  .ap-round.cur{background:linear-gradient(90deg,var(--coral-soft),transparent 70%);
+    grid-template-columns:46px 1fr}   /* 进行中还没有吞吐柱/判定 → 那两列(298px+gap)纯空白,不留 */
   .ap-rn{font-family:ui-monospace,Consolas,monospace;font-size:14px;font-weight:800;color:var(--coral-strong)}
   .ap-rbody{min-width:0;font-size:12.5px}
   .ap-changed{display:inline-block;margin-left:8px;font-family:ui-monospace,Consolas,monospace;font-size:11px;font-weight:700;color:var(--coral-strong);background:var(--coral-soft);border-radius:5px;padding:1px 7px}
