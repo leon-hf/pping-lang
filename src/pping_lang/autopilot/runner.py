@@ -221,8 +221,12 @@ class Runner(threading.Thread):
         self._equivalence_golden: list[str] | None = None
         self._cur_round: int | None = None
         if hasattr(self._sb, "set_progress"):      # 沙盒 apply 长静默窗 → 心跳进事件流
+            # 同一个回调槽同时接就绪心跳(apply)和 bench 实时成绩(_bench_progress,前缀
+            # "压测 "),按消息前缀分流,别把压测心跳打成"启动候选沙盒"的标签(会误导判断)。
             self._sb.set_progress(
-                lambda msg: self._event("apply", msg, round=self._cur_round))
+                lambda msg: self._event(
+                    "benchmark" if msg.startswith("压测 ") else "apply",
+                    msg, round=self._cur_round))
         if hasattr(self._agent, "set_progress"):   # LLM 网络重试过程亮出来,解释等待时长
             self._agent.set_progress(
                 lambda msg: self._event("propose", msg, round=self._cur_round, level="warn"))
