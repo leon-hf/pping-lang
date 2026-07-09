@@ -1680,7 +1680,10 @@ function autopilotTab() {
       if (!decision && !thinking) return null;
       const d = (decision && decision.detail) || {};
       return {
-        knobLine: decision ? decision.message.replace(/^agent 决策:/, '').trim() : '',
+        // message = "knob from→to —— rationale前110字"(服务端为滚动事件流截断拼的);
+        // 只取 " —— " 前半段(旋钮变更),完整 rationale 用下面的 detail.rationale——
+        // 否则会先显示截断预览、紧接着又完整重复一遍。
+        knobLine: decision ? decision.message.replace(/^agent 决策:/, '').split(' —— ')[0].trim() : '',
         rationale: d.rationale || '',
         expectedEffect: d.expected_effect || '',
         guardrailNotes: d.guardrail_notes || '',
@@ -1703,8 +1706,11 @@ function autopilotTab() {
       const detail = ev.detail || {};
       const action = detail.flag ? `${detail.flag} ${detail.from} → ${detail.to}` : '';
       const evidence = (detail.evidence_refs || []).slice(0, 3).join(' · ');
-      let hyp = ev.message || this._phaseLabel(ev.phase);
-      if (evidence) hyp += ` · ${evidence}`;
+      // agent 思考/决策事件的完整内容已经在下面的常驻推理框里显示;这里再放一遍
+      // ev.message(服务端为滚动流截断过的版本)只会造出"截断预览 + 完整重复"的观感。
+      const isReasoningEvent = /^agent (决策|思考):/.test(ev.message || '');
+      let hyp = isReasoningEvent ? '' : (ev.message || this._phaseLabel(ev.phase));
+      if (hyp && evidence) hyp += ` · ${evidence}`;
       const curRound = Number.isFinite(evRound) ? evRound : maxCompletedRound + 1;
       return {
         phase: ev.phase,
