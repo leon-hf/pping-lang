@@ -1735,6 +1735,7 @@ function autopilotTab() {
         agent: Object.assign({}, this.agent, {
           guidance: this.adv.guidance, temperature: this.adv.temperature,
           timeout_s: this.adv.timeout_s, retries: this.adv.retries,
+          lang: _uiLang(),   // agent 自由文本(rationale/思考过程)跟随界面语言,而非默认英文
         }),
       };
       try {

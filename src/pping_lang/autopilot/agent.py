@@ -97,9 +97,22 @@ REGIME_PLAYBOOK = {
 }
 
 
-def build_messages(ctx: AgentContext, guidance: str = "") -> tuple[str, str]:
-    """§8 prompt 骨架:返回 (system, user)。"""
-    system = LOCKED_PROMPT + (("\n———\n额外指引:" + guidance) if guidance else "")
+# 自由文本字段(rationale/reason/expected_effect/guardrail_notes)的应答语言:
+# 不指定时 LLM 会跟着上下文里的英文技术标识符(max_num_seqs/evidence_refs…)默认说英文,
+# 即使 system prompt 本身是中文——thinking 通道尤其容易滑向模型默认语言。
+# 只影响这几个自由文本字段,不影响 JSON key / knob 名 / evidence_refs 里的规则 id。
+_LANG_DIRECTIVE = {
+    "zh": "所有自由文本字段(rationale/reason/expected_effect/guardrail_notes,以及思考过程)"
+          "必须用中文回答,不要用英文。knob 名、JSON key、evidence_refs 里的规则 id 保持原样不译。",
+    "en": "Answer all free-text fields (rationale/reason/expected_effect/guardrail_notes, and your "
+          "thinking) in English. Keep knob names, JSON keys, and evidence_refs rule ids as-is.",
+}
+
+
+def build_messages(ctx: AgentContext, guidance: str = "", lang: str = "zh") -> tuple[str, str]:
+    """§8 prompt 骨架:返回 (system, user)。lang 控制自由文本字段的应答语言(zh/en,默认 zh)。"""
+    directive = _LANG_DIRECTIVE.get(lang, _LANG_DIRECTIVE["zh"])
+    system = LOCKED_PROMPT + "\n" + directive + (("\n———\n额外指引:" + guidance) if guidance else "")
     bn = ctx.diagnosis.get("bottleneck")
     user = json.dumps({
         "objective": ctx.objective,
@@ -209,12 +222,14 @@ class _HTTPAgent:
     model = "http-agent"
     NET_RETRIES = 4          # 成功率 1/3 时 4 发 ≈ 80%,5 发 ≈ 87%
 
-    def __init__(self, guidance: str = "", temperature: float = 0.4, timeout_s: float = 90.0) -> None:
+    def __init__(self, guidance: str = "", temperature: float = 0.4, timeout_s: float = 90.0,
+                 lang: str = "zh") -> None:
         # timeout_s 默认 90:thinking 类模型(K2.7 等)单次响应实测常 >30s,
         # 30s 超时会让每轮都退化成启发式兜底(真机 ap-20260706-153658 全程 TimeoutError)。
         self.guidance = guidance
         self.temperature = temperature
         self.timeout_s = timeout_s
+        self.lang = lang if lang in _LANG_DIRECTIVE else "zh"
         self._progress = None            # set_progress(cb):重试过程亮给直播,解释等待时长
         self._last_thinking = ""         # 最近一次调用的思考文本(provider 支持时)
 
@@ -235,7 +250,7 @@ class _HTTPAgent:
         """调用 + JSON 解析整体纳入重试:响应被截断/非 JSON(JSONDecodeError)与网络失败
         同等对待——一次坏响应不该把整轮打回启发式兜底。"""
         import time as _time
-        system, user = build_messages(ctx, self.guidance)
+        system, user = build_messages(ctx, self.guidance, self.lang)
         last: Exception | None = None
         for attempt in range(self.NET_RETRIES + 1):
             try:

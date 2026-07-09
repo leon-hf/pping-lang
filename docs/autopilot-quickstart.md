@@ -46,6 +46,7 @@ python -m pping_lang.autopilot.run \
 | `--baseline-max-num-seqs / --baseline-gpu-util` | 基线起点；默认 32 / 0.70（故意朴素的常见配置） |
 | `--quality-gate` | 放开 T2 质量类旋钮（kv-cache fp8 / 量化 / 投机解码），带输出等价检查 |
 | `--dash-port 8013` | 候选容器带 pping 插件时发布其 dashboard：Agent 直接读**真诊断**而非启发式 |
+| `--agent-lang zh\|en` | Agent 自由文本应答语言（rationale/reason/思考过程）；默认 `zh`。不指定时 LLM 会跟着上下文里的英文技术标识符默认答英文，即使 system prompt 本身是中文 |
 
 Agent 供应商任选其一：
 

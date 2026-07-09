@@ -94,6 +94,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--agent-model", default=None)
     p.add_argument("--agent-provider", default=None)
     p.add_argument("--agent-guidance", default="")
+    p.add_argument("--agent-lang", default=None, choices=["zh", "en"],
+                   help="Agent 自由文本应答语言(rationale/reason/思考过程),默认中文")
     args = p.parse_args(argv)
 
     agent_cfg = None
@@ -102,10 +104,11 @@ def main(argv: list[str] | None = None) -> int:
     agent_model = args.agent_model or os.environ.get("AGENT_MODEL")
     agent_provider = args.agent_provider or os.environ.get("AGENT_PROVIDER")
     agent_guidance = args.agent_guidance or os.environ.get("AGENT_GUIDANCE", "")
+    agent_lang = args.agent_lang or os.environ.get("AGENT_LANG", "zh")
     if agent_key and agent_base and agent_model:
         agent_cfg = {"base_url": agent_base, "api_key": agent_key,
                      "model": agent_model, "provider": agent_provider,
-                     "guidance": agent_guidance}
+                     "guidance": agent_guidance, "lang": agent_lang}
 
     env = {}
     for kv in args.env:

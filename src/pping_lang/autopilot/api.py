@@ -35,7 +35,8 @@ def build_agent(cfg: dict | None):
     cfg = cfg or {}
     key, base, model = cfg.get("api_key"), cfg.get("base_url"), cfg.get("model")
     common = dict(guidance=cfg.get("guidance", ""), temperature=float(cfg.get("temperature", 0.4)),
-                  timeout_s=float(cfg.get("timeout_s", 90)))    # thinking 模型常 >30s(见 _HTTPAgent)
+                  timeout_s=float(cfg.get("timeout_s", 90)),    # thinking 模型常 >30s(见 _HTTPAgent)
+                  lang=cfg.get("lang", "zh"))                   # 自由文本应答语言,默认中文
     primary = None
     if key and (cfg.get("provider") == "anthropic" or (base and "anthropic" in base)):
         primary = ClaudeAgent(api_key=key, model=model or "claude-opus-4", **common)

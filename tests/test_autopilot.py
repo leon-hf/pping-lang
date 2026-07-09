@@ -561,6 +561,37 @@ def _ctx(cands, bottleneck="A", config=None, tried=None):
         candidates=cands, tried_configs=tried or [])
 
 
+def test_build_messages_lang_directive_defaults_to_chinese():
+    """不指定 lang 时默认中文指令,防止 LLM 跟着英文技术标识符默认答英文。"""
+    from pping_lang.autopilot.agent import build_messages
+    cands = propose_candidates("A", {"max_num_seqs": 32, "gpu_memory_utilization": 0.70})
+    system, _ = build_messages(_ctx(cands), lang="zh")
+    assert "用中文回答" in system
+    system_default, _ = build_messages(_ctx(cands))    # 不传 lang 参数也应默认中文
+    assert "用中文回答" in system_default
+
+
+def test_build_messages_lang_directive_english():
+    from pping_lang.autopilot.agent import build_messages
+    cands = propose_candidates("A", {"max_num_seqs": 32, "gpu_memory_utilization": 0.70})
+    system, _ = build_messages(_ctx(cands), lang="en")
+    assert "Answer all free-text fields" in system and "用中文回答" not in system
+
+
+def test_http_agent_invalid_lang_falls_back_to_zh():
+    from pping_lang.autopilot.agent import OpenAIAgent
+    a = OpenAIAgent("http://x/v1", "k", "m", lang="fr")   # 不支持的语言 → 回落中文,不炸
+    assert a.lang == "zh"
+
+
+def test_build_agent_propagates_lang_from_config():
+    from pping_lang.autopilot.api import build_agent
+    agent = build_agent({"provider": "anthropic", "api_key": "k", "model": "m", "lang": "en"})
+    assert agent._primary.lang == "en"                    # ResilientAgent 包裹的真 agent
+    agent_default = build_agent({"provider": "anthropic", "api_key": "k", "model": "m"})
+    assert agent_default._primary.lang == "zh"             # 未传 lang → 默认中文
+
+
 def test_openai_agent_picks_candidate(monkeypatch):
     from pping_lang.autopilot.agent import OpenAIAgent
     a = OpenAIAgent("http://x/v1", "k", "m")
