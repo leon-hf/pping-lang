@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import re
 import socket
 import time
 from typing import Any
@@ -31,6 +32,24 @@ EQUIVALENCE_PROMPTS = (
     "Answer with one short factual sentence: what is 2 + 2?",
     "Write exactly one concise sentence about GPU memory.",
 )
+
+# 就绪心跳的日志摘取:vLLM 启动日志九成是噪声("Unknown vLLM environment variable
+# detected"之类),只挑真的标志进度的行(加载/编译/CUDA graph/显存/KV);挑到的行再
+# 剥掉 "(APIServer pid=N) INFO MM-DD HH:MM:SS [file.py:NNN]" 这层前缀,只剩人话。
+_LOG_INTERESTING_RE = re.compile(
+    r"loading|load(ed|ing)? took|CUDA graph|Capturing|Profiling|torch\.compil|"
+    r"Warming up|memory profil|KV cache|GiB|took \d",
+    re.IGNORECASE,
+)
+_LOG_PID_PREFIX_RE = re.compile(r"^\(\w+ pid=\d+\)\s*")
+_LOG_TS_PREFIX_RE = re.compile(r"^(?:INFO|WARNING|ERROR)\s+[\d-]+\s+[\d:]+\s+\[[^\]]+\]\s*")
+
+
+def _clean_log_line(line: str) -> str:
+    # 两层前缀顺序剥离:"(EngineCore pid=206) " 和 "INFO 07-08 23:35:42 [monitor.py:53] "
+    # 常常叠在一起,单条 ^ 锚定的正则一次 sub 只能吃掉最外层那层。
+    s = _LOG_PID_PREFIX_RE.sub("", line.strip())
+    return _LOG_TS_PREFIX_RE.sub("", s)
 
 _CONFIG_ATTRS = {
     "max_num_seqs": ("scheduler_config", "max_num_seqs"),
@@ -263,6 +282,17 @@ class DockerSandbox:
                 return line.strip()
         return None
 
+    def _logs_tail_interesting(self, n: int = 30) -> str | None:
+        """就绪心跳用:最近日志里最后一条真正标志进度的行(加载/编译/CUDA graph/显存),
+        跳过环境变量警告之类的噪声;命中的行剥掉 pid/时间戳前缀。没有可报的行 → None
+        (心跳退化成纯计时,总比刷一行没用的噪声强)。"""
+        r = self._docker("logs", "--tail", str(n), self._container)
+        lines = ((r.stdout or "") + (r.stderr or "")).splitlines()
+        for line in reversed(lines):
+            if _LOG_INTERESTING_RE.search(line):
+                return _clean_log_line(line)[-100:]
+        return None
+
     def apply(self, config: dict) -> None:
         from pping_lang.autopilot.action_space import render_flags
         self.teardown()                                  # 清掉上一候选
@@ -353,14 +383,14 @@ class DockerSandbox:
                 self.teardown()
                 raise LaunchError(f"候选 API 就绪超时({self._ready_timeout:.0f}s)。日志尾:\n{logs}")
             if now - last_report >= 15:                  # 心跳:长静默窗内 UI 不能死着
-                stage = self._logs_tail(1).strip().replace("\n", " ")[-90:]  # vLLM 正在干什么
+                stage = self._logs_tail_interesting()     # 过滤噪声,只留有信息量的进度行
                 self._report(f"等待 vLLM API 就绪 {int(now - start)}s / {self._ready_timeout:.0f}s"
                              + (f" · {stage}" if stage else " …"))
                 last_report = now
             time.sleep(self._poll)
         kv_line = self._find_log_line("KV cache size")   # 引擎实测 KV 池,D regime 的关键底数
         if kv_line:
-            self._report(f"引擎就绪:{kv_line[-110:]}")
+            self._report(f"引擎就绪:{_clean_log_line(kv_line)[-110:]}")
         # 阶段2:真推理探针 —— 确认推理可用 + 跑完首个 JIT(冷引擎首请求慢,否则 bench 0 样本)。
         # 重试式:Blackwell 首推理时长高方差(实测 26s ~ >180s,JIT/cudagraph 竞争),单发长超时
         # 会被一次卡死请求挂满;短超时 + 重试,新连接往往立即成功。

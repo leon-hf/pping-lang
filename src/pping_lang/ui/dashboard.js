@@ -1633,6 +1633,21 @@ function autopilotTab() {
         finalize: '收尾恢复',
       }[phase] || '运行中';
     },
+    // propose 阶段挤了 6 种不同的事(P0 剪枝/候选检索/思考/决策/网络重试/收敛判断),
+    // 共用"等待 Agent 决策"一个标签会看花——按消息前缀拆细,其余阶段维持原标签。
+    _eventLabel(ev) {
+      const msg = ev.message || '';
+      if (ev.phase === 'propose') {
+        if (msg.startsWith('P0 预测剪枝')) return 'P0 剪枝';
+        if (msg.startsWith('诊断命中')) return '候选检索';
+        if (msg.startsWith('agent 思考:')) return 'Agent 思考';
+        if (msg.startsWith('agent 决策:')) return 'Agent 决策';
+        if (msg.startsWith('agent 调用失败')) return '网络重试';
+        if (msg.includes('LLM 调用失败')) return 'LLM 兜底';
+        if (msg.includes('没有对症候选') || msg.includes('近最优')) return '收敛判断';
+      }
+      return this._phaseLabel(ev.phase);
+    },
     _eventTime(ev) {
       const t = Date.parse(ev && ev.ts_wall);
       return Number.isFinite(t) ? t : Date.now();
@@ -1694,14 +1709,14 @@ function autopilotTab() {
       return {
         phase: ev.phase,
         round: curRound,
-        title: this._phaseLabel(ev.phase),
+        title: this._eventLabel(ev),
         hyp,
         action,
         progress: this._benchProgress(ev),
         age: this._eventAge(ev),
         reasoning: this._latestReasoning(allEvents, curRound),   // 常驻,不被心跳挤走
         events: events.slice().reverse().map(x => Object.assign({}, x, {
-          label: this._phaseLabel(x.phase),
+          label: this._eventLabel(x),
           age: this._eventAge(x),
         })),
       };

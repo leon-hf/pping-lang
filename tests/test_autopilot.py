@@ -680,6 +680,35 @@ def _fake_proc(returncode=0, stdout="", stderr=""):
     return type("R", (), {"returncode": returncode, "stdout": stdout, "stderr": stderr})()
 
 
+def test_clean_log_line_strips_layered_prefixes():
+    """就绪心跳日志清理:pid 前缀 + INFO/时间戳/文件名前缀常叠两层,须都剥掉。"""
+    from pping_lang.autopilot.sandbox import _clean_log_line
+    raw = "(EngineCore pid=206) INFO 07-08 23:35:42 [monitor.py:53] torch.compile took 12.3s"
+    assert _clean_log_line(raw) == "torch.compile took 12.3s"
+    assert _clean_log_line("INFO 07-08 23:26:47 [api_server.py:1] hello") == "hello"
+    assert _clean_log_line("no prefix here") == "no prefix here"
+
+
+def test_logs_tail_interesting_filters_noise(monkeypatch):
+    """噪声行(环境变量警告)被过滤;真正标志进度的行(加载/CUDA graph)被选中并清理。"""
+    from pping_lang.autopilot.sandbox import DockerSandbox
+    sb = DockerSandbox("M", "img:dev")
+    lines = "\n".join([
+        "INFO 07-08 23:44:41 [envs.py:1866] Unknown vLLM environment variable detected: FOO",
+        "(APIServer pid=1) INFO 07-08 23:44:59 [gpu_model_runner.py:4959] Model loading took 5.29 GiB",
+        "INFO 07-08 23:45:01 [server.py:9] some other harmless line",
+    ])
+    monkeypatch.setattr(sb, "_docker", lambda *a: _fake_proc(0, lines))
+    assert sb._logs_tail_interesting() == "Model loading took 5.29 GiB"
+
+
+def test_logs_tail_interesting_none_when_nothing_matches(monkeypatch):
+    from pping_lang.autopilot.sandbox import DockerSandbox
+    sb = DockerSandbox("M", "img:dev")
+    monkeypatch.setattr(sb, "_docker", lambda *a: _fake_proc(0, "just noise\nmore noise"))
+    assert sb._logs_tail_interesting() is None
+
+
 def test_docker_sandbox_builds_run_command(monkeypatch):
     import subprocess
     calls = []
