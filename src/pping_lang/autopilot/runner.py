@@ -435,7 +435,22 @@ class Runner(threading.Thread):
         self._store.set_state("baselining")
         self._event("baseline", "建立基线:启动沙盒并跑第一轮压测",
                     round=0, detail={"config": dict(self._baseline), "bench": self._bench_plan()})
-        sc = self._measure(self._baseline)
+        try:
+            sc = self._measure(self._baseline)
+        except Exception as e:           # LaunchError/BenchError → 基线起不来,整个 session 报废
+            # 候选轮的失败早就带容器日志尾(见 _run_candidate);基线轮这条路径当时漏了,
+            # 崩溃原因随容器销毁一起丢失,只剩"0 个成功样本"这种没法排查的短消息。补齐。
+            err = str(e)
+            if "日志尾" not in err and hasattr(self._sb, "_logs_tail"):
+                try:
+                    tail = self._sb._logs_tail()
+                    if tail:
+                        err += "\n容器日志尾:\n" + tail
+                except Exception:  # noqa: BLE001
+                    pass
+            self._event("decide", f"基线失败:{type(e).__name__}: {err[:200]}",
+                        round=0, level="error", detail={"error": err[:1200]})
+            raise
         self._equivalence_golden = self._sample_outputs()
         score = objective_score(sc, self._obj)
         self._best_cfg, self._best_sc, self._best_score = dict(self._baseline), sc, score

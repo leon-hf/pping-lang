@@ -1161,6 +1161,29 @@ def test_runner_t2_equivalence_tolerates_minor_drift(tmp_path):
     store.close()
 
 
+def test_runner_baseline_failure_emits_error_event(tmp_path):
+    """基线轮的 LaunchError/BenchError 之前是裸抛,连诊断信息都留不下(真机教训:
+    "0 个成功样本" 报废整个 session,却没有任何事件说明候选中途崩了)。现在必须
+    在 failed 之前先发一条带 detail.error 的 decide 事件。"""
+    from pping_lang.autopilot.scorecard import BenchError
+
+    class CrashingSandbox(SimSandbox):
+        def measure(self, obj):
+            raise BenchError("bench 0 个成功样本(共 480)→ 候选不可用,判负")
+
+    store = SessionStore(tmp_path / "baseline-crash.jsonl")
+    store.new_session("ap-crash", {"target": "throughput"}, {"rounds": 2})
+    Runner(store=store, sandbox=CrashingSandbox("M"), agent=StubAgent(), obj=OBJ,
+           budget={"rounds": 2, "seconds": 900}, model="M", step_delay_s=0.0).run()
+    st = store.status_dict()
+    assert st["state"] == "failed"
+    assert "BenchError" in (st.get("error") or "")
+    errs = [e for e in st["events"] if e.get("level") == "error"]
+    assert any("基线失败" in (e.get("message") or "") for e in errs)
+    assert any((e.get("detail") or {}).get("error") for e in errs)
+    store.close()
+
+
 def test_run_static_streams_progress_snapshots():
     """bench 直播(反馈密度二期 A):采集期周期回调运行中快照,回调异常不影响压测。"""
     import asyncio
