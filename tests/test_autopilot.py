@@ -1313,6 +1313,27 @@ def test_load_binding_from_probe():
     assert load_binding(cfg, {}, Scorecard(output_tps=1000, ttft_p99_ms=100)) is None
 
 
+def test_load_binding_ambiguous_when_bench_concurrency_not_exceeding_cap():
+    """真机教训:bench 并发默认恰好等于基线 max_num_seqs(都是 32)时,waiting 结构性
+    永远测不出 >0(client 自己就没发第 33 个请求)——不能把"没测过"当"真没绑定"(False),
+    否则 max_num_seqs 会被误剪出候选集,agent 连试都试不了。"""
+    from pping_lang.autopilot.runner import load_binding
+    cfg = {"max_num_seqs": 32}
+
+    def sc_with(probe, concurrency):
+        return Scorecard(output_tps=1000, ttft_p99_ms=100,
+                         run_meta={"runtime_probe": probe, "concurrency": concurrency})
+
+    running_saturated = {"running_reqs": {"max": 32.0, "avg": 29.9},
+                         "waiting_reqs": {"max": 0.0, "avg": 0.0}}
+    # bench 并发 == 上限:没机会观察排队 → 未知(None),别误判 False
+    assert load_binding(cfg, {}, sc_with(running_saturated, concurrency=32)) is None
+    # bench 并发 < 上限:更没机会测出排队 → 同样未知
+    assert load_binding(cfg, {}, sc_with(running_saturated, concurrency=24)) is None
+    # bench 并发确实超过上限、仍无排队 → 这才是"真没绑定"的硬证据
+    assert load_binding(cfg, {}, sc_with(running_saturated, concurrency=48)) is False
+
+
 def test_resilient_agent_marks_fallback_structurally():
     """兜底必须结构化标记(candidate_meta.llm_fallback),不能只藏在 rationale 文案。"""
     from pping_lang.autopilot.agent import ResilientAgent

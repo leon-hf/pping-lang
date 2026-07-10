@@ -82,24 +82,36 @@ def diag_block(config: dict, sc: Scorecard) -> dict:
 def load_binding(config: dict, diag: dict, sc: Scorecard | None = None) -> bool | None:
     """准入闸是否真绑定(§4.4 守卫的姊妹判据)。
 
-    决定性证据是 **waiting 队列**:提高准入上限只对排队中的需求有用。
-    - waiting>0 → 绑定(有需求被闸住);
-    - waiting==0 → 没绑定 —— 即使 running 顶满上限,也只说明负载恰好吃满配置,
-      再提上限没有排队需求可放进来(真实教训:并发 32 压 max_num_seqs=32,
-      running 峰值=32 但 waiting=0,提到 64 一样空转);
-    - waiting 证据缺失 → 退化用 running 峰值 ≥80% 上限作代理;全无证据 → None。"""
+    决定性证据是 **waiting 队列**,但 waiting==0 有两种物理上完全不同的成因,必须分清:
+    ① running 明显低于 max_num_seqs → 真喂不饱,提上限确定没用(False);
+    ② running 顶满/贴近 max_num_seqs 但 waiting 仍是 0 → 要看 bench 并发有没有真的
+       超过这个上限试过。**bench 并发若 ≤ max_num_seqs,压根没有第 33 个请求去排队,
+       waiting=0 是必然结果、不是证据**(真机教训:bridge 默认并发=32 恰好撞上默认基线
+       max_num_seqs=32,导致这条闸在第一轮就恒判"没绑定",连 max_num_seqs 这个最该试的
+       候选都被剪掉)。这种"没测过"要老实返回 None(未知),不能当 False 用。
+    只有 bench 并发确实超过 max_num_seqs、且仍无排队,才是"真没绑定"的硬证据。
+    waiting 证据缺失 → 退化用 running 峰值 ≥80% 上限作代理;全无证据 → None。"""
     seqs = config.get("max_num_seqs")
     running = _probe_stat(sc, "running_reqs", "max")
     if running is None:
         running = diag.get("running")
     if running is None or not seqs:
         return None
+    seqs = float(seqs)
+    running = float(running)
     waiting = _probe_stat(sc, "waiting_reqs", "max")
     if waiting is None:
         waiting = diag.get("waiting")
+    if waiting is not None and float(waiting) > 0:
+        return True                          # 排队铁证,不用猜
+    if running < 0.8 * seqs:
+        return False                         # running 压根没顶到上限 → 真喂不饱
+    concurrency = (sc.run_meta or {}).get("concurrency") if sc else None
+    if concurrency is not None and float(concurrency) <= seqs:
+        return None                          # bench 并发没超过上限,没机会观察排队,判不了
     if waiting is not None:
-        return float(waiting) > 0
-    return float(running) >= 0.8 * float(seqs)
+        return False                         # 并发确实更高仍无排队 → 真没绑定
+    return running >= 0.8 * seqs             # 无 waiting 数据的退化路径
 
 
 def kv_headroom(config: dict, diag: dict, sc: Scorecard | None = None) -> float:
@@ -461,8 +473,14 @@ class Runner(threading.Thread):
             if binding is False:            # 负载受限:亮成证据,让 agent/UI/报告都看得见
                 diag.setdefault("evidence_refs", []).append(
                     f"load_limited:running_peak={_probe_stat(self._best_sc, 'running_reqs', 'max')}"
-                    f"≪max_num_seqs={effective_cfg.get('max_num_seqs')},waiting=0")
+                    f"<max_num_seqs={effective_cfg.get('max_num_seqs')},waiting=0")
                 diag["load_limited"] = True
+            elif binding is None:           # 准入闸绑不绑定未知:说清楚为什么,别让候选悄悄冒出来
+                bc = (self._best_sc.run_meta or {}).get("concurrency") if self._best_sc else None
+                if bc is not None and float(bc) <= float(effective_cfg.get("max_num_seqs") or 0):
+                    diag.setdefault("evidence_refs", []).append(
+                        f"untested:bench并发={bc}≤max_num_seqs="
+                        f"{effective_cfg.get('max_num_seqs')},未观测到排队但也没测过更高并发")
             cands = propose_candidates(diag["bottleneck"], effective_cfg,
                                        kv_headroom=kv_headroom(effective_cfg, diag, self._best_sc),
                                        quality_gate=self._quality_gate,

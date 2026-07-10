@@ -29,7 +29,7 @@ python -m pping_lang.autopilot.run \
   --agent-model deepseek-chat \
   --rounds 6 --minutes 25 \
   --target throughput --ttft 8000 --tpot 50 \
-  --bench-concurrency 32 --bench-repeats 3
+  --bench-concurrency 48 --bench-repeats 3
 ```
 
 跑完终端会打印逐轮判定和推荐命令，完整轨迹落在 `./autopilot-sessions/ap-*.jsonl`。
@@ -41,7 +41,7 @@ python -m pping_lang.autopilot.run \
 | `--serve-cmd ""` | 官方镜像的 entrypoint 已是 `vllm serve`，留空即可；用自带 pping 插件的镜像时按镜像形态给 |
 | `--serve-container <名字>` | 机器上有在跑的 serve 容器时给：session 期间停它腾卡、结束自动重启 |
 | `--restore-cmd '<shell>'` | serve 靠 `docker exec` 起（容器主进程是 `sleep infinity`）的部署形态必须给完整恢复命令 |
-| `--bench-concurrency` | **必须能压满你的准入闸**（≥ 基线 `max_num_seqs`），否则调吞吐没有意义——Agent 会诚实告诉你"瓶颈在负载" |
+| `--bench-concurrency` | **必须明显高于**基线 `max_num_seqs`（不能只是等于！等于时 waiting 永远测不出 >0，Agent 会误判"准入闸没绑定"而不去试提并发——留出 1.5× 左右余量） |
 | `--bench-repeats 3` | median-of-3 去噪：p99 延迟在 SLA 边界不再因单次离群翻转判定 |
 | `--baseline-max-num-seqs / --baseline-gpu-util` | 基线起点；默认 32 / 0.70（故意朴素的常见配置） |
 | `--quality-gate` | 放开 T2 质量类旋钮（kv-cache fp8 / 量化 / 投机解码），带输出等价检查 |
