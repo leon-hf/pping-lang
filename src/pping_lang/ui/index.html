@@ -1757,6 +1757,9 @@
       <!-- 结果卡 -->
       <template x-if="session.state==='done'">
         <div class="ap-result">
+          <div class="coldnote" x-show="session.coldLoaded" style="font-size:12px;color:var(--muted-2,#8a8a99);margin-bottom:8px">
+            📋 上次调优结果<span x-show="session.started_ts"> · <span x-text="session.started_ts"></span></span>（非本次刚跑完，页面重新打开后自动带出）
+          </div>
           <div class="hl">吞吐 <b><span x-text="fmt(baselineTps)"></span> → <span x-text="fmt(best.tps)"></span> tok/s（×<span x-text="(best.tps/baselineTps).toFixed(2)"></span>）</b>，仍满足 TTFT SLA</div>
           <div class="ap-cmd"><span class="pfx">$</span> <span x-text="best.cmd"></span> <span class="copy" @click="copyCmd($event)">复制</span></div>
           <div class="honest">「×3」只在「现实但没调过」的默认基线上成立 —— 那正是大量真实部署的现状。已调过的基线则是诚实的边际收益（+5~15%），Agent 会如实报「已近最优」。</div>

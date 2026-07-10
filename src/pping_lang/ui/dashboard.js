@@ -3,7 +3,7 @@
 // 语言存 Alpine.store('i18n').lang(响应式,切换即时重渲染)+ localStorage 持久化。
 const I18N = {
   zh: {
-    'nav.live': '实时', 'nav.kernel': 'Kernel', 'nav.rules': '瓶颈诊断', 'nav.bench': '压测', 'nav.autopilot': 'Autopilot', 'nav.preview': '预览',
+    'nav.live': '实时', 'nav.kernel': 'Kernel', 'nav.rules': '瓶颈诊断', 'nav.bench': '压测', 'nav.autopilot': 'Autopilot', 'nav.preview': 'M0',
     'brand.sub': 'vLLM 性能诊断',
     'btn.issue': '提 Issue', 'btn.star': 'Star',
     'hero.info': '查看 vLLM 启动命令、环境变量、解析配置',
@@ -378,7 +378,7 @@ const I18N = {
     'lang.label': '语言 / Language',
   },
   en: {
-    'nav.live': 'Live', 'nav.kernel': 'Kernel', 'nav.rules': 'Bottleneck diagnosis', 'nav.bench': 'Bench', 'nav.autopilot': 'Autopilot', 'nav.preview': 'preview',
+    'nav.live': 'Live', 'nav.kernel': 'Kernel', 'nav.rules': 'Bottleneck diagnosis', 'nav.bench': 'Bench', 'nav.autopilot': 'Autopilot', 'nav.preview': 'M0',
     'brand.sub': 'vLLM perf diagnostics',
     'btn.issue': 'Issue', 'btn.star': 'Star',
     'hero.info': 'View vLLM launch command, env vars, resolved config',
@@ -1804,11 +1804,15 @@ function autopilotTab() {
         ['starting', 'baselining', 'proposing', 'applying', 'warming_up', 'benchmarking', 'deciding', 'finalizing'].includes(s.state);
       const state = bridgeStopped ? 'stopped' : s.state;
       const term = ['done', 'stopped', 'failed'].includes(state);
-      // Cold-opening the tab should not present the latest completed JSONL as
-      // if the user just ran Autopilot. Still attach to active sessions, and
-      // keep showing terminal state for sessions started in this page.
-      if (term && !this.session && !this.running) { return; }
-      this.session = Object.assign({}, s, { state: state === 'failed' ? 'failed' : (term ? 'done' : 'running') });
+      // Cold-opening the tab used to suppress a terminal session entirely so it
+      // wouldn't look like it "just finished" — but the recommended command and
+      // scorecard are the whole point of running Autopilot, and this is a
+      // single-tenant/single-session tool (one GPU, one session at a time), so
+      // hiding the last result on a simple reload just throws away the answer.
+      // Show it, but flag it as a past result so the framing stays honest.
+      const isColdLoadedTerminal = term && !this.session && !this.running;
+      this.session = Object.assign({}, s, { state: state === 'failed' ? 'failed' : (term ? 'done' : 'running'),
+                                            coldLoaded: isColdLoadedTerminal });
       this.shownRounds = (s.rounds || []).map(r => this._map(r));
       this.maxTps = Math.max(1, ...this.shownRounds.map(r => r.tps || 0));
       this.shownRounds.forEach(r => { r.barPct = r.tps ? Math.max(6, (r.tps / this.maxTps) * 100) : 0; });

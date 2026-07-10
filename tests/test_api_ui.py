@@ -68,11 +68,16 @@ def test_root_references_known_api_endpoints(client):
         assert endpoint in body, f"UI does not reference {endpoint}"
 
 
-def test_autopilot_cold_open_ignores_terminal_history(client):
-    """打开 Autopilot tab 时,历史 done JSONL 不应伪装成刚跑完的当前 session。"""
+def test_autopilot_cold_open_shows_last_result_as_past(client):
+    """打开 Autopilot tab 时,历史 done session 曾被整个隐藏(dogfood 实测暴露:调优结果 —
+    包括推荐命令 — 是产品的核心产出,单卡单 session 工具上刷新一次页面就整个消失,等于白跑)。
+    现在改为:仍然显示,但标成"上次结果"而非伪装成刚跑完。"""
     js = client.get("/dashboard.js").text
-    assert "term && !this.session && !this.running" in js
-    assert "latest completed JSONL" in js
+    body = client.get("/").text + js
+    assert "coldLoaded" in js                          # 冷启动加载的历史 session 有独立标记
+    assert "if (term && !this.session && !this.running) { return; }" not in js  # 旧的整段隐藏已移除
+    assert "session.coldLoaded" in body                # 模板据此渲染"上次结果"提示,不是静默藏起来
+    assert "上次调优结果" in body
 
 
 def test_autopilot_start_button_uses_execute_label(client):

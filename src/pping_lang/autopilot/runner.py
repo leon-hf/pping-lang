@@ -51,6 +51,15 @@ def _probe_stat(sc: Scorecard | None, group: str, field: str = "avg") -> float |
     return float(val) if val is not None else None
 
 
+def _round(v, nd: int = 2):
+    """诊断数值进 LLM prompt 前取整:未取整的浮点(如 running=30.366666...)会被
+    agent 原样抄进它自己的 evidence_refs,UI 里显得毛糙(dogfood 实测发现)。"""
+    try:
+        return round(float(v), nd) if v is not None else None
+    except (TypeError, ValueError):
+        return v
+
+
 def diag_block(config: dict, sc: Scorecard) -> dict:
     """observe → §8 蒸馏诊断块。优先候选实测的真诊断(③:sc.run_meta['diagnosis']),
     映射成 {bottleneck, fired_rules, mfu, mbu, running, waiting, kv_util, ttft/tpot/tps,
@@ -68,11 +77,11 @@ def diag_block(config: dict, sc: Scorecard) -> dict:
             kv_util = m.get("vllm.scheduler.kv_cache_usage_ratio:avg")
         return {
             "bottleneck": bn, "fired_rules": [bn], "source": live.get("source"),
-            "mfu": m.get("vllm.perf.mfu_ratio:avg", _probe_stat(sc, "mfu")),
-            "mbu": m.get("gpu.mem_util_pct:avg", _probe_stat(sc, "gpu_mem_bw_pct")),
-            "running": m.get("vllm.scheduler.running_reqs:avg", _probe_stat(sc, "running_reqs")),
-            "waiting": _probe_stat(sc, "waiting_reqs", "max"),
-            "kv_util": kv_util,
+            "mfu": _round(m.get("vllm.perf.mfu_ratio:avg", _probe_stat(sc, "mfu")), 3),
+            "mbu": _round(m.get("gpu.mem_util_pct:avg", _probe_stat(sc, "gpu_mem_bw_pct")), 3),
+            "running": _round(m.get("vllm.scheduler.running_reqs:avg", _probe_stat(sc, "running_reqs")), 1),
+            "waiting": _round(_probe_stat(sc, "waiting_reqs", "max"), 1),
+            "kv_util": _round(kv_util, 3),
             "ttft_p99_ms": sc.ttft_p99_ms, "tpot_p99_ms": sc.tpot_p99_ms,
             "output_tps": sc.output_tps, "evidence_refs": live.get("evidence_refs", []),
         }
