@@ -80,6 +80,19 @@ def test_autopilot_cold_open_shows_last_result_as_past(client):
     assert "上次调优结果" in body
 
 
+def test_autopilot_target_switch_adjusts_sla_defaults(client):
+    """三个目标按钮切换时 SLA 数值之前纹丝不动(延迟优先复用吞吐优先的松阈值,形同虚设)。
+    现在按目标切换合理默认值,且不覆盖用户已手动改过的数值;延迟优先额外露出
+    latency_metric(主看哪个指标)+ floor(吞吐硬下限)——后端 objective.py 早就支持,
+    UI 之前从没接过。"""
+    body = client.get("/").text + client.get("/dashboard.js").text
+    assert "setTarget(" in body                        # 目标按钮走专门的切换方法,不是裸赋值
+    assert "TARGET_SLA_DEFAULTS" in body
+    assert "latencyMetric" in body and "obj.floor" in body
+    assert "latency_metric: this.obj.target" in body    # start() payload 真的带上了这两个字段
+    assert "floor: (this.obj.target" in body
+
+
 def test_autopilot_start_button_uses_execute_label(client):
     js = client.get("/dashboard.js").text
     assert "return '执行调优'" in js

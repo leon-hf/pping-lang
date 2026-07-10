@@ -592,6 +592,48 @@ def test_build_agent_propagates_lang_from_config():
     assert agent_default._primary.lang == "zh"             # 未传 lang → 默认中文
 
 
+def test_run_cli_target_choices_include_cost():
+    """--target choices 之前只有 throughput/latency,漏了 cost —— UI"性价比"按钮真跑
+    一次会在参数解析这步直接 SystemExit(2)(argparse 拒绝非法 choice),会话还没起步就崩。
+    用 --help 探测,不需要 docker/GPU 就能验证 choices 列表本身。"""
+    import contextlib
+    import io
+
+    from pping_lang.autopilot import run as run_mod
+
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf), pytest.raises(SystemExit) as exc_info:
+        run_mod.main(["--help"])
+    assert exc_info.value.code == 0
+    help_text = buf.getvalue()
+    assert "cost" in help_text                        # target choices 现在包含 cost
+    assert "--latency-metric" in help_text             # 延迟优先"主看哪个指标"
+    assert "--floor" in help_text                      # 延迟优先"吞吐硬下限"
+
+
+def test_run_cli_objective_carries_latency_metric_and_floor():
+    """--latency-metric/--floor 得真的进 objective dict,不能只是接受了参数却没接到位。"""
+    import argparse
+
+    from pping_lang.autopilot import run as run_mod
+
+    p = argparse.ArgumentParser()
+    p.add_argument("--target", default="throughput", choices=["throughput", "latency", "cost"])
+    p.add_argument("--ttft", type=float, default=None)
+    p.add_argument("--tpot", type=float, default=None)
+    p.add_argument("--latency-metric", default=None, choices=["ttft", "tpot"])
+    p.add_argument("--floor", type=float, default=None)
+    args = p.parse_args(["--target", "latency", "--ttft", "800", "--tpot", "30",
+                         "--latency-metric", "ttft", "--floor", "500"])
+    objective = {"target": args.target, "sla": {"ttft_p99_ms": args.ttft, "tpot_p99_ms": args.tpot}}
+    if args.latency_metric:
+        objective["latency_metric"] = args.latency_metric
+    if args.floor is not None:
+        objective["floor"] = {"output_tps": args.floor}
+    spec = build_objective(objective)
+    assert spec.latency_metric == "ttft" and spec.floor.output_tps == 500.0
+
+
 def test_openai_agent_picks_candidate(monkeypatch):
     from pping_lang.autopilot.agent import OpenAIAgent
     a = OpenAIAgent("http://x/v1", "k", "m")

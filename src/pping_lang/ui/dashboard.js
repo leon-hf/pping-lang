@@ -1500,8 +1500,16 @@ function autopilotTab() {
     baseline: { t: '基线', c: 'base' }, kept: { t: '✓ 保留', c: 'kept' },
     reverted: { t: '↩ 回滚', c: 'rev' }, tie: { t: '≈ 持平', c: 'tie' }, done: { t: '■ 完成', c: 'stop' },
   };
+  // 每个目标对应的合理 SLA 默认值(参照行业惯例:TTFT/TPOT 是 LLM serving SLO 的标准构成)。
+  // 吞吐优先:SLA 只是闸门,松一点没关系;延迟优先:SLA 字段本身就是要压低的东西,
+  // 必须收紧,不然"最小化延迟"在一个 8000ms 的松闸门下形同虚设;性价比同吞吐优先。
+  const TARGET_SLA_DEFAULTS = {
+    throughput: { ttft: 8000, tpot: 50 },
+    latency: { ttft: 800, tpot: 30 },
+    cost: { ttft: 8000, tpot: 50 },
+  };
   return {
-    obj: { target: 'throughput', ttft: 8000, tpot: 50 },
+    obj: { target: 'throughput', ttft: 8000, tpot: 50, latencyMetric: 'ttft', floor: '' },
     budget: { rounds: 12, minutes: 30 },
     agentOpen: false,
     preset: 'openrouter',
@@ -1614,6 +1622,19 @@ function autopilotTab() {
       const real = this.hasBridge();
       if (this.running) return real ? '真实调优中…' : '调优中…';
       return '执行调优';
+    },
+    setTarget(target) {
+      // 只在用户没手动改过 SLA 数值时才自动套用新目标的推荐值——不然切一下目标
+      // 就把用户特意填的阈值(比如"我们的真实 SLA 就是 1500ms")悄悄覆盖掉。
+      const prevDefaults = TARGET_SLA_DEFAULTS[this.obj.target];
+      const untouched = prevDefaults && Number(this.obj.ttft) === prevDefaults.ttft
+        && Number(this.obj.tpot) === prevDefaults.tpot;
+      this.obj.target = target;
+      if (untouched) {
+        const d = TARGET_SLA_DEFAULTS[target];
+        this.obj.ttft = d.ttft;
+        this.obj.tpot = d.tpot;
+      }
     },
     stateLabel() {
       if (!this.session) return '';
@@ -1736,7 +1757,15 @@ function autopilotTab() {
         return;
       }
       const body = {
-        objective: { target: this.obj.target, sla: { ttft_p99_ms: Number(this.obj.ttft) || null, tpot_p99_ms: Number(this.obj.tpot) || null } },
+        objective: {
+          target: this.obj.target,
+          sla: { ttft_p99_ms: Number(this.obj.ttft) || null, tpot_p99_ms: Number(this.obj.tpot) || null },
+          // latency_metric/floor 早就在后端(objective.py)支持,之前从没接过 UI:
+          // 延迟优先模式下"主看哪个指标""吞吐不能跌破多少"完全没法配置。
+          latency_metric: this.obj.target === 'latency' ? this.obj.latencyMetric : undefined,
+          floor: (this.obj.target === 'latency' && Number(this.obj.floor) > 0)
+            ? { output_tps: Number(this.obj.floor) } : undefined,
+        },
         budget: { rounds: Number(this.budget.rounds) || 12, minutes: Number(this.budget.minutes) || 30 },
         agent: Object.assign({}, this.agent, {
           guidance: this.adv.guidance, temperature: this.adv.temperature,

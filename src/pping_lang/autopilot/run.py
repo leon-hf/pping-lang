@@ -86,9 +86,13 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--quality-gate", action="store_true", help="放开 T2 质量类候选(默认只 T1)")
     p.add_argument("--rounds", type=int, default=12)
     p.add_argument("--minutes", type=int, default=30)
-    p.add_argument("--target", default="throughput", choices=["throughput", "latency"])
+    p.add_argument("--target", default="throughput", choices=["throughput", "latency", "cost"])
     p.add_argument("--ttft", type=float, default=None, help="TTFT p99 SLA(ms)")
     p.add_argument("--tpot", type=float, default=None, help="TPOT p99 SLA(ms)")
+    p.add_argument("--latency-metric", default=None, choices=["ttft", "tpot"],
+                   help="target=latency 时主看哪个指标(默认 tpot)")
+    p.add_argument("--floor", type=float, default=None,
+                   help="target=latency 时的吞吐硬下限(tok/s),防止'最小化延迟'跌成零吞吐")
     p.add_argument("--agent-base-url", default=None)
     p.add_argument("--agent-key", default=None)
     p.add_argument("--agent-model", default=None)
@@ -148,6 +152,10 @@ def main(argv: list[str] | None = None) -> int:
     else:
         objective = {"target": args.target,
                      "sla": {"ttft_p99_ms": args.ttft, "tpot_p99_ms": args.tpot}}
+        if args.latency_metric:
+            objective["latency_metric"] = args.latency_metric
+        if args.floor is not None:
+            objective["floor"] = {"output_tps": args.floor}
         budget = {"rounds": args.rounds, "minutes": args.minutes}
         sid = args.session_id or "ap-" + time.strftime("%Y%m%d-%H%M%S", time.gmtime())
         store = SessionStore(session_dir / f"{sid}.jsonl")
