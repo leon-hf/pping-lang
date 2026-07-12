@@ -12,7 +12,9 @@ import threading
 import time
 
 from pping_lang.autopilot.action_space import knob, propose_candidates, render_command
-from pping_lang.autopilot.agent import AgentContext, AgentDecision, config_hash, validate
+from pping_lang.autopilot.agent import (
+    AgentContext, AgentDecision, RECOVERY_ACTIONS, config_hash, validate,
+)
 from pping_lang.autopilot.config_review import review_config_diff
 from pping_lang.autopilot.kvfit import evaluate_kvfit
 from pping_lang.autopilot.objective import (
@@ -27,8 +29,15 @@ from pping_lang.autopilot.session_store import Round, SessionStore
 from pping_lang.autopilot.repeat import aggregate_scorecards
 from pping_lang.autopilot.search import prepare_search_candidates
 
-BASELINE_CONFIG = {"max_num_seqs": 32, "gpu_memory_utilization": 0.70}
+BASELINE_CONFIG = {"max_num_seqs": 64, "gpu_memory_utilization": 0.70}
+# 2026-07-12 复盘:K_NO_IMPROVE 曾被临时拍到 999(强制跑满预算),但真机证据显示——
+# Agent 判 done 时桌上永远还摆着候选(候选真空由 T1→T2 fallback 在问它之前就兜掉了,
+# 见 _run_loop 的 `if not cands` 分支),它是在做"值不值得冒 SLA 风险"的定性判断,
+# 不是"没得选"。而且强制它多跑的那些轮次实测"几乎没有性能提升"——纯烧预算换不来信息。
+# 折中:MIN_EXPLORE_ROUNDS 防它探索不够就撂挑子,过了这道门槛就信任它的判断;
+# K_NO_IMPROVE 恢复成不依赖信任 LLM 的机械兜底(它从不主动认输时的保险)。
 K_NO_IMPROVE = 4
+MIN_EXPLORE_ROUNDS = 2   # 判 done 前至少要真探索这么多轮候选,防止刚起步就撂挑子
 MAX_ILLEGAL = 2          # proposing:连续非法提案上限 → failed(§9.3)
 INCOMPLETE_STATES = {"applying", "warming_up", "benchmarking", "deciding"}
 # T2 等价判定阈值:serving 输出非 seed 决定性(§6.2),batching 差异可致个别 token 漂移,
@@ -190,6 +199,7 @@ def applies_to(model: str, obj: ObjectiveSpec, sc: Scorecard | None) -> dict:
             "sla": {
                 "ttft_p99_ms": obj.sla.ttft_p99_ms,
                 "tpot_p99_ms": obj.sla.tpot_p99_ms,
+                "e2e_p99_ms": obj.sla.e2e_p99_ms,
             },
             "floor": {
                 "output_tps": obj.floor.output_tps if obj.floor else None,
@@ -446,7 +456,7 @@ class Runner(threading.Thread):
                     round=0, detail={"config": dict(self._baseline), "bench": self._bench_plan()})
         try:
             sc = self._measure(self._baseline)
-        except Exception as e:           # LaunchError/BenchError → 基线起不来,整个 session 报废
+        except Exception as e:           # LaunchError/BenchError → 先尝试 recovery 自愈
             # 候选轮的失败早就带容器日志尾(见 _run_candidate);基线轮这条路径当时漏了,
             # 崩溃原因随容器销毁一起丢失,只剩"0 个成功样本"这种没法排查的短消息。补齐。
             err = str(e)
@@ -459,7 +469,10 @@ class Runner(threading.Thread):
                     pass
             self._event("decide", f"基线失败:{type(e).__name__}: {err[:200]}",
                         round=0, level="error", detail={"error": err[:1200]})
-            raise
+            # B+C:让 LLM 感知失败、选择修复动作、执行后重试
+            sc = self._run_baseline_recovery(err)
+            if sc is None:
+                raise
         self._equivalence_golden = self._sample_outputs()
         score = objective_score(sc, self._obj)
         self._best_cfg, self._best_sc, self._best_score = dict(self._baseline), sc, score
@@ -477,6 +490,120 @@ class Runner(threading.Thread):
                     round=0, detail={"output_tps": sc.output_tps, "ttft_p99_ms": sc.ttft_p99_ms,
                                      "tpot_p99_ms": sc.tpot_p99_ms})
         self._tick()
+
+    def _run_baseline_recovery(self, error: str) -> Scorecard | None:
+        """B+C:基线失败自愈。让 LLM/启发式根据错误日志选系统级修复动作,执行后重试 baseline。
+        返回成功 Scorecard 或 None(无法修复)。"""
+        MAX_RECOVERY = 3
+        tried: list[str] = []
+        for attempt in range(1, MAX_RECOVERY + 1):
+            failure_ctx = {
+                "error": error,
+                "error_type": self._classify_failure(error),
+                "container_log_tail": self._sb._logs_tail() if hasattr(self._sb, "_logs_tail") else "",
+                "current_baseline_config": dict(self._baseline),
+                "bench_plan": self._bench_plan(),
+                "tried_recovery_actions": list(tried),
+                "attempt": attempt,
+                "max_attempts": MAX_RECOVERY,
+            }
+            ctx = AgentContext(
+                objective={"target": self._obj.target, "sla": {
+                    "ttft_p99_ms": self._obj.sla.ttft_p99_ms, "tpot_p99_ms": self._obj.sla.tpot_p99_ms}},
+                round=0,
+                budget={"rounds_left": self._rounds_budget, "seconds_left": self._secs_budget},
+                current_config=dict(self._baseline),
+                diagnosis={"bench_plan": self._bench_plan()},
+                candidates=[],       # recovery 模式不用候选旋钮
+                history=[],
+                recovery_mode=True,
+                failure_context=failure_ctx,
+            )
+            dec = self._agent.propose(ctx)
+            val_err = validate(dec, ctx)
+            if val_err:
+                self._event("decide", f"recovery 非法提案: {val_err}", round=0, level="warn")
+                tried.append(dec.recovery_action or "invalid")
+                continue
+            action = dec.recovery_action
+            if action == "abort":
+                self._event("decide", "recovery: agent 判无法修复,结束 session",
+                            round=0, level="error")
+                return None
+            self._event("baseline", f"recovery 第{attempt}次: 执行 {action} — {dec.rationale}",
+                        round=0, detail={"recovery_action": action,
+                                         "expected_effect": dec.expected_effect,
+                                         "baseline_before": dict(self._baseline),
+                                         "bench_before": self._bench_plan()})
+            if self._apply_recovery_action(action):
+                tried.append(action)
+            else:
+                self._event("decide", f"recovery 动作 {action} 未产生实际变更,跳过", round=0, level="warn")
+                tried.append(action)
+                continue
+            try:
+                sc = self._measure(self._baseline)
+                self._event("decide", f"recovery 成功: 第{attempt}次 {action} 后 baseline 跑通",
+                            round=0, detail={"recovery_action": action,
+                                             "baseline_after": dict(self._baseline),
+                                             "bench_after": self._bench_plan()})
+                return sc
+            except Exception as e2:  # noqa: BLE001
+                err2 = str(e2)
+                if "日志尾" not in err2 and hasattr(self._sb, "_logs_tail"):
+                    try:
+                        tail = self._sb._logs_tail()
+                        if tail:
+                            err2 += "\n容器日志尾:\n" + tail
+                    except Exception:  # noqa: BLE001
+                        pass
+                error = err2  # 用最新错误继续下一轮 recovery
+                self._event("decide", f"recovery 第{attempt}次仍失败: {err2[:200]}",
+                            round=0, level="error", detail={"error": err2[:1200]})
+        self._event("decide", f"recovery 耗尽 {MAX_RECOVERY} 次尝试,无法自愈",
+                    round=0, level="error")
+        return None
+
+    def _classify_failure(self, error: str) -> str:
+        err = error.lower()
+        if "outofmemory" in err or "oom" in err or "cuda out of memory" in err:
+            return "OOM"
+        if "500" in err or "internal server error" in err:
+            return "APIServer500"
+        if "timeout" in err:
+            return "timeout"
+        return "unknown"
+
+    def _apply_recovery_action(self, action: str) -> bool:
+        """执行 recovery 动作,返回是否发生了实际变更。"""
+        changed = False
+        if action == "raise_gpu_memory_utilization":
+            old = float(self._baseline.get("gpu_memory_utilization", 0.9))
+            new = round(min(old + 0.05, 0.98), 2)
+            if new > old:
+                self._baseline["gpu_memory_utilization"] = new
+                changed = True
+        elif action == "lower_bench_concurrency":
+            spec = getattr(self._sb, "_spec", None)
+            if spec:
+                old = int(spec.get("concurrency", 32))
+                new = max(old - 8, 16)
+                if new < old:
+                    spec["concurrency"] = new
+                    changed = True
+        elif action == "lower_baseline_max_num_seqs":
+            old = int(self._baseline.get("max_num_seqs", 64))
+            new = max(int(old * 0.75), 16)
+            if new < old:
+                self._baseline["max_num_seqs"] = new
+                changed = True
+        elif action == "lower_max_model_len":
+            old = int(self._baseline.get("max_model_len", 2048))
+            new = 1024
+            if new < old:
+                self._baseline["max_model_len"] = new
+                changed = True
+        return changed
 
     def _run_loop(self, *, start_round: int = 1, history: list[dict] | None = None,
                   tried: list[dict] | None = None, no_improve: int = 0) -> None:
@@ -540,13 +667,36 @@ class Runner(threading.Thread):
                 current_config=effective_cfg, diagnosis=diag, candidates=cands,
                 history=history, tried_configs=tried,
                 best_so_far={"config": dict(self._best_cfg), "scorecard": self._best_sc.to_dict()})
-            if not cands:                                                # 无对症候选 → 近最优,停
-                reason = ("瓶颈在提供的负载(bench 并发喂不满准入闸),server 旋钮无对症动作;"
-                          "提高压测并发或换真实 workload 再调"
-                          if diag.get("load_limited") else "无对症候选 → 近最优")
-                self._event("decide", f"没有对症候选,准备停止并恢复 best({reason})", round=rnd)
-                self._append_stop(rnd, AgentDecision(done=True, reason=reason), diag)
-                break
+            rounds_left = self._rounds_budget - rnd + 1
+            if not cands:                                                # 无对症候选 → 尝试 fallback
+                if rounds_left > 1 and not self._quality_gate:           # T1 耗尽,开 quality_gate 再搜 T2
+                    self._quality_gate = True
+                    cands = propose_candidates(diag["bottleneck"], effective_cfg,
+                                               kv_headroom=kv_headroom(effective_cfg, diag, self._best_sc),
+                                               quality_gate=True,
+                                               load_binding=binding)
+                    cands = prepare_search_candidates(
+                        cands, effective_cfg, diag["bottleneck"], history,
+                        mode=self._search_mode, max_values_per_knob=self._search_width)
+                    p0 = evaluate_kvfit(cands, effective_cfg, self._best_sc)
+                    for pc in p0.pruned:
+                        self._event("propose",
+                                    f"P0 预测剪枝:{pc['knob']} → {pc['to']}"
+                                    f"({(pc.get('p0') or {}).get('reason', '')[:70]})",
+                                    round=rnd, detail={"p0": pc.get("p0")})
+                    cands = p0.candidates
+                    diag["p0_kvfit"] = p0.summary()
+                    diag["p2_search"]["quality_gate_fallback"] = len(cands)
+                    self._event("propose",
+                                f"T1 候选耗尽,自动开启 quality_gate 重生成 {len(cands)} 个 T2 候选",
+                                round=rnd, detail={"candidate_count": len(cands)})
+                if not cands:                                            # 仍然空 → 才停止
+                    reason = ("瓶颈在提供的负载(bench 并发喂不满准入闸),server 旋钮无对症动作;"
+                              "提高压测并发或换真实 workload 再调"
+                              if diag.get("load_limited") else "无对症候选 → 近最优")
+                    self._event("decide", f"没有对症候选,准备停止并恢复 best({reason})", round=rnd)
+                    self._append_stop(rnd, AgentDecision(done=True, reason=reason), diag)
+                    break
             dec = self._heartbeat_run(                                  # LLM 思考+网络重试可达数分钟
                 "propose", "等待 agent 决策(LLM 思考/重试中)",
                 lambda: self._propose_valid(ctx))                       # 校验 ∈ 候选 + 防重(2 次非法→failed)
@@ -574,9 +724,49 @@ class Runner(threading.Thread):
                                     "evidence_refs": dec.evidence_refs,
                                     "value_source": (dec.candidate_meta or {}).get("value_source")})
             if dec.done:
-                self._event("decide", dec.reason or "agent 判断已近最优,准备停止", round=rnd)
-                self._append_stop(rnd, dec, diag)
-                break
+                prior_explored = rnd - 1
+                # prior_explored = 本轮之前已经真跑过多少个候选轮(不含 baseline)。
+                # 两种独立的"别信这次 done"场景,缺一不可:
+                # ① 探索不够(prior_explored < MIN_EXPLORE_ROUNDS)——防止 Agent 刚起步、
+                #    一个候选没试就撂挑子;
+                # ② best_score 仍是 -inf,即从没有任何配置真正通过 SLA——这跟"收益递减"
+                #    是完全不同的风险等级,"我放弃了"和"从没成功过、我放弃了"分量不一样,
+                #    不该被①单独取代(哪怕已经探索够轮次,SLA 从没达标也不该轻易采信)。
+                # 达到探索门槛 且 SLA 已至少通过一次时,才真正信任它的判断
+                # (见上方 K_NO_IMPROVE 注释:真机证据显示这类 done 通常是靠谱的定性判断)。
+                sla_never_met = self._best_score == float("-inf")
+                if (prior_explored < MIN_EXPLORE_ROUNDS or sla_never_met) and rounds_left > 1 and cands:
+                    failed = {t["hash"] for t in tried
+                              if t.get("decision") in ("reverted", "tie")}
+                    forced = next((c for c in cands
+                                   if config_hash(c["config"]) not in failed), None)
+                    if forced is not None:
+                        why = (f"从未通过 SLA(best_score=-inf)" if sla_never_met
+                               else f"只探索了 {prior_explored} 轮(< 最低 {MIN_EXPLORE_ROUNDS} 轮)")
+                        dec = AgentDecision(
+                            done=False, knob=forced["knob"], config=forced["config"],
+                            from_val=forced["from"], to_val=forced["to"], flag=forced["flag"],
+                            rationale=f"agent 判 done,但{why},强制多试一个候选:"
+                                      f"{forced['knob']} {forced['from']}→{forced['to']}",
+                            expected_effect="主指标↑,不破 SLA",
+                            evidence_refs=list(diag.get("evidence_refs", [])),
+                            guardrail_notes=f"{why};强制多试一轮;仍受 SLA/launch-catch 约束")
+                        self._event("decide",
+                                    f"agent 判 done 但{why},强制试 {forced['knob']} "
+                                    f"{forced['from']}→{forced['to']}",
+                                    round=rnd, level="warn")
+                    else:
+                        # 候选集里剩下的全是已判负的配置 —— 重试产生不了新信息,
+                        # 硬凑"多探索一轮"只是重复烧一次已知没用的候选,老实停。
+                        self._event("decide",
+                                    f"{dec.reason or 'agent 判断已近最优'}(候选集内均已判负,"
+                                    "无未试过的配置可强制探索)", round=rnd)
+                        self._append_stop(rnd, dec, diag)
+                        break
+                else:
+                    self._event("decide", dec.reason or "agent 判断已近最优,准备停止", round=rnd)
+                    self._append_stop(rnd, dec, diag)
+                    break
             if dec.config is not None and dec.knob:
                 tracked = dict(self._best_cfg)
                 tracked[dec.knob] = dec.to_val

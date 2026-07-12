@@ -28,6 +28,8 @@ class AgentContext:
     history: list[dict] = field(default_factory=list)        # [{round, action, decision, ...}]
     tried_configs: list[dict] = field(default_factory=list)  # [{hash, decision}] 防重
     best_so_far: dict = field(default_factory=dict)          # {config, scorecard}
+    recovery_mode: bool = False                  # True=基线失败自愈模式(动作空间换成系统修复)
+    failure_context: dict | None = None          # recovery 模式专用:错误日志/类型/已尝试动作
 
 
 # === 输出(StructuredOutput 强约束)= AgentDecision(§8)===
@@ -47,14 +49,32 @@ class AgentDecision:
     guardrail_notes: str = ""
     candidate_meta: dict = field(default_factory=dict)
     thinking: str = ""                           # LLM 思考过程(provider 支持时),直播+落轨迹
+    recovery_action: str | None = None           # recovery 模式下选的修复动作(如 raise_gpu_memory_utilization)
 
 
 def config_hash(config: dict) -> str:
     return ";".join(f"{k}={config[k]}" for k in sorted(config))
 
 
+# recovery 动作表:LLM 在基线失败时可执行的系统级修复动作
+RECOVERY_ACTIONS: list[dict] = [
+    {"action": "raise_gpu_memory_utilization", "description": "提高 baseline 的 gpu_memory_utilization(+0.05,上限0.98),扩KV池"},
+    {"action": "lower_bench_concurrency", "description": "降低压测并发(-8,下限16),减轻请求压力"},
+    {"action": "lower_baseline_max_num_seqs", "description": "降低 baseline max_num_seqs(*0.75,下限16),减少同时序列数"},
+    {"action": "lower_max_model_len", "description": "降低 max_model_len 到1024,减少KV占用"},
+    {"action": "abort", "description": "无法修复,结束 session"},
+]
+
+
 def validate(dec: AgentDecision, ctx: AgentContext) -> str | None:
-    """校验 ∈ 候选集 + 防重(§9.3 proposing)。返回 None=合法,否则返回拒绝原因。"""
+    """校验 ∈ 候选集 + 防重(§9.3 proposing);recovery 模式则校验 recovery_action。"""
+    if ctx.recovery_mode:
+        if dec.recovery_action is None:
+            return "recovery_mode 必须提供 recovery_action"
+        valid = {a["action"] for a in RECOVERY_ACTIONS}
+        if dec.recovery_action not in valid:
+            return f"recovery_action {dec.recovery_action!r} 不在合法动作集 {sorted(valid)} 中"
+        return None
     if dec.done:
         return None
     cand = next((c for c in ctx.candidates if c["knob"] == dec.knob), None)
@@ -112,7 +132,21 @@ _LANG_DIRECTIVE = {
 def build_messages(ctx: AgentContext, guidance: str = "", lang: str = "zh") -> tuple[str, str]:
     """§8 prompt 骨架:返回 (system, user)。lang 控制自由文本字段的应答语言(zh/en,默认 zh)。"""
     directive = _LANG_DIRECTIVE.get(lang, _LANG_DIRECTIVE["zh"])
-    system = LOCKED_PROMPT + "\n" + directive + (("\n———\n额外指引:" + guidance) if guidance else "")
+    system = LOCKED_PROMPT + "\n" + directive + ("\n———\n额外指引:" + guidance if guidance else "")
+    if ctx.recovery_mode:
+        system += (
+            "\n———\n当前处于【基线失败自愈/recovery 模式】。基线压测失败,你必须从以下系统级修复动作中选一个:\n"
+            + "\n".join(f"- {a['action']}: {a['description']}" for a in RECOVERY_ACTIONS)
+            + "\n只输出 JSON:{\"recovery_action\":str, \"rationale\":str, \"expected_effect\":str}"
+        )
+        user = json.dumps({
+            "round": ctx.round, "budget": ctx.budget,
+            "current_baseline_config": ctx.current_config,
+            "bench_plan": ctx.diagnosis.get("bench_plan", {}),
+            "failure": ctx.failure_context,
+            "history": ctx.history,
+        }, ensure_ascii=False)
+        return system, user
     bn = ctx.diagnosis.get("bottleneck")
     user = json.dumps({
         "objective": ctx.objective,
@@ -157,7 +191,14 @@ def _agent_value(cand: dict, value):
 
 def _decision_from_json(out: dict, ctx: AgentContext) -> AgentDecision:
     """LLM JSON → AgentDecision。knob 只能从候选选;数值旋钮的 value 可在 range 内
-    沿候选方向自选(一步到位省轮次),非法则回落候选建议档。launch-catch + bench 兜底。"""
+    沿候选方向自选(一步到位省轮次),非法则回落候选建议档。launch-catch + bench 兜底。
+    recovery 模式下解析 recovery_action。"""
+    if ctx.recovery_mode:
+        return AgentDecision(
+            recovery_action=out.get("recovery_action"),
+            rationale=out.get("rationale", ""),
+            expected_effect=out.get("expected_effect", ""),
+        )
     if out.get("done"):
         return AgentDecision(done=True, reason=out.get("reason", "已近最优"),
                              rationale=out.get("rationale", out.get("reason", "")),
@@ -189,11 +230,14 @@ def _decision_from_json(out: dict, ctx: AgentContext) -> AgentDecision:
 # === 实现 ===
 
 class StubAgent:
-    """确定性启发式(默认、无 key):挑候选交集里第一个没试过的;无则 done。"""
+    """确定性启发式(默认、无 key):挑候选交集里第一个没试过的;无则 done。
+    recovery 模式下按失败类型选修复动作。"""
 
     model = "stub-agent"
 
     def propose(self, ctx: AgentContext) -> AgentDecision:
+        if ctx.recovery_mode:
+            return self._propose_recovery(ctx)
         tried = {t["hash"] for t in ctx.tried_configs
                  if t.get("decision") in ("reverted", "tie")}
         bn = ctx.diagnosis.get("bottleneck")
@@ -211,6 +255,27 @@ class StubAgent:
                 candidate_meta={"p0": c.get("p0"), "p2": c.get("p2")})
         return AgentDecision(done=True, reason="已无对症候选 / 收益耗尽 → 判定近最优,停。",
                              rationale="已无对症候选", evidence_refs=ev)
+
+    def _propose_recovery(self, ctx: AgentContext) -> AgentDecision:
+        fc = ctx.failure_context or {}
+        err = (fc.get("error", "") + "\n" + fc.get("container_log_tail", "")).lower()
+        tried = set(ctx.failure_context.get("tried_recovery_actions", []))
+        # OOM/CUDA 类优先扩 KV 池;500/overload 类优先降并发
+        if "outofmemory" in err or "cuda" in err or "oom" in err:
+            order = ["raise_gpu_memory_utilization", "lower_bench_concurrency",
+                     "lower_baseline_max_num_seqs", "lower_max_model_len", "abort"]
+        else:
+            order = ["lower_bench_concurrency", "raise_gpu_memory_utilization",
+                     "lower_baseline_max_num_seqs", "lower_max_model_len", "abort"]
+        for action in order:
+            if action not in tried:
+                return AgentDecision(
+                    recovery_action=action,
+                    rationale=f"stub recovery:失败日志含 {err[:80]!r},优先尝试 {action}",
+                    expected_effect="修复基线启动/压测失败,获得首个有效 scorecard")
+        return AgentDecision(recovery_action="abort",
+                             rationale="stub recovery:已耗尽修复动作,无法自愈",
+                             expected_effect="结束 session")
 
 
 class _HTTPAgent:

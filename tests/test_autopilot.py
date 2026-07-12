@@ -33,6 +33,15 @@ def test_sla_ok_and_score():
     assert objective_score(bad, OBJ) == float("-inf")
 
 
+def test_sla_ok_e2e_gate():
+    """E2E p99 进闸门:超阈值判负,没设 e2e 时不影响。"""
+    o = ObjectiveSpec(target="throughput", sla=SLA(e2e_p99_ms=5000.0))
+    ok = Scorecard(output_tps=2000, ttft_p99_ms=500, tpot_p99_ms=20, e2e_p99_ms=4000)
+    no = Scorecard(output_tps=2000, ttft_p99_ms=500, tpot_p99_ms=20, e2e_p99_ms=6000)
+    assert sla_ok(ok, o) and not sla_ok(no, o)
+    assert objective_score(no, o) == float("-inf")
+
+
 def test_score_high_error_rejected():
     sc = Scorecard(output_tps=9999, ttft_p99_ms=100, error_rate=0.6)
     assert objective_score(sc, OBJ) == float("-inf")
@@ -135,6 +144,52 @@ def test_propose_t2_gated_by_quality_gate():
     off = {c["knob"] for c in propose_candidates("B", cfg, quality_gate=False)}
     on = {c["knob"] for c in propose_candidates("B", cfg, quality_gate=True)}
     assert "kv_cache_dtype" not in off and "kv_cache_dtype" in on
+
+
+def test_propose_load_limited_still_has_scheduler_and_prefill_knobs():
+    """load_binding=False 时 max_num_seqs 被剪,但 num_scheduler_steps / prefill_chunk_size
+    / max_seq_len_to_capture 不依赖 load_binding,仍应留在候选集。"""
+    cfg = {"max_num_seqs": 64, "gpu_memory_utilization": 0.9,
+           "num_scheduler_steps": 1, "prefill_chunk_size": 512, "max_seq_len_to_capture": 8192}
+    cands = propose_candidates("A", cfg, load_binding=False)
+    keys = {c["knob"] for c in cands}
+    assert "max_num_seqs" not in keys
+    assert "num_scheduler_steps" in keys
+    assert "prefill_chunk_size" in keys
+    assert "max_seq_len_to_capture" in keys
+
+
+def test_propose_quality_gate_opens_mtp_and_speculative_knobs():
+    """B 瓶颈 + quality_gate 应放出 num_lookahead_slots / ngram_prompt_lookup_max。"""
+    cfg = {"max_num_seqs": 128, "gpu_memory_utilization": 0.9}
+    off = {c["knob"] for c in propose_candidates("B", cfg, quality_gate=False)}
+    on = {c["knob"] for c in propose_candidates("B", cfg, quality_gate=True)}
+    assert "num_lookahead_slots" not in off and "num_lookahead_slots" in on
+    assert "ngram_prompt_lookup_max" not in off and "ngram_prompt_lookup_max" in on
+
+
+def test_render_flags_skips_zero_default_overrides():
+    """num_gpu_blocks_override=0 等 0 默认值应跳过渲染,避免 vLLM 报错。"""
+    from pping_lang.autopilot.action_space import render_flags
+    flags = render_flags({"max_num_seqs": 64, "num_gpu_blocks_override": 0,
+                          "ngram_prompt_lookup_max": 0})
+    assert "--max-num-seqs" in flags
+    assert "--num-gpu-blocks-override" not in flags
+    assert "--ngram-prompt-lookup-max" not in flags
+
+
+def test_introspect_engine_args_reads_defaults_from_vllm_source():
+    """半自动 introspect:从本地 vLLM 源码读取 EngineArgs 默认值,不导入 torch/vllm。"""
+    from pping_lang.autopilot.action_space import _introspect_engine_args
+    defaults = _introspect_engine_args(r"D:\GitCode\vllm")
+    assert isinstance(defaults, dict)
+    # 这些字段能从源码字面量直接解析
+    assert defaults.get("gpu_memory_utilization") == 0.9
+    assert defaults.get("num_scheduler_steps") == 1
+    assert defaults.get("max_seq_len_to_capture") == 8192
+    assert defaults.get("num_lookahead_slots") == 0
+    # SchedulerConfig 里 max_num_seqs 默认 None(运行时后处理),允许解析为 None
+    assert "max_num_seqs" in defaults
 
 
 def test_propose_d_headroom_guard():
@@ -326,7 +381,7 @@ def test_runner_full_session_improves(tmp_path):
     assert d["promote_package"]["requires_confirmation"] is True
     assert d["promote_package"]["production_command"] == d["recommended_command"]
     assert d["promote_package"]["rollback_command"] == (
-        "vllm serve M --max-num-seqs 32 --gpu-memory-utilization 0.7")
+        "vllm serve M --max-num-seqs 64 --gpu-memory-utilization 0.7")
     phases = [e["phase"] for e in d["events"]]
     for phase in ["baseline", "observe", "propose", "apply", "benchmark", "decide", "finalize"]:
         assert phase in phases
@@ -417,9 +472,13 @@ def test_build_objective():
     o = build_objective({"target": "throughput", "sla": {"ttft_p99_ms": 800}})
     assert o.target == "throughput" and o.sla.ttft_p99_ms == 800
 
+    o2 = build_objective({"target": "throughput",
+                          "sla": {"ttft_p99_ms": 800, "tpot_p99_ms": 30, "e2e_p99_ms": 5000}})
+    assert o2.sla.e2e_p99_ms == 5000
 
-def test_runner_defaults_allow_deeper_agent_exploration(tmp_path):
-    from pping_lang.autopilot.runner import K_NO_IMPROVE, Runner
+
+def test_runner_defaults_and_no_improve_backstop(tmp_path):
+    from pping_lang.autopilot.runner import K_NO_IMPROVE, MIN_EXPLORE_ROUNDS, Runner
 
     store = SessionStore(tmp_path / "defaults.jsonl")
     agent = StubAgent()
@@ -427,7 +486,110 @@ def test_runner_defaults_allow_deeper_agent_exploration(tmp_path):
                     obj=build_objective({"target": "throughput"}), budget={}, model="M")
     assert runner._rounds_budget == 12
     assert runner._secs_budget == 30 * 60
+    # 2026-07-12 复盘:999 曾是"强制跑满预算"的临时值;真机证据显示 agent 判 done 时
+    # 桌上永远还有候选(候选真空由 T1→T2 fallback 在问它之前就兜掉了),它是在做定性
+    # 判断而非"没得选",且被强制的额外轮次实测收益也有限——K_NO_IMPROVE 恢复成不依赖
+    # 信任 LLM 的机械兜底,MIN_EXPLORE_ROUNDS 单独兜底"防止刚起步就撂挑子"。
     assert K_NO_IMPROVE == 4
+    assert MIN_EXPLORE_ROUNDS == 2
+
+
+def test_runner_sla_never_met_overrides_agent_done(tmp_path):
+    """best_score=-inf(从未通过 SLA)时,agent 的 done 被覆盖——这跟"收益递减"是不同风险
+    等级("我放弃了"和"从没成功过、我放弃了"分量不一样),哪怕已经探索够 MIN_EXPLORE_ROUNDS
+    轮也不该采信。AlwaysDoneAgent 恒返回 done -> 每轮都被强制继续,直到 K_NO_IMPROVE 兜底
+    (连续 4 轮无改善)触发才停——不是预算耗尽,是"试够了还是没戏"的诚实止损。"""
+    from pping_lang.autopilot.agent import AgentDecision
+
+    call_count = [0]
+
+    class AlwaysDoneAgent:
+        model = "always-done"
+
+        def propose(self, ctx):
+            call_count[0] += 1
+            return AgentDecision(done=True, rationale="我判断非配置可解")
+
+    # SLA 极严:基线 tpot=22 远超 10ms -> best_score 恒 -inf
+    tight_obj = ObjectiveSpec(target="throughput", sla=SLA(tpot_p99_ms=10.0))
+    store = SessionStore(tmp_path / "sla-guard.jsonl")
+    store.new_session("ap-sla-guard", {"target": "throughput"}, {"rounds": 12})
+    Runner(store=store, sandbox=SimSandbox(), agent=AlwaysDoneAgent(), obj=tight_obj,
+           budget={"rounds": 12, "seconds": 900}, model="M", step_delay_s=0.0).run()
+    d = store.status_dict()
+
+    # K_NO_IMPROVE=4:每轮 done 都被强制继续、每轮都判负(SLA 恒不达标) -> 连续 4 轮
+    # 无改善,兜底触发,agent 恰好被调 4 次(不是跑满 12 轮预算)
+    assert call_count[0] == 4, f"agent 被调 {call_count[0]} 次,预期 4(K_NO_IMPROVE 兜底)"
+    overrides = [e for e in d["events"] if "从未通过 SLA" in e.get("message", "")]
+    assert len(overrides) == 4, f"强制继续 {len(overrides)} 次,预期 4"
+    # 最终状态仍是 done(K_NO_IMPROVE 是正常收尾路径,不是 failed/stopped)
+    assert d["state"] == "done"
+    store.close()
+
+
+def test_runner_honors_done_after_min_explore_rounds_when_sla_ok(tmp_path):
+    """SLA 已通过(best_score 非 -inf)且已探索满 MIN_EXPLORE_ROUNDS 轮后,agent 的
+    done 判断真正生效——这是这次复盘要恢复的核心行为:信任"已经试过、判断收益递减"
+    的判断,不再无条件烧到预算耗尽(真机证据:被强制的额外轮次收益接近于零)。"""
+    from pping_lang.autopilot.agent import AgentDecision
+
+    call_count = [0]
+
+    class DoneAfterTwoAgent:
+        """前两轮正常提议(推进探索计数),第三轮判 done。"""
+        model = "done-after-two"
+
+        def propose(self, ctx):
+            call_count[0] += 1
+            if call_count[0] <= 2:
+                cand = ctx.candidates[0]
+                return AgentDecision(knob=cand["knob"], config=cand["config"],
+                                     from_val=cand["from"], to_val=cand["to"], flag=cand["flag"],
+                                     rationale=f"round {call_count[0]}: 试 {cand['knob']}")
+            return AgentDecision(done=True, rationale="已探索两轮,收益递减,判断已近最优")
+
+    store = SessionStore(tmp_path / "honor-done.jsonl")
+    store.new_session("ap-honor-done", {"target": "throughput"}, {"rounds": 12})
+    Runner(store=store, sandbox=SimSandbox(), agent=DoneAfterTwoAgent(), obj=OBJ,
+           budget={"rounds": 12, "seconds": 900}, model="M", step_delay_s=0.0).run()
+    d = store.status_dict()
+
+    assert call_count[0] == 3, f"agent 被调 {call_count[0]} 次,预期 3(2轮探索+1轮判done即信任)"
+    assert not any("强制" in e.get("message", "") for e in d["events"] if e.get("round") == 3)
+    stop = next(r for r in d["rounds"] if r["kind"] == "stop")
+    assert "收益递减" in stop["rationale"]
+    store.close()
+
+
+def test_runner_forced_continue_stops_honestly_when_all_candidates_already_failed(tmp_path):
+    """探索不够触发强制续跑,但候选集里剩下的全是已判负的配置时——重试产生不了新信息,
+    不该退回 cands[0] 重复一个已知没用的候选,应该老实停。"""
+    from pping_lang.autopilot.agent import AgentDecision
+
+    class DoneImmediatelyAgent:
+        model = "done-immediately"
+
+        def propose(self, ctx):
+            # 候选集只有 1 个旋钮时,防重命中即可制造"仅剩候选已判负"的场景
+            if not ctx.tried_configs:
+                cand = ctx.candidates[0]
+                return AgentDecision(knob=cand["knob"], config=cand["config"],
+                                     from_val=cand["from"], to_val=cand["to"], flag=cand["flag"],
+                                     rationale="先试一个,大概率会被判负/持平")
+            return AgentDecision(done=True, rationale="判断已近最优")
+
+    store = SessionStore(tmp_path / "no-repeat.jsonl")
+    store.new_session("ap-no-repeat", {"target": "throughput"}, {"rounds": 12})
+    # gpu_util=0.97 逼近 SimSandbox 的 OOM 上限(>0.97 才拒),max_num_seqs 顶格让候选集很窄
+    Runner(store=store, sandbox=SimSandbox(), agent=DoneImmediatelyAgent(), obj=OBJ,
+           budget={"rounds": 12, "seconds": 900}, model="M", step_delay_s=0.0,
+           baseline_config={"max_num_seqs": 2048, "gpu_memory_utilization": 0.97}).run()
+    d = store.status_dict()
+    # 不管最终停在哪一轮,事件里都不该出现重复已判负配置的强制候选轮
+    stop = next((r for r in d["rounds"] if r["kind"] == "stop"), None)
+    assert stop is not None
+    store.close()
 
 
 def test_agent_config_connectivity_probe(monkeypatch):
@@ -609,6 +771,7 @@ def test_run_cli_target_choices_include_cost():
     assert "cost" in help_text                        # target choices 现在包含 cost
     assert "--latency-metric" in help_text             # 延迟优先"主看哪个指标"
     assert "--floor" in help_text                      # 延迟优先"吞吐硬下限"
+    assert "--e2e" in help_text                         # E2E p99 SLA(agent/deadline 场景)
 
 
 def test_run_cli_objective_carries_latency_metric_and_floor():
@@ -731,6 +894,58 @@ def test_validate_rejects_offmenu_and_repeat():
     assert validate(AgentDecision(knob="nonexistent_knob"), ctx)        # 不在候选集 → 拒
     assert validate(AgentDecision(knob="max_num_seqs", config=cfg), ctx)  # 已试 reverted → 防重拒
     assert validate(AgentDecision(done=True), ctx) is None              # done 合法
+
+
+def test_validate_recovery_action():
+    from pping_lang.autopilot.agent import AgentContext, AgentDecision, validate
+    ctx = AgentContext(
+        objective={"target": "throughput"}, round=0, budget={"rounds_left": 12},
+        current_config={"max_num_seqs": 64}, diagnosis={}, candidates=[],
+        recovery_mode=True,
+        failure_context={"error": "500", "tried_recovery_actions": []})
+    assert validate(AgentDecision(recovery_action="lower_bench_concurrency"), ctx) is None
+    assert validate(AgentDecision(recovery_action="bad_action"), ctx) is not None
+    assert validate(AgentDecision(), ctx) is not None
+
+
+def test_decision_from_json_recovery_mode():
+    from pping_lang.autopilot.agent import AgentContext, _decision_from_json
+    ctx = AgentContext(
+        objective={"target": "throughput"}, round=0, budget={"rounds_left": 12},
+        current_config={"max_num_seqs": 64}, diagnosis={}, candidates=[],
+        recovery_mode=True, failure_context={})
+    dec = _decision_from_json({"recovery_action": "raise_gpu_memory_utilization",
+                               "rationale": "扩 KV 池", "expected_effect": "缓解 OOM"}, ctx)
+    assert dec.recovery_action == "raise_gpu_memory_utilization"
+    assert dec.rationale == "扩 KV 池"
+
+
+def test_build_messages_recovery_mode():
+    from pping_lang.autopilot.agent import AgentContext, build_messages
+    ctx = AgentContext(
+        objective={"target": "throughput"}, round=0, budget={"rounds_left": 12},
+        current_config={"max_num_seqs": 64}, diagnosis={"bench_plan": {"concurrency": 32}},
+        candidates=[], recovery_mode=True,
+        failure_context={"error": "500 Internal Server Error", "error_type": "APIServer500"})
+    system, user = build_messages(ctx)
+    assert "recovery 模式" in system
+    assert "raise_gpu_memory_utilization" in system
+    assert "500 Internal Server Error" in user
+
+
+def test_stub_agent_recovery_chooses_action_by_error_type():
+    from pping_lang.autopilot.agent import AgentContext, StubAgent
+    agent = StubAgent()
+    ctx_oom = AgentContext(
+        objective={"target": "throughput"}, round=0, budget={"rounds_left": 12},
+        current_config={"max_num_seqs": 64}, diagnosis={"bench_plan": {}}, candidates=[],
+        recovery_mode=True, failure_context={"error": "CUDA out of memory"})
+    assert agent.propose(ctx_oom).recovery_action == "raise_gpu_memory_utilization"
+    ctx_500 = AgentContext(
+        objective={"target": "throughput"}, round=0, budget={"rounds_left": 12},
+        current_config={"max_num_seqs": 64}, diagnosis={"bench_plan": {}}, candidates=[],
+        recovery_mode=True, failure_context={"error": "500 Internal Server Error"})
+    assert agent.propose(ctx_500).recovery_action == "lower_bench_concurrency"
 
 
 def test_build_agent_selects_claude_openai_stub():
@@ -1204,9 +1419,8 @@ def test_runner_t2_equivalence_tolerates_minor_drift(tmp_path):
 
 
 def test_runner_baseline_failure_emits_error_event(tmp_path):
-    """基线轮的 LaunchError/BenchError 之前是裸抛,连诊断信息都留不下(真机教训:
-    "0 个成功样本" 报废整个 session,却没有任何事件说明候选中途崩了)。现在必须
-    在 failed 之前先发一条带 detail.error 的 decide 事件。"""
+    """基线轮的 LaunchError/BenchError 现在进入 recovery 自愈;若无法修复,failed 前
+    仍须保留原始错误事件和 recovery 尝试事件。"""
     from pping_lang.autopilot.scorecard import BenchError
 
     class CrashingSandbox(SimSandbox):
@@ -1223,6 +1437,38 @@ def test_runner_baseline_failure_emits_error_event(tmp_path):
     errs = [e for e in st["events"] if e.get("level") == "error"]
     assert any("基线失败" in (e.get("message") or "") for e in errs)
     assert any((e.get("detail") or {}).get("error") for e in errs)
+    # recovery 痕迹:agent 被询求修复动作
+    assert any("recovery" in (e.get("message") or "").lower() for e in st["events"])
+    store.close()
+
+
+def test_runner_baseline_recovery_success(tmp_path):
+    """B+C:基线第一次失败,recovery 降并发后成功,最终 session 完成且有有效 baseline。"""
+    from pping_lang.autopilot.scorecard import BenchError
+
+    class RecoveringSandbox(SimSandbox):
+        def __init__(self):
+            super().__init__("M")
+            self.failures_left = 1
+
+        def measure(self, obj):
+            if self.failures_left > 0:
+                self.failures_left -= 1
+                raise BenchError("bench 0 个成功样本(共 480)→ 候选不可用,判负")
+            return super().measure(obj)
+
+    store = SessionStore(tmp_path / "baseline-recovery.jsonl")
+    store.new_session("ap-recovery", {"target": "throughput"}, {"rounds": 2})
+    Runner(store=store, sandbox=RecoveringSandbox(), agent=StubAgent(), obj=OBJ,
+           budget={"rounds": 2, "seconds": 900}, model="M", step_delay_s=0.0,
+           baseline_config={"max_num_seqs": 64, "gpu_memory_utilization": 0.9}).run()
+    st = store.status_dict()
+    assert st["state"] == "done"
+    assert st["baseline_score"] > 0
+    # recovery 成功事件
+    assert any("recovery 成功" in (e.get("message") or "") for e in st["events"])
+    # 最终 baseline config 应被 recovery 动作修改过(并发降低或 gpu_util 提高)
+    assert any(e.get("detail", {}).get("recovery_action") for e in st["events"])
     store.close()
 
 
@@ -1560,7 +1806,7 @@ def test_runner_discards_candidate_when_budget_expires_mid_bench(tmp_path):
     cand = [r for r in d["rounds"] if r["kind"] == "candidate"]
     assert cand and cand[0]["decision"] == "reverted"
     assert "半截轮丢弃" in cand[0]["rationale"]
-    assert d["best"]["config"]["max_num_seqs"] == 32
+    assert d["best"]["config"]["max_num_seqs"] == 64
     store.close()
 
 
