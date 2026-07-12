@@ -12,7 +12,10 @@
 """
 from __future__ import annotations
 
+import os
+import re
 from dataclasses import dataclass
+from pathlib import Path
 
 # regime 词汇与诊断引擎一致:A 喂不饱 / B 带宽墙 / C 算力墙 / D 容量墙(§4.3)
 REGIMES = ("A", "B", "C", "D")
@@ -39,85 +42,258 @@ class Knob:
     unsupported: bool = False       # 当前钉定的 vLLM 版本硬拒非默认值 → 永不提议(烧轮)
 
 
-# === curated 高杠杆旋钮(§4.4 两张表)。default 为 0.21 静态值,introspect 可覆盖。===
+# === 半自动 introspect + 白名单标签表(§4.4 / §4.6)===
+#
+# 设计:人工维护「哪些 flag 是性能杠杆 + 方向标签(helps/hurts/lever)」这张白名单;
+# 默认值从本地 vLLM 源码的 EngineArgs 自动读取。这样既避免把 258 个背景参数全丢给 agent,
+# 又能随 vLLM 版本更新自动校准默认值,不用每次手工改 static default。
+#
+# 读取路径优先级:
+#   1. 环境变量 PPING_VLLM_SOURCE 指向的 vLLM 源码根目录
+#   2. 固定候选 D:\GitCode\vllm
+#   3. 读不到/解析失败 → 使用白名单里的 static_default
 
-# 分类(一)——默认已开,通常别动(§4.4):诊断 A 去"开"它们 = 开已开的开关,白烧一轮。
-_DEFAULT_ON: tuple[Knob, ...] = (
-    Knob("enable_chunked_prefill", "--enable-chunked-prefill", "choice", "减气泡",
-         helps=("A",), hurts=(), primary_slo="ttft", default=True, default_on=True,
-         choices=(False, True)),
-    Knob("enable_prefix_caching", "--enable-prefix-caching", "choice", "省重算",
-         helps=("C",), hurts=(), primary_slo="ttft", default=True, default_on=True,
-         choices=(False, True)),
-    Knob("async_scheduling", "--async-scheduling", "choice", "消调度气泡",
-         helps=("A",), hurts=(), primary_slo="tpot", default=True, default_on=True,
-         choices=(False, True), conflicts=("speculative",)),
-)
+_VLLM_SOURCE_ROOT = os.environ.get("PPING_VLLM_SOURCE", r"D:\GitCode\vllm")
+_UNPARSED = object()
 
-# 分类(二)——真·可调杠杆。T1(output_impact=none)= M0 默认放开;T2 走「质量门」开关。
-_TUNABLE: tuple[Knob, ...] = (
+
+def _parse_default_literal(val: str) -> object:
+    """解析 dataclass 字段的默认字面量。复杂表达式返回 _UNPARSED,让调用方 fallback。"""
+    # 去掉行尾注释(如 `# type: ignore`)
+    if "#" in val:
+        val = val.split("#", 1)[0]
+    val = val.strip()
+    if val == "None":
+        return None
+    if val == "True":
+        return True
+    if val == "False":
+        return False
+    if (val.startswith('"') and val.endswith('"')) or (
+            val.startswith("'") and val.endswith("'")):
+        return val[1:-1]
+    try:
+        if "." in val and not val.startswith("0x"):
+            # 避免把 "ModelConfig.x" 当 float
+            float(val)
+            return float(val)
+        return int(val)
+    except ValueError:
+        return _UNPARSED
+
+
+def _extract_class_body(text: str, class_name: str) -> str | None:
+    """从源码文本中提取 class_name 的类体(到第一个方法/def/类装饰器之前)。"""
+    pattern = rf"class {class_name}\b.*?:(?=\s*\n)(.*?)(?=\n    def |\n\n@|\Z)"
+    match = re.search(pattern, text, re.DOTALL)
+    return match.group(1) if match else None
+
+
+def _parse_class_defaults(text: str, class_name: str) -> dict[str, object]:
+    """解析某个 Config 类的字段默认值。"""
+    body = _extract_class_body(text, class_name)
+    if body is None:
+        return {}
+    out: dict[str, object] = {}
+    for m in re.finditer(
+        r"^\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*:\s*[^=\n]+?=\s*(.+?)$",
+        body, re.MULTILINE | re.DOTALL):
+        key = m.group(1)
+        val = " ".join(line.strip().lstrip("\\").strip()
+                         for line in m.group(2).splitlines())
+        parsed = _parse_default_literal(val)
+        if parsed is not _UNPARSED:
+            out[key] = parsed
+    return out
+
+
+def _introspect_engine_args(vllm_root: str | None = None) -> dict:
+    """从 vLLM 源码 EngineArgs 解析字段默认值。不导入 vllm(避免依赖 torch)。
+
+    EngineArgs 大量字段默认值写成 SomeConfig.field(如 ModelConfig.max_seq_len_to_capture),
+    因此需要先到 vllm/config.py 把各 Config 类字段默认值解析出来,再做一次查找。
+    """
+    root = Path(vllm_root or _VLLM_SOURCE_ROOT)
+    arg_utils = root / "vllm" / "engine" / "arg_utils.py"
+    config_py = root / "vllm" / "config.py"
+    if not arg_utils.exists():
+        return {}
+
+    config_defaults: dict[str, dict[str, object]] = {}
+    if config_py.exists():
+        config_text = config_py.read_text(encoding="utf-8")
+        for cls in ("ModelConfig", "CacheConfig", "SchedulerConfig",
+                    "ParallelConfig", "LoadConfig", "MultiModalConfig",
+                    "LoRAConfig", "DecodingConfig"):
+            config_defaults[cls] = _parse_class_defaults(config_text, cls)
+
+    text = arg_utils.read_text(encoding="utf-8")
+    body = _extract_class_body(text, "EngineArgs")
+    if body is None:
+        return {}
+
+    defaults: dict[str, object] = {}
+    for m in re.finditer(
+        r"^\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*:\s*[^=\n]+?=\s*(.+?)$",
+        body, re.MULTILINE | re.DOTALL):
+        key = m.group(1)
+        val = " ".join(line.strip().lstrip("\\").strip()
+                         for line in m.group(2).splitlines())
+
+        # SomeConfig.field 形式 → 查 config.py 解析结果
+        cm = re.match(r"^([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)$", val)
+        if cm:
+            cls_name, fld_name = cm.group(1), cm.group(2)
+            if cls_name in config_defaults and fld_name in config_defaults[cls_name]:
+                defaults[key] = config_defaults[cls_name][fld_name]
+            continue
+
+        parsed = _parse_default_literal(val)
+        if parsed is not _UNPARSED:
+            defaults[key] = parsed
+    return defaults
+
+
+# 白名单标签表:性能杠杆参数的元数据。
+# static_default 是 vLLM 0.21 典型值,作为源码 introspect 失败时的 fallback。
+_KNOB_REGISTRY: tuple[dict, ...] = (
+    # 分类(一)——默认已开,通常别动(§4.4)
+    {"key": "enable_chunked_prefill", "flag": "--enable-chunked-prefill",
+     "kind": "choice", "lever": "减气泡", "helps": ("A",), "primary_slo": "ttft",
+     "static_default": True, "default_on": True, "choices": (False, True)},
+    {"key": "enable_prefix_caching", "flag": "--enable-prefix-caching",
+     "kind": "choice", "lever": "省重算", "helps": ("C",), "primary_slo": "ttft",
+     "static_default": True, "default_on": True, "choices": (False, True)},
+    {"key": "async_scheduling", "flag": "--async-scheduling",
+     "kind": "choice", "lever": "消调度气泡", "helps": ("A",), "primary_slo": "tpot",
+     "static_default": True, "default_on": True, "choices": (False, True),
+     "conflicts": ("speculative",)},
+
     # —— T1 ——
-    Knob("max_num_seqs", "--max-num-seqs", "int", "提并发/利用率",
-         helps=("A", "B"), hurts=("D",), primary_slo="throughput", default=256,
-         lo=1, hi=2048, big_batch=True),
-    Knob("max_num_batched_tokens", "--max-num-batched-tokens", "int", "加大每step预算",
-         helps=("A", "C"), hurts=("D",), primary_slo="ttft", default=2048,
-         lo=256, hi=65536, big_batch=True),
-    # vLLM 0.21 V1 硬拒任何非默认值:"No Concurrent Partial Prefills so far"
-    # (arg_utils.py:2191 _check_feature_supported)。真机连烧两轮 LaunchError 后钉死。
-    Knob("max_num_partial_prefills", "--max-num-partial-prefills", "int", "短prompt插队",
-         helps=("A",), hurts=(), primary_slo="ttft", default=1, lo=1, hi=8,
-         needs=("enable_chunked_prefill",), unsupported=True),
-    Knob("long_prefill_token_threshold", "--long-prefill-token-threshold", "int", "长prompt降级",
-         helps=("A",), hurts=(), primary_slo="ttft", default=0, lo=0, hi=8192),
-    Knob("gpu_memory_utilization", "--gpu-memory-utilization", "float", "腾容量(扩KV池)",
-         helps=("B", "D"), hurts=(), primary_slo="throughput", default=0.92,
-         lo=0.5, hi=0.97),
-    Knob("cudagraph_mode", "--cudagraph-mode", "choice", "减per-step开销",
-         helps=("A", "B"), hurts=(), primary_slo="tpot", default="FULL_AND_PIECEWISE",
-         choices=("PIECEWISE", "FULL_AND_PIECEWISE")),
-    Knob("max_model_len", "--max-model-len", "int", "腾容量(降上下文)",
-         helps=("D",), hurts=(), primary_slo="throughput", default=0, lo=512, hi=131072),
-    Knob("cpu_offload_gb", "--cpu-offload-gb", "int", "腾容量(权重→CPU)",
-         helps=("D",), hurts=(), primary_slo="tpot", default=0, lo=0, hi=128),
-    Knob("performance_mode", "--performance-mode", "choice", "元旋钮(batch+cudagraph策略)",
-         helps=("A", "B"), hurts=("D",), primary_slo="throughput", default="balanced",
-         choices=("interactivity", "balanced", "throughput")),
-    # —— T2(走「质量门」开关,output_impact != none)——
-    Knob("kv_cache_dtype", "--kv-cache-dtype", "choice", "减字节+腾容量",
-         helps=("B", "D"), hurts=(), primary_slo="tpot", output_impact="equivalence",
-         default="auto", choices=("auto", "fp8"), conflicts=("attention_backend",)),
-    Knob("quantization", "--quantization", "choice", "减字节(权重)",
-         helps=("B", "D"), hurts=(), primary_slo="tpot", output_impact="equivalence",
-         default=None, choices=(None, "fp8", "awq")),
-    Knob("speculative", "--speculative-config", "choice", "减步数(摊权重读)",
-         helps=("B",), hurts=("C",), primary_slo="tpot", output_impact="equivalence",
-         default=None, choices=(None, "ngram"), conflicts=("async_scheduling",)),
-    Knob("attention_backend", "--attention-backend", "choice", "抬有效屋顶",
-         helps=("B", "C"), hurts=(), primary_slo="ttft", output_impact="equivalence",
-         default="auto", choices=("auto", "FLASHINFER"), conflicts=("kv_cache_dtype",)),
+    {"key": "max_num_seqs", "flag": "--max-num-seqs",
+     "kind": "int", "lever": "提并发/利用率", "helps": ("A", "B"), "hurts": ("D",),
+     "primary_slo": "throughput", "static_default": 256, "lo": 1, "hi": 2048,
+     "big_batch": True},
+    {"key": "max_num_batched_tokens", "flag": "--max-num-batched-tokens",
+     "kind": "int", "lever": "加大每step预算", "helps": ("A", "C"), "hurts": ("D",),
+     "primary_slo": "ttft", "static_default": 2048, "lo": 256, "hi": 65536,
+     "big_batch": True},
+    # vLLM 0.21 V1 硬拒任何非默认值,永不提议
+    {"key": "max_num_partial_prefills", "flag": "--max-num-partial-prefills",
+     "kind": "int", "lever": "短prompt插队", "helps": ("A",), "primary_slo": "ttft",
+     "static_default": 1, "lo": 1, "hi": 8, "needs": ("enable_chunked_prefill",),
+     "unsupported": True},
+    {"key": "long_prefill_token_threshold", "flag": "--long-prefill-token-threshold",
+     "kind": "int", "lever": "长prompt降级", "helps": ("A",), "primary_slo": "ttft",
+     "static_default": 0, "lo": 0, "hi": 8192},
+    {"key": "gpu_memory_utilization", "flag": "--gpu-memory-utilization",
+     "kind": "float", "lever": "腾容量(扩KV池)", "helps": ("B", "D"),
+     "primary_slo": "throughput", "static_default": 0.92, "lo": 0.5, "hi": 0.97},
+    {"key": "cudagraph_mode", "flag": "--cudagraph-mode",
+     "kind": "choice", "lever": "减per-step开销", "helps": ("A", "B"),
+     "primary_slo": "tpot", "static_default": "FULL_AND_PIECEWISE",
+     "choices": ("PIECEWISE", "FULL_AND_PIECEWISE")},
+    {"key": "max_model_len", "flag": "--max-model-len",
+     "kind": "int", "lever": "腾容量(降上下文)", "helps": ("D",),
+     "primary_slo": "throughput", "static_default": 0, "lo": 512, "hi": 131072},
+    {"key": "cpu_offload_gb", "flag": "--cpu-offload-gb",
+     "kind": "int", "lever": "腾容量(权重→CPU)", "helps": ("D",),
+     "primary_slo": "tpot", "static_default": 0, "lo": 0, "hi": 128},
+    {"key": "performance_mode", "flag": "--performance-mode",
+     "kind": "choice", "lever": "元旋钮(batch+cudagraph策略)", "helps": ("A", "B"),
+     "hurts": ("D",), "primary_slo": "throughput", "static_default": "balanced",
+     "choices": ("interactivity", "balanced", "throughput")},
+    # 调度与开销类(不依赖 load_binding)
+    {"key": "num_scheduler_steps", "flag": "--num-scheduler-steps",
+     "kind": "int", "lever": "减调度开销", "helps": ("A", "B"), "hurts": ("C",),
+     "primary_slo": "tpot", "static_default": 1, "lo": 1, "hi": 64},
+    {"key": "prefill_chunk_size", "flag": "--prefill-chunk-size",
+     "kind": "int", "lever": "prefill粒度", "helps": ("A", "C"),
+     "primary_slo": "ttft", "static_default": 512, "lo": 256, "hi": 8192},
+    {"key": "scheduler_delay_factor", "flag": "--scheduler-delay-factor",
+     "kind": "float", "lever": "调度等待系数", "helps": ("A",),
+     "primary_slo": "throughput", "static_default": 0.0, "lo": 0.0, "hi": 2.0},
+    {"key": "max_seq_len_to_capture", "flag": "--max-seq-len-to-capture",
+     "kind": "int", "lever": "cudagraph捕获长度", "helps": ("A", "B"),
+     "primary_slo": "tpot", "static_default": 8192, "lo": 512, "hi": 32768},
+    # D 守卫类
+    {"key": "num_gpu_blocks_override", "flag": "--num-gpu-blocks-override",
+     "kind": "int", "lever": "手动KV块数", "helps": ("D",),
+     "primary_slo": "throughput", "static_default": None, "lo": 256, "hi": 65536},
+    {"key": "block_size", "flag": "--block-size",
+     "kind": "choice", "lever": "KV块大小", "helps": ("D",),
+     "primary_slo": "throughput", "static_default": None,
+     "choices": (8, 16, 32)},
+
+    # —— T2 ——
+    {"key": "kv_cache_dtype", "flag": "--kv-cache-dtype",
+     "kind": "choice", "lever": "减字节+腾容量", "helps": ("B", "D"),
+     "primary_slo": "tpot", "output_impact": "equivalence",
+     "static_default": "auto", "choices": ("auto", "fp8"),
+     "conflicts": ("attention_backend",)},
+    {"key": "quantization", "flag": "--quantization",
+     "kind": "choice", "lever": "减字节(权重)", "helps": ("B", "D"),
+     "primary_slo": "tpot", "output_impact": "equivalence",
+     "static_default": None, "choices": (None, "fp8", "awq")},
+    {"key": "speculative", "flag": "--speculative-config",
+     "kind": "choice", "lever": "减步数(摊权重读)", "helps": ("B",), "hurts": ("C",),
+     "primary_slo": "tpot", "output_impact": "equivalence",
+     "static_default": None, "choices": (None, "ngram"),
+     "conflicts": ("async_scheduling",)},
+    # MTP / speculative 细粒度控制
+    {"key": "num_lookahead_slots", "flag": "--num-lookahead-slots",
+     "kind": "int", "lever": "MTP前瞻槽数", "helps": ("B",), "hurts": ("C",),
+     "primary_slo": "tpot", "output_impact": "equivalence",
+     "static_default": None, "lo": 1, "hi": 8},
+    {"key": "ngram_prompt_lookup_max", "flag": "--ngram-prompt-lookup-max",
+     "kind": "int", "lever": "ngram回溯最大长度", "helps": ("B",), "hurts": ("C",),
+     "primary_slo": "tpot", "output_impact": "equivalence",
+     "static_default": None, "lo": 2, "hi": 16},
+    {"key": "attention_backend", "flag": "--attention-backend",
+     "kind": "choice", "lever": "抬有效屋顶", "helps": ("B", "C"),
+     "primary_slo": "ttft", "output_impact": "equivalence",
+     "static_default": "auto", "choices": ("auto", "FLASHINFER"),
+     "conflicts": ("kv_cache_dtype",)},
 )
 
-KNOBS: tuple[Knob, ...] = _DEFAULT_ON + _TUNABLE
+
+def _build_knob(meta: dict, defaults: dict) -> Knob:
+    """把白名单元数据和 EngineArgs 解析出的默认值合并成 Knob。"""
+    return Knob(
+        key=meta["key"], flag=meta["flag"], kind=meta["kind"], lever=meta["lever"],
+        helps=meta.get("helps", ()), hurts=meta.get("hurts", ()),
+        primary_slo=meta["primary_slo"],
+        output_impact=meta.get("output_impact", "none"),
+        default=defaults.get(meta["key"], meta.get("static_default")),
+        default_on=meta.get("default_on", False),
+        lo=meta.get("lo", 0.0), hi=meta.get("hi", 0.0),
+        choices=meta.get("choices", ()),
+        big_batch=meta.get("big_batch", False),
+        needs=meta.get("needs", ()),
+        conflicts=meta.get("conflicts", ()),
+        unsupported=meta.get("unsupported", False),
+    )
+
+
+_EA_DEFAULTS = _introspect_engine_args(_VLLM_SOURCE_ROOT)
+KNOBS: tuple[Knob, ...] = tuple(
+    _build_knob(m, _EA_DEFAULTS) for m in _KNOB_REGISTRY)
 _BY_KEY = {k.key: k for k in KNOBS}
 
 
-# === introspect:vllm 可导入时读当前生效默认值,填 default_0_21(§4.6.1)===
+# === introspect:读 vLLM 源码 EngineArgs 默认值,填 default_0_21(§4.6.1)===
 
-def introspect_defaults() -> dict:
-    """读 vllm EngineArgs 当前默认值(可导入时);否则空 → 用 Knob.default 静态值。
+def introspect_defaults(vllm_root: str | None = None) -> dict:
+    """读 vLLM 源码 EngineArgs 默认值(不导入 vllm,避免 torch 依赖)。
 
-    M0 价值:让 propose 跳过"已到位/默认已开"的旋钮,不烧空轮(§4.4「先读当前生效值」)。
+    M0 价值:让 propose 跳过"已到位/默认已开"的旋钮,不烧空轮。
+    如果提供了 vllm_root,优先从该路径解析;否则用模块初始化时的结果。
     """
+    defaults = _introspect_engine_args(vllm_root) if vllm_root else _EA_DEFAULTS
     out: dict = {}
-    try:  # pragma: no cover - 需装 vllm
-        from vllm.engine.arg_utils import EngineArgs  # noqa: PLC0415
-        ea = EngineArgs(model="x")
-        for k in KNOBS:
-            if hasattr(ea, k.key):
-                out[k.key] = getattr(ea, k.key)
-    except Exception:  # noqa: BLE001 — 无 vllm / 版本差异 → 回退静态
-        pass
+    for k in KNOBS:
+        if k.key in defaults:
+            out[k.key] = defaults[k.key]
     return out
 
 
@@ -253,16 +429,30 @@ def _render_special(key: str, value) -> list[str] | None:
     return None
 
 
+# 这些旋钮的 0 表示"禁用/不覆盖",传 0 和不传等效,某些 flag 传 0 还会让 vLLM 报错
+_ZERO_DISABLED_KEYS = {
+    "num_gpu_blocks_override", "num_lookahead_slots", "ngram_prompt_lookup_max",
+    "long_prefill_token_threshold", "cpu_offload_gb",
+}
+
+
 def render_flags(config: dict) -> list[str]:
-    """config → vllm serve flag tokens(给 docker run 拼参数)。choice/None 跳过。"""
+    """config → vllm serve flag tokens(给 docker run 拼参数)。choice/None/0禁用 跳过。"""
     out: list[str] = []
     for k in KNOBS:
-        if k.key in config and config[k.key] is not None:
-            special = _render_special(k.key, config[k.key])
-            if special is not None:
-                out += special
-            else:
-                out += [k.flag, str(config[k.key])]
+        if k.key not in config:
+            continue
+        value = config[k.key]
+        if value is None:
+            continue
+        # 0 默认值通常表示"不启用/自动",传 0 和不传等效,且某些 flag 传 0 会报错
+        if value == 0 and (k.default == 0 or k.key in _ZERO_DISABLED_KEYS):
+            continue
+        special = _render_special(k.key, value)
+        if special is not None:
+            out += special
+        else:
+            out += [k.flag, str(value)]
     return out
 
 
