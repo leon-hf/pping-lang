@@ -1503,13 +1503,14 @@ function autopilotTab() {
   // 每个目标对应的合理 SLA 默认值(参照行业惯例:TTFT/TPOT 是 LLM serving SLO 的标准构成)。
   // 吞吐优先:SLA 只是闸门,松一点没关系;延迟优先:SLA 字段本身就是要压低的东西,
   // 必须收紧,不然"最小化延迟"在一个 8000ms 的松闸门下形同虚设;性价比同吞吐优先。
+  // E2E 默认留空(不设闸门)--交互式场景 TTFT+TPOT 已够,deadline/agent 场景用户自填。
   const TARGET_SLA_DEFAULTS = {
-    throughput: { ttft: 8000, tpot: 50 },
-    latency: { ttft: 800, tpot: 30 },
-    cost: { ttft: 8000, tpot: 50 },
+    throughput: { ttft: 8000, tpot: 50, e2e: '' },
+    latency: { ttft: 800, tpot: 30, e2e: '' },
+    cost: { ttft: 8000, tpot: 50, e2e: '' },
   };
   return {
-    obj: { target: 'throughput', ttft: 8000, tpot: 50, latencyMetric: 'ttft', floor: '' },
+    obj: { target: 'throughput', ttft: 8000, tpot: 50, e2e: '', latencyMetric: 'ttft', floor: '' },
     budget: { rounds: 12, minutes: 30 },
     agentOpen: false,
     preset: 'openrouter',
@@ -1624,16 +1625,18 @@ function autopilotTab() {
       return '执行调优';
     },
     setTarget(target) {
-      // 只在用户没手动改过 SLA 数值时才自动套用新目标的推荐值——不然切一下目标
+      // 只在用户没手动改过 SLA 数值时才自动套用新目标的推荐值--不然切一下目标
       // 就把用户特意填的阈值(比如"我们的真实 SLA 就是 1500ms")悄悄覆盖掉。
       const prevDefaults = TARGET_SLA_DEFAULTS[this.obj.target];
       const untouched = prevDefaults && Number(this.obj.ttft) === prevDefaults.ttft
-        && Number(this.obj.tpot) === prevDefaults.tpot;
+        && Number(this.obj.tpot) === prevDefaults.tpot
+        && (this.obj.e2e === '' || Number(this.obj.e2e) === prevDefaults.e2e);
       this.obj.target = target;
       if (untouched) {
         const d = TARGET_SLA_DEFAULTS[target];
         this.obj.ttft = d.ttft;
         this.obj.tpot = d.tpot;
+        this.obj.e2e = d.e2e;
       }
     },
     stateLabel() {
@@ -1759,7 +1762,8 @@ function autopilotTab() {
       const body = {
         objective: {
           target: this.obj.target,
-          sla: { ttft_p99_ms: Number(this.obj.ttft) || null, tpot_p99_ms: Number(this.obj.tpot) || null },
+          sla: { ttft_p99_ms: Number(this.obj.ttft) || null, tpot_p99_ms: Number(this.obj.tpot) || null,
+                 e2e_p99_ms: Number(this.obj.e2e) || null },
           // latency_metric/floor 早就在后端(objective.py)支持,之前从没接过 UI:
           // 延迟优先模式下"主看哪个指标""吞吐不能跌破多少"完全没法配置。
           latency_metric: this.obj.target === 'latency' ? this.obj.latencyMetric : undefined,

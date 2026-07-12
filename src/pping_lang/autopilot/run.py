@@ -67,8 +67,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--env", action="append", default=[], help="docker -e KEY=VAL(可多次)")
     p.add_argument("--cap-add", action="append", default=[], help="docker --cap-add(可多次)")
     p.add_argument("--ready-timeout", type=float, default=300.0)
-    p.add_argument("--baseline-max-num-seqs", type=int, default=32, help="基线起点(压低=造喂不饱工况)")
-    p.add_argument("--baseline-gpu-util", type=float, default=0.70)
+    p.add_argument("--baseline-max-num-seqs", type=int, default=64, help="基线起点(压低=造喂不饱工况)")
+    p.add_argument("--baseline-gpu-util", type=float, default=0.90)
+    p.add_argument("--baseline-max-model-len", type=int, default=None,
+                   help="基线 max_model_len;候选由 --cmd-template 固定,不传则 baseline 不限制")
     p.add_argument("--bench-concurrency", type=int, default=8, help="压测并发(拉高让提并发真有收益)")
     p.add_argument("--bench-duration", type=int, default=30)
     p.add_argument("--bench-warmup", type=int, default=20)
@@ -89,6 +91,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--target", default="throughput", choices=["throughput", "latency", "cost"])
     p.add_argument("--ttft", type=float, default=None, help="TTFT p99 SLA(ms)")
     p.add_argument("--tpot", type=float, default=None, help="TPOT p99 SLA(ms)")
+    p.add_argument("--e2e", type=float, default=None, help="E2E p99 SLA(ms),agent/工具调用场景的 deadline")
     p.add_argument("--latency-metric", default=None, choices=["ttft", "tpot"],
                    help="target=latency 时主看哪个指标(默认 tpot)")
     p.add_argument("--floor", type=float, default=None,
@@ -121,6 +124,8 @@ def main(argv: list[str] | None = None) -> int:
 
     baseline_config = {"max_num_seqs": args.baseline_max_num_seqs,
                        "gpu_memory_utilization": args.baseline_gpu_util}
+    if args.baseline_max_model_len is not None:
+        baseline_config["max_model_len"] = args.baseline_max_model_len
     bench_spec = {**BENCH_SPEC, "concurrency": args.bench_concurrency,
                   "duration_s": args.bench_duration, "warmup_s": args.bench_warmup,
                   "timeout_s": args.bench_timeout,
@@ -151,7 +156,8 @@ def main(argv: list[str] | None = None) -> int:
             pass
     else:
         objective = {"target": args.target,
-                     "sla": {"ttft_p99_ms": args.ttft, "tpot_p99_ms": args.tpot}}
+                     "sla": {"ttft_p99_ms": args.ttft, "tpot_p99_ms": args.tpot,
+                             "e2e_p99_ms": args.e2e}}
         if args.latency_metric:
             objective["latency_metric"] = args.latency_metric
         if args.floor is not None:

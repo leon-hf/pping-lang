@@ -91,6 +91,8 @@ def test_autopilot_target_switch_adjusts_sla_defaults(client):
     assert "latencyMetric" in body and "obj.floor" in body
     assert "latency_metric: this.obj.target" in body    # start() payload 真的带上了这两个字段
     assert "floor: (this.obj.target" in body
+    assert "obj.e2e" in body                            # E2E p99 SLA 输入(agent/deadline 场景)
+    assert "e2e_p99_ms" in body                         # start() payload 带上 e2e SLA
 
 
 def test_autopilot_start_button_uses_execute_label(client):

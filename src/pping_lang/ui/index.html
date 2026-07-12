@@ -1618,7 +1618,7 @@
         <button :class="{active: obj.target==='latency'}" @click="setTarget('latency')">延迟优先</button>
         <button :class="{active: obj.target==='cost'}" @click="setTarget('cost')">性价比</button>
       </div>
-      <span>SLA · TTFT p99 ≤ <input type="number" x-model="obj.ttft"> ms · TPOT p99 ≤ <input type="number" x-model="obj.tpot"> ms</span>
+      <span>SLA · TTFT p99 ≤ <input type="number" x-model="obj.ttft"> ms · TPOT p99 ≤ <input type="number" x-model="obj.tpot"> ms · E2E p99 ≤ <input type="number" x-model="obj.e2e" placeholder="可选" style="width:80px"> ms</span>
       <!-- 延迟优先专属:SLA 在这个模式下是"要最小化的东西"本身,不是纯闸门——
            得说清楚主看哪个、吞吐不能跌破多少,否则"最小化延迟"可能极端到吞吐归零 -->
       <span x-show="obj.target==='latency'">

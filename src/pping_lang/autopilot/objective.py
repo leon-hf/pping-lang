@@ -17,6 +17,7 @@ Target = Literal["throughput", "latency", "cost"]
 class SLA:
     ttft_p99_ms: float | None = None
     tpot_p99_ms: float | None = None
+    e2e_p99_ms: float | None = None          # 端到端完成时间(agent/工具调用场景的 deadline)
 
 
 @dataclass(frozen=True)
@@ -59,6 +60,8 @@ def sla_ok(sc: Scorecard, obj: ObjectiveSpec) -> bool:
         ok &= sc.ttft_p99_ms <= obj.sla.ttft_p99_ms
     if obj.sla.tpot_p99_ms is not None:
         ok &= sc.tpot_p99_ms <= obj.sla.tpot_p99_ms
+    if obj.sla.e2e_p99_ms is not None:
+        ok &= sc.e2e_p99_ms <= obj.sla.e2e_p99_ms
     if obj.target == "latency" and obj.floor is not None:        # 吞吐下限作硬约束
         ok &= sc.output_tps >= obj.floor.output_tps
     if sc.error_rate > 0.5:                                       # 高错误率不可接受

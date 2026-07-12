@@ -55,7 +55,8 @@ def build_objective(d: dict) -> ObjectiveSpec:
     floor = d.get("floor")
     return ObjectiveSpec(
         target=d.get("target", "throughput"),
-        sla=SLA(ttft_p99_ms=sla.get("ttft_p99_ms"), tpot_p99_ms=sla.get("tpot_p99_ms")),
+        sla=SLA(ttft_p99_ms=sla.get("ttft_p99_ms"), tpot_p99_ms=sla.get("tpot_p99_ms"),
+                e2e_p99_ms=sla.get("e2e_p99_ms")),
         floor=Floor(output_tps=floor["output_tps"]) if floor else None,
         latency_metric=d.get("latency_metric", "tpot"),
         gpu_count=int(d.get("gpu_count", 1)),
