@@ -154,6 +154,13 @@ def test_autopilot_status_poll_failure_keeps_last_frame_briefly(client):
     assert "this.pollFailures < 3" in js
 
 
+def test_autopilot_sync_discards_out_of_order_status_responses(client):
+    js = client.get("/dashboard.js").text
+    assert "_syncSeq" in js
+    assert "const seq = ++this._syncSeq" in js
+    assert "if (seq !== this._syncSeq) return" in js
+
+
 def test_autopilot_running_feedback_uses_structured_events(client):
     body = client.get("/").text + client.get("/dashboard.js").text + client.get("/dashboard.css").text
     assert "_pendingFromStatus" in body

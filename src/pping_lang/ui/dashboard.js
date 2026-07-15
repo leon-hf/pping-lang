@@ -1589,6 +1589,7 @@ function autopilotTab() {
     expandedRounds: [],
     maxTps: 1,
     _poll: null,
+    _syncSeq: 0,
     activeSessionId: '',
 
     init() { this._sync(); },          // 进页时拉一次:断线重连/已有 session 直接接管直播
@@ -1814,7 +1815,14 @@ function autopilotTab() {
 
     _startPoll() { if (this._poll) clearInterval(this._poll); this._sync(); this._poll = setInterval(() => this._sync(), 2000); },
     async _sync() {
+      // setInterval 每 2s 发一次,不等上一发落地——候选轮里 vLLM 崩溃重启/恢复 best
+      // 这类慢操作能让某次请求晚到,若后到的旧响应覆盖了先到的新响应(轮次更多、已
+      // 终态),UI 会永久卡在那个旧快照上(term 时已 clearInterval,没有下一轮来纠正)。
+      // 真机复现:R2(候选崩溃重试)拖慢那次请求,R3(stop)的响应先到、poll 已停,
+      // R2 请求的响应姗姗来迟,把 shownRounds 覆盖回只有 2 轮——序号哨兵防这个。
+      const seq = ++this._syncSeq;
       let s; try { s = await fetch(this.apiUrl('/api/autopilot/status')).then(x => x.json()); } catch (e) {
+        if (seq !== this._syncSeq) return;           // 期间已有更新的请求,这次报错作废
         if (this.running) {
           this.pollFailures += 1;
           if (this.pending) this.pending.progress = '状态刷新重试中，保留上一帧';
@@ -1828,6 +1836,7 @@ function autopilotTab() {
         }
         return;
       }
+      if (seq !== this._syncSeq) return;              // 过期响应,不覆盖更新的状态
       this.pollFailures = 0;
       if (!s || s.state === 'idle') { return; }
       if (this.activeSessionId && s.session_id && s.session_id !== this.activeSessionId) {
