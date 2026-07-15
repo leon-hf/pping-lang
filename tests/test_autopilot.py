@@ -528,6 +528,31 @@ def test_runner_sla_never_met_overrides_agent_done(tmp_path):
     store.close()
 
 
+def test_runner_forced_continue_preserves_original_agent_thinking(tmp_path):
+    """真机复现(2026-07-16):agent 判 done 被 MIN_EXPLORE_ROUNDS 强制覆盖成一个候选轮后,
+    该轮落盘的 agent_thinking 是空的——覆盖逻辑重新造了个 AgentDecision,没把原始 dec
+    的 thinking 带过去,UI 那轮"Agent 思考过程"整节就消失了,用户看不到 agent 当时为什么
+    想停。thinking 必须跟着原始 dec 一起保留下来。"""
+    from pping_lang.autopilot.agent import AgentDecision
+
+    class DoneWithThinkingAgent:
+        model = "done-with-thinking"
+
+        def propose(self, ctx):
+            return AgentDecision(done=True, rationale="我判断已近最优",
+                                 thinking="baseline 已经很稳,感觉不用再试了")
+
+    store = SessionStore(tmp_path / "preserve-thinking.jsonl")
+    store.new_session("ap-preserve-thinking", {"target": "throughput"}, {"rounds": 12})
+    Runner(store=store, sandbox=SimSandbox(), agent=DoneWithThinkingAgent(), obj=OBJ,
+           budget={"rounds": 12, "seconds": 900}, model="M", step_delay_s=0.0).run()
+    d = store.status_dict()
+
+    forced_round = next(r for r in d["rounds"] if r["kind"] == "candidate")
+    assert forced_round["agent_thinking"] == "baseline 已经很稳,感觉不用再试了"
+    store.close()
+
+
 def test_runner_honors_done_after_min_explore_rounds_when_sla_ok(tmp_path):
     """SLA 已通过(best_score 非 -inf)且已探索满 MIN_EXPLORE_ROUNDS 轮后,agent 的
     done 判断真正生效——这是这次复盘要恢复的核心行为:信任"已经试过、判断收益递减"

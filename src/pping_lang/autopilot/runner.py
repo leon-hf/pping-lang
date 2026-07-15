@@ -750,7 +750,10 @@ class Runner(threading.Thread):
                                       f"{forced['knob']} {forced['from']}→{forced['to']}",
                             expected_effect="主指标↑,不破 SLA",
                             evidence_refs=list(diag.get("evidence_refs", [])),
-                            guardrail_notes=f"{why};强制多试一轮;仍受 SLA/launch-catch 约束")
+                            guardrail_notes=f"{why};强制多试一轮;仍受 SLA/launch-catch 约束",
+                            # 覆盖决策丢的是"要不要停",不该连带丢 agent 原本为什么想停的推理——
+                            # 保留原始 thinking,轨迹里这轮才留得住"它当时是怎么想的"。
+                            thinking=dec.thinking)
                         self._event("decide",
                                     f"agent 判 done 但{why},强制试 {forced['knob']} "
                                     f"{forced['from']}→{forced['to']}",
