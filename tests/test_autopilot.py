@@ -156,14 +156,13 @@ def test_propose_t2_gated_by_quality_gate():
 
 
 def test_propose_load_limited_still_has_scheduler_and_prefill_knobs():
-    """load_binding=False 时 max_num_seqs 被剪,但 num_scheduler_steps / prefill_chunk_size
-    / max_seq_len_to_capture 不依赖 load_binding,仍应留在候选集。"""
+    """load_binding=False 时 max_num_seqs 被剪,但 prefill_chunk_size / max_seq_len_to_capture
+    不依赖 load_binding,仍应留在候选集(num_scheduler_steps 已标 unsupported,不测它)。"""
     cfg = {"max_num_seqs": 64, "gpu_memory_utilization": 0.9,
-           "num_scheduler_steps": 1, "prefill_chunk_size": 512, "max_seq_len_to_capture": 8192}
+           "prefill_chunk_size": 512, "max_seq_len_to_capture": 8192}
     cands = propose_candidates("A", cfg, load_binding=False)
     keys = {c["knob"] for c in cands}
     assert "max_num_seqs" not in keys
-    assert "num_scheduler_steps" in keys
     assert "prefill_chunk_size" in keys
     assert "max_seq_len_to_capture" in keys
 
@@ -263,6 +262,16 @@ def test_propose_skips_unsupported_knob():
     # → 永不提议,不管约束图是否满足(真机连烧两轮 LaunchError 的教训)。
     on = {c["knob"] for c in propose_candidates("A", {"max_num_seqs": 8, "enable_chunked_prefill": True})}
     assert "max_num_partial_prefills" not in on
+
+
+def test_propose_skips_removed_v0_scheduler_knobs():
+    """真机复现(2026-07-16 dogfood,两次不同 session):`num_scheduler_steps`/
+    `scheduler_delay_factor` 在这个 vLLM 版本的 `vllm serve --help` 里根本不存在
+    (V1 引擎砍掉的 V0 遗留 multi-step 调度参数),每次被选中都是 `unrecognized
+    arguments` 崩溃回滚,白烧一轮——标 unsupported 后不该再被提议。"""
+    on = {c["knob"] for c in propose_candidates("A", {"max_num_seqs": 8})}
+    assert "num_scheduler_steps" not in on
+    assert "scheduler_delay_factor" not in on
 
 
 def test_constraint_graph_needs_mechanism():

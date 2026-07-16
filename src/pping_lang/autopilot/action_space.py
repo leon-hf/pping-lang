@@ -204,15 +204,20 @@ _KNOB_REGISTRY: tuple[dict, ...] = (
      "hurts": ("D",), "primary_slo": "throughput", "static_default": "balanced",
      "choices": ("interactivity", "balanced", "throughput")},
     # 调度与开销类(不依赖 load_binding)
+    # 2026-07-16 dogfood 真机复现:`vllm serve --help` 里根本没有这两个 flag,提了必
+    # `unrecognized arguments`(V1 引擎砍掉了 multi-step 调度,§这两个是 V0 遗留)——
+    # 每次被选中都是白烧一轮(候选启动崩溃→回滚),标 unsupported 让它们永不被提议。
     {"key": "num_scheduler_steps", "flag": "--num-scheduler-steps",
      "kind": "int", "lever": "减调度开销", "helps": ("A", "B"), "hurts": ("C",),
-     "primary_slo": "tpot", "static_default": 1, "lo": 1, "hi": 64},
+     "primary_slo": "tpot", "static_default": 1, "lo": 1, "hi": 64,
+     "unsupported": True},
     {"key": "prefill_chunk_size", "flag": "--prefill-chunk-size",
      "kind": "int", "lever": "prefill粒度", "helps": ("A", "C"),
      "primary_slo": "ttft", "static_default": 512, "lo": 256, "hi": 8192},
     {"key": "scheduler_delay_factor", "flag": "--scheduler-delay-factor",
      "kind": "float", "lever": "调度等待系数", "helps": ("A",),
-     "primary_slo": "throughput", "static_default": 0.0, "lo": 0.0, "hi": 2.0},
+     "primary_slo": "throughput", "static_default": 0.0, "lo": 0.0, "hi": 2.0,
+     "unsupported": True},
     {"key": "max_seq_len_to_capture", "flag": "--max-seq-len-to-capture",
      "kind": "int", "lever": "cudagraph捕获长度", "helps": ("A", "B"),
      "primary_slo": "tpot", "static_default": 8192, "lo": 512, "hi": 32768},
