@@ -54,6 +54,15 @@ def test_decide_kept_revert_tie():
     assert decide(1250, 1240, 0.03) == "tie"             # 噪声内
 
 
+def test_decide_worse_than_noise_margin_is_reverted_not_tie():
+    """真机复现(2026-07-16 dogfood):候选 1682.9 vs best 1784.1(-5.7%,远超 3% 噪声边界)
+    被判成了 tie(UI 显示"≈持平")——decide() 曾经只挡"赢得不够多"的上界,没挡"输得
+    不是噪声"的下界,任何没到 -inf 的退化候选都会落进 tie,把真实退化说成没变化。"""
+    assert decide(1682.9, 1784.1, 0.03) == "reverted"
+    assert decide(1240 * 0.9, 1240, 0.03) == "reverted"  # -10%,远超噪声边界
+    assert decide(1240 * 0.98, 1240, 0.03) == "tie"      # -2%,仍在噪声边界内
+
+
 def test_latency_target_minimizes():
     o = ObjectiveSpec(target="latency", latency_metric="tpot", sla=SLA())
     fast = Scorecard(output_tps=100, ttft_p99_ms=300, tpot_p99_ms=15)

@@ -87,8 +87,12 @@ def decide(cand_score: float, best_score: float, noise_margin: float = 0.03) -> 
         return "reverted"                                        # 破 SLA / 起不来 / 高错误
     if best_score == float("-inf"):
         return "kept"                                            # 首个可行候选(基线也可能不达标)
-    if cand_score > best_score + abs(best_score) * noise_margin:
+    margin = abs(best_score) * noise_margin
+    if cand_score > best_score + margin:
         return "kept"                                            # 超噪声边界才算赢
+    if cand_score < best_score - margin:
+        return "reverted"                                        # 真变差了(不是噪声内)→ 回滚,
+                                                                   # 别标"持平"掩盖真实退化
     return "tie"                                                 # 噪声内:不替换 best
 
 
