@@ -25,6 +25,7 @@ from pping_lang.autopilot.api import build_agent, build_objective
 from pping_lang.autopilot.runner import Runner
 from pping_lang.autopilot.sandbox import BENCH_SPEC, DockerSandbox
 from pping_lang.autopilot.session_store import SessionStore
+from pping_lang.autopilot.workload import WORKLOAD_SHAPES, resolve_bench, resolve_sla
 
 
 def _docker(*args: str) -> subprocess.CompletedProcess:
@@ -71,20 +72,25 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--baseline-gpu-util", type=float, default=0.90)
     p.add_argument("--baseline-max-model-len", type=int, default=None,
                    help="基线 max_model_len;候选由 --cmd-template 固定,不传则 baseline 不限制")
-    p.add_argument("--bench-concurrency", type=int, default=8, help="压测并发(拉高让提并发真有收益)")
+    p.add_argument("--bench-concurrency", type=int, default=None,
+                   help="压测并发(拉高让提并发真有收益);不给则按 --workload 形态,再无形态兜底 8")
     p.add_argument("--bench-duration", type=int, default=30)
     p.add_argument("--bench-warmup", type=int, default=20)
     p.add_argument("--bench-timeout", type=float, default=BENCH_SPEC["timeout_s"],
                    help="单请求超时秒数(长上下文/容量墙工况需拉高)")
     p.add_argument("--bench-prompt-source", default=BENCH_SPEC["prompt_source"],
                    help="prompt 来源:synthetic / builtin:<name> / file:<path>")
-    p.add_argument("--bench-prompt-tokens", type=int, default=BENCH_SPEC["prompt_tokens"],
-                   help="synthetic prompt 的目标 token 数(造 D/KV 容量墙时拉高)")
-    p.add_argument("--bench-output-tokens", type=int, default=128, help="解码长度(拉长填 KV 造容量墙 D)")
+    p.add_argument("--bench-prompt-tokens", type=int, default=None,
+                   help="synthetic prompt 的目标 token 数(造 D/KV 容量墙时拉高);不给则按形态")
+    p.add_argument("--bench-output-tokens", type=int, default=None,
+                   help="解码长度(拉长填 KV 造容量墙 D);不给则按形态,再无形态兜底 128")
     p.add_argument("--bench-repeats", type=int, default=1, help="每个 baseline/candidate 重复 bench 次数(M1 去噪)")
     p.add_argument("--search-mode", default="agent", choices=["agent", "grid", "bo"],
                    help="P2 搜索模式:agent=旧单步候选,grid=坐标小网格,bo=热启动 BO v1 排序")
     p.add_argument("--search-width", type=int, default=3, help="grid/bo 每个旋钮展开的候选档数")
+    p.add_argument("--workload", default=None, choices=sorted(WORKLOAD_SHAPES),
+                   help="业务形态:自带 bench 负载参数与默认 SLA(M1 业务形态 WorkloadSpec);"
+                        "显式 --bench-*/--ttft/--tpot 优先于形态,custom=全手动透传")
     p.add_argument("--quality-gate", action="store_true", help="放开 T2 质量类候选(默认只 T1)")
     p.add_argument("--rounds", type=int, default=12)
     p.add_argument("--minutes", type=int, default=30)
@@ -126,12 +132,18 @@ def main(argv: list[str] | None = None) -> int:
                        "gpu_memory_utilization": args.baseline_gpu_util}
     if args.baseline_max_model_len is not None:
         baseline_config["max_model_len"] = args.baseline_max_model_len
-    bench_spec = {**BENCH_SPEC, "concurrency": args.bench_concurrency,
+    # 业务形态 WorkloadSpec:显式 flag > 形态默认 > 旧兜底(8/128/BENCH_SPEC)
+    shape = args.workload or ""
+    _rb = resolve_bench(shape, {"prompt_tokens": args.bench_prompt_tokens,
+                                "output_tokens": args.bench_output_tokens,
+                                "concurrency": args.bench_concurrency})
+    sla_ttft, sla_tpot = resolve_sla(shape, args.ttft, args.tpot)
+    bench_spec = {**BENCH_SPEC, "concurrency": _rb.get("concurrency", 8),
                   "duration_s": args.bench_duration, "warmup_s": args.bench_warmup,
                   "timeout_s": args.bench_timeout,
                   "prompt_source": args.bench_prompt_source,
-                  "prompt_tokens": args.bench_prompt_tokens,
-                  "output_tokens": args.bench_output_tokens}
+                  "prompt_tokens": _rb.get("prompt_tokens", BENCH_SPEC["prompt_tokens"]),
+                  "output_tokens": _rb.get("output_tokens", 128)}
 
     session_dir = Path(args.session_dir)
     session_dir.mkdir(parents=True, exist_ok=True)
@@ -156,8 +168,10 @@ def main(argv: list[str] | None = None) -> int:
             pass
     else:
         objective = {"target": args.target,
-                     "sla": {"ttft_p99_ms": args.ttft, "tpot_p99_ms": args.tpot,
+                     "sla": {"ttft_p99_ms": sla_ttft, "tpot_p99_ms": sla_tpot,
                              "e2e_p99_ms": args.e2e}}
+        if shape:
+            objective["workload"] = shape          # 报告/status 可见本次按什么业务形态调的
         if args.latency_metric:
             objective["latency_metric"] = args.latency_metric
         if args.floor is not None:

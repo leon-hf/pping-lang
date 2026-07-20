@@ -1612,6 +1612,16 @@
   <!-- 目标条 -->
   <div class="ap-bar">
     <div class="ap-goal">
+      <b>形态</b>
+      <select x-model="obj.workload" @change="applyWorkload()">
+        <option value="chat">对话</option>
+        <option value="rag">RAG 问答</option>
+        <option value="agent">Agent</option>
+        <option value="reasoning">长推理</option>
+        <option value="code">代码补全</option>
+        <option value="custom">自定义</option>
+      </select>
+      <span style="font-size:11.5px;color:var(--muted-2);" x-text="workloadHint()" title="形态自带 bench 负载参数与默认 SLA;SLA 仍可手改"></span>
       <b>目标</b>
       <div class="ap-seg">
         <button :class="{active: obj.target==='throughput'}" @click="setTarget('throughput')">吞吐优先</button>
@@ -1626,6 +1636,7 @@
         · 吞吐下限 ≥ <input type="number" x-model="obj.floor" placeholder="可选" style="width:70px"> tok/s
       </span>
       <span>最多 <input type="number" x-model="budget.rounds"> 轮 / <input type="number" x-model="budget.minutes"> min</span>
+      <span style="font-size:11.5px;color:var(--muted-2);" title="轮数和分钟都是上限,不是目标">轮数是上限:多数 session 3-5 轮诚实收敛,提前停属正常</span>
     </div>
     <button class="ap-start" @click="start()" :disabled="running">
       <svg x-show="!running" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>

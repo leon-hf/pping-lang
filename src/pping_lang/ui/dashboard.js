@@ -1509,8 +1509,18 @@ function autopilotTab() {
     latency: { ttft: 800, tpot: 30, e2e: '' },
     cost: { ttft: 8000, tpot: 50, e2e: '' },
   };
+  // 业务形态 WorkloadSpec(M1):形态是主维度——自带 bench 负载与默认 SLA(数值同后端
+  // autopilot/workload.py);目标降级为次级开关。动机:泛负载 load_limited 交白卷(ap-20260719-004104)。
+  const WORKLOAD_SHAPES = {
+    chat:      { sla: [1000, 50], load: 'p500/o128 · c64' },
+    rag:       { sla: [3000, 50], load: 'p4000/o256 · c16' },
+    agent:     { sla: [1000, 50], load: 'p2000/o512 · c32' },
+    reasoning: { sla: [1000, 30], load: 'p1000/o4096 · c16' },
+    code:      { sla: [100, 20],  load: 'p300/o128 · c16' },
+    custom:    { sla: null,       load: '全手动(沿用旧默认)' },
+  };
   return {
-    obj: { target: 'throughput', ttft: 8000, tpot: 50, e2e: '', latencyMetric: 'ttft', floor: '' },
+    obj: { target: 'throughput', workload: 'chat', ttft: 1000, tpot: 50, e2e: '', latencyMetric: 'ttft', floor: '' },
     budget: { rounds: 12, minutes: 30 },
     agentOpen: false,
     preset: 'openrouter',
@@ -1640,6 +1650,18 @@ function autopilotTab() {
         this.obj.e2e = d.e2e;
       }
     },
+    applyWorkload() {
+      // 形态是显式主维度:直接套用形态 SLA(之后仍可手改);custom 不动任何字段(全手动透传)。
+      const s = WORKLOAD_SHAPES[this.obj.workload];
+      if (s && s.sla) {
+        this.obj.ttft = s.sla[0];
+        this.obj.tpot = s.sla[1];
+      }
+    },
+    workloadHint() {
+      const s = WORKLOAD_SHAPES[this.obj.workload];
+      return s ? `负载 ${s.load}` : '';
+    },
     stateLabel() {
       if (!this.session) return '';
       if (this.session.state === 'failed') return '失败';
@@ -1761,6 +1783,7 @@ function autopilotTab() {
         return;
       }
       const body = {
+        workload: this.obj.workload,      // 业务形态:bridge/run.py 侧展开 bench 负载参数
         objective: {
           target: this.obj.target,
           sla: { ttft_p99_ms: Number(this.obj.ttft) || null, tpot_p99_ms: Number(this.obj.tpot) || null,
