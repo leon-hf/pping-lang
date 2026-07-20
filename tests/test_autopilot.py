@@ -156,15 +156,16 @@ def test_propose_t2_gated_by_quality_gate():
 
 
 def test_propose_load_limited_still_has_scheduler_and_prefill_knobs():
-    """load_binding=False 时 max_num_seqs 被剪,但 prefill_chunk_size / max_seq_len_to_capture
-    不依赖 load_binding,仍应留在候选集(num_scheduler_steps 已标 unsupported,不测它)。"""
+    """load_binding=False 时 max_num_seqs 被剪;prefill_chunk_size / num_scheduler_steps /
+    max_seq_len_to_capture 均已标 unsupported(vLLM 0.21 无此 flag,真机 LaunchError 复现),
+    不应出现在候选集。"""
     cfg = {"max_num_seqs": 64, "gpu_memory_utilization": 0.9,
            "prefill_chunk_size": 512, "max_seq_len_to_capture": 8192}
     cands = propose_candidates("A", cfg, load_binding=False)
     keys = {c["knob"] for c in cands}
     assert "max_num_seqs" not in keys
-    assert "prefill_chunk_size" in keys
-    assert "max_seq_len_to_capture" in keys
+    assert "prefill_chunk_size" not in keys
+    assert "max_seq_len_to_capture" not in keys
 
 
 def test_propose_quality_gate_opens_mtp_and_speculative_knobs():
@@ -206,6 +207,44 @@ def test_propose_d_headroom_guard():
     tight = {c["knob"] for c in propose_candidates("A", cfg, kv_headroom=0.05)}
     loose = {c["knob"] for c in propose_candidates("A", cfg, kv_headroom=0.9)}
     assert "max_num_seqs" in loose and "max_num_seqs" not in tight
+
+
+def test_propose_b_unions_d_relief_knobs():
+    # B↔D 共生(§4.3):诊断 B 时并入 D 缓解类旋钮(治 B 要推大 batch,batch 要 KV 空间)
+    cfg = {"max_num_seqs": 64, "gpu_memory_utilization": 0.70}
+    cands = propose_candidates("B", cfg)
+    knobs = [c["knob"] for c in cands]
+    assert len(knobs) == len(set(knobs))                       # 并集不产生重复旋钮
+    secondary = {c["knob"]: c for c in cands if c.get("secondary_regime") == "D"}
+    assert secondary, "B 诊断应并入 D 缓解类旋钮"
+    for key in ("cpu_offload_gb", "num_gpu_blocks_override", "block_size"):
+        assert key in secondary
+    # 主 regime 版优先:gpu_memory_utilization 同属 B/D,只出现一次且不带并集标记
+    gpu = [c for c in cands if c["knob"] == "gpu_memory_utilization"]
+    assert len(gpu) == 1 and "secondary_regime" not in gpu[0]
+    # 并集排在主 regime 候选之后
+    first_secondary = next(i for i, c in enumerate(cands) if c.get("secondary_regime"))
+    assert all("secondary_regime" not in c for c in cands[:first_secondary])
+    # 方向按 D 语义:max_model_len 往下(腾容量)——需 config 带真实值才有降的空间
+    cfg_len = {**cfg, "max_model_len": 32768}
+    sec_len = {c["knob"]: c for c in propose_candidates("B", cfg_len)
+               if c.get("secondary_regime") == "D"}
+    assert sec_len["max_model_len"]["to"] < sec_len["max_model_len"]["from"]
+
+
+def test_propose_b_union_respects_d_guard_and_disable():
+    # 并集候选同样受 D 余量守卫硬约束:KV 紧张时 big_batch 照剪,容量缓解类照给
+    cfg = {"max_num_seqs": 64, "gpu_memory_utilization": 0.70}
+    tight = {c["knob"] for c in propose_candidates("B", cfg, kv_headroom=0.05)}
+    assert "max_num_seqs" not in tight                        # 推大 batch 被剪
+    assert "gpu_memory_utilization" in tight                  # 扩 KV 池照给
+    assert "num_gpu_blocks_override" in tight                 # 并集的 D 缓解照给
+    # couple_regimes 关掉 → 退回单 regime 交集
+    solo = {c["knob"] for c in propose_candidates("B", cfg, couple_regimes=False)}
+    assert "num_gpu_blocks_override" not in solo and "cpu_offload_gb" not in solo
+    # 其他 regime 不受影响:D 诊断不并 B 的旋钮(无 secondary 标记)
+    d_cands = propose_candidates("D", {"max_num_seqs": 128, "gpu_memory_utilization": 0.70})
+    assert not any(c.get("secondary_regime") for c in d_cands)
 
 
 def test_kvfit_prunes_obvious_capacity_failure():
@@ -434,6 +473,57 @@ def test_runner_repeats_bench_and_reports_config_review(tmp_path):
     store.close()
 
 
+def test_runner_conditional_repeats_only_on_borderline(tmp_path):
+    """条件 median-of-3:默认 bench_repeats=1;Δ 落噪声带(gpu_util 微调恒 tie)才补测
+    2 次走 median;明确改进(max_num_seqs 大幅提升)不补——补测时间只花在判定边界上。"""
+    from pping_lang.autopilot.agent import AgentDecision
+
+    class CountingSandbox(SimSandbox):
+        def __init__(self):
+            super().__init__("M")
+            self.measures = 0
+
+        def measure(self, obj):
+            self.measures += 1
+            return super().measure(obj)
+
+    class PickKnobAgent:
+        def __init__(self, key):
+            self.model = f"pick-{key}"
+            self._key = key
+
+        def propose(self, ctx):
+            cand = next(c for c in ctx.candidates if c["knob"] == self._key)
+            return AgentDecision(knob=cand["knob"], config=cand["config"],
+                                 from_val=cand["from"], to_val=cand["to"], flag=cand["flag"],
+                                 rationale=f"试 {self._key}")
+
+    # Δ 在噪声带内 → 补测:baseline 1 + candidate 3
+    sb = CountingSandbox()
+    store = SessionStore(tmp_path / "cond-rep.jsonl")
+    store.new_session("ap-cond-rep", {"target": "throughput"}, {"rounds": 1})
+    Runner(store=store, sandbox=sb, agent=PickKnobAgent("long_prefill_token_threshold"), obj=OBJ,
+           budget={"rounds": 1, "seconds": 900}, model="M", step_delay_s=0.0).run()
+    d = store.status_dict()
+    assert sb.measures == 4, f"边界成绩应补测:measure {sb.measures} 次,预期 4(1+3)"
+    cand = next(r for r in d["rounds"] if r["kind"] == "candidate")
+    assert cand["bench_spec"]["bench_repeats"] == 3
+    assert cand["bench_spec"]["repeats_trigger"] == "borderline"
+    store.close()
+
+    # 明确改进 → 不补:baseline 1 + candidate 1
+    sb2 = CountingSandbox()
+    store2 = SessionStore(tmp_path / "cond-norep.jsonl")
+    store2.new_session("ap-cond-norep", {"target": "throughput"}, {"rounds": 1})
+    Runner(store=store2, sandbox=sb2, agent=PickKnobAgent("max_num_seqs"), obj=OBJ,
+           budget={"rounds": 1, "seconds": 900}, model="M", step_delay_s=0.0).run()
+    assert sb2.measures == 2, f"明确改进不该补测:measure {sb2.measures} 次,预期 2(1+1)"
+    cand2 = next(r for r in store2.status_dict()["rounds"] if r["kind"] == "candidate")
+    assert cand2["bench_spec"]["bench_repeats"] == 1
+    assert "repeats_trigger" not in cand2["bench_spec"]
+    store2.close()
+
+
 def test_runner_records_p2_search_mode(tmp_path):
     from pping_lang.autopilot.agent import AgentDecision
     seen = []
@@ -543,6 +633,9 @@ def test_runner_sla_never_met_overrides_agent_done(tmp_path):
     assert len(overrides) == 4, f"强制继续 {len(overrides)} 次,预期 4"
     # 最终状态仍是 done(K_NO_IMPROVE 是正常收尾路径,不是 failed/stopped)
     assert d["state"] == "done"
+    # 停机归因:K 兜底触发的自然退出必须补记 stop 轮
+    stop = next(r for r in d["rounds"] if r["kind"] == "stop")
+    assert stop["stop_cause"] == "no_improve_k"
     store.close()
 
 
@@ -572,9 +665,10 @@ def test_runner_forced_continue_preserves_original_agent_thinking(tmp_path):
 
 
 def test_runner_honors_done_after_min_explore_rounds_when_sla_ok(tmp_path):
-    """SLA 已通过(best_score 非 -inf)且已探索满 MIN_EXPLORE_ROUNDS 轮后,agent 的
-    done 判断真正生效——这是这次复盘要恢复的核心行为:信任"已经试过、判断收益递减"
-    的判断,不再无条件烧到预算耗尽(真机证据:被强制的额外轮次收益接近于零)。"""
+    """SLA 已通过 + 探索满 MIN_EXPLORE_ROUNDS + 桌面大半已试过后,agent 的 done 才真正
+    生效。相对门槛(③):桌面超过一半候选没试过时 done 被强制覆盖——"2 轮探索 + 1 轮
+    判 done"不再直接信任;本例第 3 轮的 done 被 ③ 强制(桌面 2/3 未试),第 4 轮桌面
+    已听审充分,采信。"""
     from pping_lang.autopilot.agent import AgentDecision
 
     call_count = [0]
@@ -598,10 +692,44 @@ def test_runner_honors_done_after_min_explore_rounds_when_sla_ok(tmp_path):
            budget={"rounds": 12, "seconds": 900}, model="M", step_delay_s=0.0).run()
     d = store.status_dict()
 
-    assert call_count[0] == 3, f"agent 被调 {call_count[0]} 次,预期 3(2轮探索+1轮判done即信任)"
-    assert not any("强制" in e.get("message", "") for e in d["events"] if e.get("round") == 3)
+    # 桌面 6 候选(B↔D 并集后):done 连续两轮被 ③ 强制(5/6、4/6 未试),试过一半后采信
+    assert call_count[0] == 5, (f"agent 被调 {call_count[0]} 次,预期 5"
+                                "(2轮探索+2轮③强制+桌面半试后采信)")
+    forced_rel = [e for e in d["events"] if "候选未试" in e.get("message", "")]
+    assert len(forced_rel) == 2, f"相对门槛强制 {len(forced_rel)} 次,预期 2"
     stop = next(r for r in d["rounds"] if r["kind"] == "stop")
+    assert stop["stop_cause"] == "agent_done"
     assert "收益递减" in stop["rationale"]
+    tried_n = sum(1 for s in stop["table_snapshot"] if s["tried"] != "untried")
+    assert tried_n * 2 >= len(stop["table_snapshot"]), "采信时桌面应至少试过一半"
+    store.close()
+
+
+def test_runner_relative_gate_forced_cap_then_honors(tmp_path, monkeypatch):
+    """相对门槛(③)的连续强制有上限(MAX_FORCED_RELATIVE):达到上限后,即使桌面仍有
+    大半未试也采信 done 并在 rationale 注记——再逼下去就是烧 bench 换不到信息
+    (monkeypatch 上限为 0 直接走采信路径验证注记机制)。"""
+    from pping_lang.autopilot.agent import AgentDecision
+    monkeypatch.setattr("pping_lang.autopilot.runner.MAX_FORCED_RELATIVE", 0)
+
+    calls = [0]
+
+    class AlwaysDoneAgent:
+        model = "always-done-cap"
+
+        def propose(self, ctx):
+            calls[0] += 1
+            return AgentDecision(done=True, rationale="判断已近最优")
+
+    store = SessionStore(tmp_path / "rel-cap.jsonl")
+    store.new_session("ap-rel-cap", {"target": "throughput"}, {"rounds": 12})
+    Runner(store=store, sandbox=SimSandbox(), agent=AlwaysDoneAgent(), obj=OBJ,
+           budget={"rounds": 12, "seconds": 900}, model="M", step_delay_s=0.0).run()
+    d = store.status_dict()
+    assert calls[0] == 3, f"agent 被调 {calls[0]} 次,预期 3(①强制2轮+③被关→第3轮采信)"
+    stop = next(r for r in d["rounds"] if r["kind"] == "stop")
+    assert stop["stop_cause"] == "agent_done"
+    assert "达上限" in stop["rationale"]
     store.close()
 
 
@@ -633,6 +761,94 @@ def test_runner_forced_continue_stops_honestly_when_all_candidates_already_faile
     stop = next((r for r in d["rounds"] if r["kind"] == "stop"), None)
     assert stop is not None
     store.close()
+
+
+# ---- stop_cause 停机归因 ----
+
+def test_runner_stop_cause_budget_rounds(tmp_path):
+    """轮数预算耗尽是自然退出(非 break):以前静默,现在必须补记 stop 轮,
+    stop_cause=budget_rounds。"""
+    store = SessionStore(tmp_path / "cause-rounds.jsonl")
+    store.new_session("ap-cause-rounds", {"target": "throughput"}, {"rounds": 1})
+    Runner(store=store, sandbox=SimSandbox(), agent=StubAgent(), obj=OBJ,
+           budget={"rounds": 1, "seconds": 900}, model="M", step_delay_s=0.0).run()
+    d = store.status_dict()
+    assert d["state"] == "done"
+    stop = next(r for r in d["rounds"] if r["kind"] == "stop")
+    assert stop["stop_cause"] == "budget_rounds"
+    store.close()
+
+
+def test_runner_stop_cause_agent_done_carries_table_snapshot(tmp_path):
+    """agent done 被采信时,stop 轮带判停瞬间的桌面快照——每个候选试没试过、
+    P0 剪没剪都可审计(「没值得试的」不再是空口)。"""
+    from pping_lang.autopilot.agent import AgentDecision
+
+    call_count = [0]
+
+    class DoneAfterTwoAgent:
+        model = "done-after-two-snap"
+
+        def propose(self, ctx):
+            call_count[0] += 1
+            if call_count[0] <= 2:
+                cand = ctx.candidates[0]
+                return AgentDecision(knob=cand["knob"], config=cand["config"],
+                                     from_val=cand["from"], to_val=cand["to"], flag=cand["flag"],
+                                     rationale=f"round {call_count[0]}")
+            return AgentDecision(done=True, rationale="收益递减,判断已近最优")
+
+    store = SessionStore(tmp_path / "cause-done.jsonl")
+    store.new_session("ap-cause-done", {"target": "throughput"}, {"rounds": 12})
+    Runner(store=store, sandbox=SimSandbox(), agent=DoneAfterTwoAgent(), obj=OBJ,
+           budget={"rounds": 12, "seconds": 900}, model="M", step_delay_s=0.0).run()
+    d = store.status_dict()
+    stop = next(r for r in d["rounds"] if r["kind"] == "stop")
+    assert stop["stop_cause"] == "agent_done"
+    snap = stop["table_snapshot"]
+    assert len(snap) > 0
+    for entry in snap:
+        assert set(entry) == {"knob", "from", "to", "tried", "p0"}
+        assert entry["tried"] in ("untried", "kept", "reverted", "tie")
+        assert entry["p0"].startswith(("kept", "pruned:"))
+    store.close()
+
+
+def test_runner_stop_cause_user_stop(tmp_path):
+    """手动 stop:循环头部直接退出,补记的 stop 轮 stop_cause=user_stop,
+    最终状态 stopped。"""
+    store = SessionStore(tmp_path / "cause-stop.jsonl")
+    store.new_session("ap-cause-stop", {"target": "throughput"}, {"rounds": 12})
+    runner = Runner(store=store, sandbox=SimSandbox(), agent=StubAgent(), obj=OBJ,
+                    budget={"rounds": 12, "seconds": 900}, model="M", step_delay_s=0.0)
+    runner.stop()                    # baseline 之前发出停止:baseline 跑完,主循环不进
+    runner.run()
+    d = store.status_dict()
+    assert d["state"] == "stopped"
+    stop = next(r for r in d["rounds"] if r["kind"] == "stop")
+    assert stop["stop_cause"] == "user_stop"
+    store.close()
+
+
+def test_resume_session_tolerates_rounds_without_stop_fields(tmp_path):
+    """向后兼容:旧 JSONL 的 round 行没有 stop_cause/table_snapshot(且可能带未知字段),
+    resume 时不报错,新字段取默认值。"""
+    path = tmp_path / "old.jsonl"
+    path.write_text(
+        json.dumps({"rec": "session_start", "session_id": "ap-old", "state": "proposing",
+                    "objective": {"target": "throughput"}, "budget": {"rounds": 12}},
+                   ensure_ascii=False) + "\n"
+        + json.dumps({"rec": "round", "session_id": "ap-old", "round": 0, "kind": "baseline",
+                      "decision": "baseline", "config_after": {"max_num_seqs": 32},
+                      "objective_score_after": 100.0, "future_unknown_field": 1},
+                     ensure_ascii=False) + "\n",
+        encoding="utf-8")
+    st = SessionStore(path)
+    cur = st.resume_session()
+    assert cur is not None
+    assert cur.rounds[0].stop_cause is None
+    assert cur.rounds[0].table_snapshot == []
+    st.close()
 
 
 def test_agent_config_connectivity_probe(monkeypatch):
@@ -1736,7 +1952,8 @@ def test_runner_resume_elapsed_consumes_time_budget(tmp_path):
     st = store.status_dict()
     assert st["state"] == "done"
     kinds = [r["kind"] for r in st["rounds"]]
-    assert kinds == ["baseline"]                        # 预算已尽:只有基线,零候选轮
+    assert kinds == ["baseline", "stop"]                  # 预算已尽:零候选轮,补记归因 stop
+    assert st["rounds"][-1]["stop_cause"] == "budget_time"
     store.close()
 
 
@@ -2005,3 +2222,106 @@ def test_render_speculative_and_cudagraph_as_valid_cli():
 def test_render_command_quotes_json_tokens():
     cmd = render_command("M", {"cudagraph_mode": "PIECEWISE"})
     assert "'{\"cudagraph_mode\":\"PIECEWISE\"}'" in cmd
+
+
+# ---- 业务形态 WorkloadSpec(M1 优先级 5)----
+
+def test_workload_shape_table_integrity():
+    """形态表与首页实时 tab 同套词汇;custom 必须全空(全手动透传,行为同引入形态前)。"""
+    from pping_lang.autopilot.workload import WORKLOAD_SHAPES
+    assert set(WORKLOAD_SHAPES) == {"chat", "rag", "agent", "reasoning", "code", "custom"}
+    assert WORKLOAD_SHAPES["custom"]["bench"] == {} and WORKLOAD_SHAPES["custom"]["sla"] == {}
+    for name, s in WORKLOAD_SHAPES.items():
+        if name == "custom":
+            continue
+        assert {"prompt_tokens", "output_tokens", "concurrency"} <= set(s["bench"]), name
+        assert {"ttft_p99_ms", "tpot_p99_ms"} <= set(s["sla"]), name
+
+
+def test_workload_resolve_bench_explicit_beats_shape():
+    from pping_lang.autopilot.workload import resolve_bench
+    # 显式 flag 优先于形态
+    out = resolve_bench("chat", {"concurrency": 256, "prompt_tokens": None, "output_tokens": None})
+    assert out["concurrency"] == 256
+    assert out["prompt_tokens"] == 500 and out["output_tokens"] == 128   # 形态补上
+    # custom / 无形态:透传,只留显式值
+    out = resolve_bench("custom", {"concurrency": 32, "prompt_tokens": None, "output_tokens": None})
+    assert out == {"concurrency": 32}
+    out = resolve_bench("", {"concurrency": None, "prompt_tokens": None, "output_tokens": None})
+    assert out == {}
+
+
+def test_workload_resolve_sla():
+    from pping_lang.autopilot.workload import resolve_sla
+    assert resolve_sla("code") == (100, 20)                 # 形态默认(硬延迟闸)
+    assert resolve_sla("code", ttft=250) == (250, 20)       # 显式优先
+    assert resolve_sla("custom") == (None, None)            # 透传不加闸
+    assert resolve_sla("") == (None, None)
+
+
+def test_run_cli_workload_resolution(monkeypatch, tmp_path):
+    """run.py 接线:--workload 展开形态负载+SLA;显式 flag 覆盖;custom 行为同旧默认。"""
+    from pping_lang.autopilot import run as run_cli
+    from pping_lang.autopilot.sandbox import BENCH_SPEC
+
+    captured = {}
+
+    class _FakeRunner:
+        def __init__(self, **kw):
+            captured.update(kw)
+        def run(self):
+            pass
+
+    class _FakeSandbox:
+        def __init__(self, *a, **kw):
+            captured["bench_spec"] = kw.get("bench_spec")
+        def teardown(self):
+            pass
+
+    class _FakeStore:
+        def __init__(self, path):
+            pass
+        def new_session(self, sid, objective, budget, agent_model=""):
+            captured["objective"] = objective
+        def close(self):
+            pass
+        def status_dict(self):
+            return {"state": "done", "rounds": []}
+
+    monkeypatch.setattr(run_cli, "Runner", _FakeRunner)
+    monkeypatch.setattr(run_cli, "DockerSandbox", _FakeSandbox)
+    monkeypatch.setattr(run_cli, "SessionStore", _FakeStore)
+    monkeypatch.setattr(run_cli, "_serve_running", lambda name: False)
+    monkeypatch.setattr(run_cli, "_docker", lambda *a: None)
+
+    def _run(argv):
+        captured.clear()
+        rc = run_cli.main(argv + ["--model", "M", "--image", "I",
+                                  "--session-dir", str(tmp_path)])
+        assert rc == 0
+        return captured
+
+    base = ["--session-id", "ap-test"]
+    # 形态展开:chat → c64/p500/o128 + SLA 1000/50,objective 带 workload 标记
+    c = _run(base + ["--workload", "chat"])
+    bs = c["bench_spec"]
+    assert (bs["concurrency"], bs["prompt_tokens"], bs["output_tokens"]) == (64, 500, 128)
+    assert c["objective"]["sla"]["ttft_p99_ms"] == 1000
+    assert c["objective"]["sla"]["tpot_p99_ms"] == 50
+    assert c["objective"]["workload"] == "chat"
+
+    # 显式 flag 覆盖形态;未显式给的仍由形态补
+    c = _run(base + ["--workload", "chat", "--bench-concurrency", "256", "--ttft", "800"])
+    assert c["bench_spec"]["concurrency"] == 256
+    assert c["objective"]["sla"]["ttft_p99_ms"] == 800
+    assert c["objective"]["sla"]["tpot_p99_ms"] == 50
+
+    # custom / 无形态:行为同引入形态前(旧兜底 8/128/BENCH_SPEC,SLA 不加闸)
+    c = _run(base + ["--workload", "custom"])
+    assert c["bench_spec"]["concurrency"] == 8
+    assert c["bench_spec"]["output_tokens"] == 128
+    assert c["bench_spec"]["prompt_tokens"] == BENCH_SPEC["prompt_tokens"]
+    assert c["objective"]["sla"]["ttft_p99_ms"] is None
+    c = _run(base)
+    assert c["bench_spec"]["concurrency"] == 8
+    assert "workload" not in c["objective"]
