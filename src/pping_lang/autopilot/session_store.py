@@ -47,6 +47,9 @@ class Round:
     bench_spec: dict = field(default_factory=dict)
     agent_model: str = ""
     agent_thinking: str = ""                     # LLM 思考过程(provider 支持时,截断落盘)
+    # 停机归因(仅 stop 轮):为什么停 + 判停瞬间的桌面快照(每个候选试没试过/P0 剪没剪)
+    stop_cause: str | None = None                # agent_done|no_candidates|budget_rounds|budget_time|no_improve_k|user_stop|failed
+    table_snapshot: list[dict] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return asdict(self)

@@ -211,16 +211,24 @@ _KNOB_REGISTRY: tuple[dict, ...] = (
      "kind": "int", "lever": "减调度开销", "helps": ("A", "B"), "hurts": ("C",),
      "primary_slo": "tpot", "static_default": 1, "lo": 1, "hi": 64,
      "unsupported": True},
+    # prefill_chunk_size 同样是当前 vLLM build 没有的 flag:2026-07-19 dogfood session
+    # ap-20260719-004104 R4 真机复现——候选容器直接打印 usage 退出(LaunchError),
+    # 白烧一轮(启动崩溃→回滚),标 unsupported 让它永不被提议。
     {"key": "prefill_chunk_size", "flag": "--prefill-chunk-size",
      "kind": "int", "lever": "prefill粒度", "helps": ("A", "C"),
-     "primary_slo": "ttft", "static_default": 512, "lo": 256, "hi": 8192},
+     "primary_slo": "ttft", "static_default": 512, "lo": 256, "hi": 8192,
+     "unsupported": True},
     {"key": "scheduler_delay_factor", "flag": "--scheduler-delay-factor",
      "kind": "float", "lever": "调度等待系数", "helps": ("A",),
      "primary_slo": "throughput", "static_default": 0.0, "lo": 0.0, "hi": 2.0,
      "unsupported": True},
+    # max_seq_len_to_capture 在当前 vLLM build 同样不存在:2026-07-19 7B session
+    # ap-20260719-153115 R4 候选打印 usage 退出(LaunchError),`vllm serve --help`
+    # 实测无此 flag——白烧一轮,标 unsupported。
     {"key": "max_seq_len_to_capture", "flag": "--max-seq-len-to-capture",
      "kind": "int", "lever": "cudagraph捕获长度", "helps": ("A", "B"),
-     "primary_slo": "tpot", "static_default": 8192, "lo": 512, "hi": 32768},
+     "primary_slo": "tpot", "static_default": 8192, "lo": 512, "hi": 32768,
+     "unsupported": True},
     # D 守卫类
     {"key": "num_gpu_blocks_override", "flag": "--num-gpu-blocks-override",
      "kind": "int", "lever": "手动KV块数", "helps": ("D",),
@@ -328,9 +336,10 @@ def _step(k: Knob, cur, regime: str):
         return order[i + 1] if i + 1 < len(order) else None
     cur = float(cur if cur not in (None, 0) else k.default or k.lo)
     if k.kind == "int":
-        # D:max_num_seqs / max_model_len 往下(腾容量);其余往上(提并发/加预算)
+        # D:max_num_seqs / max_model_len 往下(腾容量);其余往上(提并发/加预算)。
+        # cur=0 时翻倍还是 0(cpu_offload_gb 这类 0 起点旋钮永远提不出来)——首档给最小非零步。
         down = regime == "D" and k.key in ("max_num_seqs", "max_model_len")
-        nxt = max(k.lo, cur // 2) if down else min(k.hi, cur * 2)
+        nxt = max(k.lo, cur // 2) if down else min(k.hi, max(cur * 2, k.lo, 1))
         nxt = int(round(nxt))
     else:  # float
         down = False
@@ -364,7 +373,8 @@ def _enabled(value) -> bool:
 
 def propose_candidates(bottleneck: str | None, config: dict, *,
                        kv_headroom: float = 1.0, quality_gate: bool = False,
-                       load_binding: bool | None = None) -> list[dict]:
+                       load_binding: bool | None = None,
+                       couple_regimes: bool = True) -> list[dict]:
     """诊断→动作交集 + D 余量守卫 + 约束图 + 跳过已到位(§4.4)。
 
     交集:`helps ∋ regime ∧ hurts ∌ regime ∧ 值未到位 ∧ 非默认已开 ∧ 约束可行`。
@@ -373,9 +383,36 @@ def propose_candidates(bottleneck: str | None, config: dict, *,
     准入闸绑定守卫(load_binding):bench 窗口实测 running 峰值远低于 max_num_seqs 且
     waiting=0 时(False),准入闸没绑定——瓶颈在提供的负载,提 max_num_seqs 是空转
     (真实教训:并发 8 的压测下 32→64 恒 tie)。None=无实测证据,保持旧行为。
-    排序:按「主影响 SLO」让对症旋钮靠前(仅排序,不硬筛)。
+    B↔D 共生并集(§4.3,couple_regimes 开):诊断 B 时把 D 缓解类旋钮并进来——
+    治 B 要推大 batch,推大 batch 要 KV 空间,真实 decode 负载常同时压在两档上;
+    方向按 D 语义(如 max_model_len↓),D 余量守卫对并集候选同样硬约束。
+    排序:按「主影响 SLO」让对症旋钮靠前(仅排序,不硬筛);并集候选排在主 regime 之后。
     """
     bn = bottleneck or "A"             # 无诊断 → 按"喂不饱(双低)"探索
+    cands = _regime_candidates(bn, config, kv_headroom=kv_headroom,
+                               quality_gate=quality_gate, load_binding=load_binding)
+    secondary: list[dict] = []
+    if couple_regimes:
+        for extra in _COUPLED_REGIMES.get(bn, ()):
+            for c in _regime_candidates(extra, config, kv_headroom=kv_headroom,
+                                        quality_gate=quality_gate,
+                                        load_binding=load_binding):
+                if all(c["knob"] != p["knob"] for p in cands):   # 主 regime 版优先
+                    c["secondary_regime"] = extra
+                    secondary.append(c)
+    # 排序:对症 SLO 在前(throughput 类对 A/B,ttft 类对 prefill,tpot 类对 decode)
+    pri = {"A": "throughput", "B": "tpot", "C": "ttft", "D": "throughput"}.get(bn, "throughput")
+    cands.sort(key=lambda c: 0 if c["primary_slo"] == pri else 1)
+    return cands + secondary
+
+
+# B↔D 共生(§4.3):诊断命中主 regime 时,并入耦合 regime 的缓解类旋钮。
+_COUPLED_REGIMES: dict[str, tuple[str, ...]] = {"B": ("D",)}
+
+
+def _regime_candidates(bn: str, config: dict, *, kv_headroom: float,
+                       quality_gate: bool, load_binding: bool | None) -> list[dict]:
+    """单 regime 的候选生成(propose_candidates 的工作马,供主/并集两路复用)。"""
     cands: list[dict] = []
     for k in KNOBS:
         if k.unsupported:              # 当前 vLLM 版本硬拒非默认值 → 提了必 LaunchError
@@ -410,9 +447,6 @@ def propose_candidates(bottleneck: str | None, config: dict, *,
                       # 证据支持时可一步到位);"to" 只是建议档
                       "kind": k.kind,
                       "range": list(k.choices) if k.kind == "choice" else [k.lo, k.hi]})
-    # 排序:对症 SLO 在前(throughput 类对 A/B,ttft 类对 prefill,tpot 类对 decode)
-    pri = {"A": "throughput", "B": "tpot", "C": "ttft", "D": "throughput"}.get(bn, "throughput")
-    cands.sort(key=lambda c: 0 if c["primary_slo"] == pri else 1)
     return cands
 
 
