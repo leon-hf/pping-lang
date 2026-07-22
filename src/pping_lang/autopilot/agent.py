@@ -14,6 +14,8 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 
+from pping_lang.autopilot.action_space import bottleneck_label
+
 # === 输入(每轮)= AgentContext(§8)===
 
 @dataclass
@@ -50,6 +52,12 @@ class AgentDecision:
     candidate_meta: dict = field(default_factory=dict)
     thinking: str = ""                           # LLM 思考过程(provider 支持时),直播+落轨迹
     recovery_action: str | None = None           # recovery 模式下选的修复动作(如 raise_gpu_memory_utilization)
+
+
+class AgentStopRequested(Exception):
+    """用户手动停止时,从 _HTTPAgent.propose() 的重试循环里主动抛出(§见 runner.py
+    _run_loop 里对应的 except 分支)。不是"调用失败",不该被 ResilientAgent 的失败重试/
+    兜底逻辑吞掉——那样会在用户已经点了停止之后,还硬跑一次启发式决策再收尾,多余且延误。"""
 
 
 def config_hash(config: dict) -> str:
@@ -93,7 +101,7 @@ def validate(dec: AgentDecision, ctx: AgentContext) -> str | None:
 LOCKED_PROMPT = (
     "你是一个 LLM-serving 性能工程师。每轮只能改 1 个旋钮(或一个解析上耦合的组),"
     "且只能从给定候选集里选。你必须:\n"
-    "① 把改动挂在本轮诊断证据上(evidence_refs,指向 fired_rules / regime / metric);\n"
+    "① 把改动挂在本轮诊断证据上(evidence_refs,指向命中规则 / 瓶颈类型 / 指标);\n"
     "② 接受压测判决——不得声称压测没证实的收益;\n"
     "③ 目标:不破 SLA 前提下最大化主指标。若判断已近最优(再动会破 SLA 或屋顶已贴),done:true。\n"
     "数值旋钮(kind=int/float)的 value 可在 range 内沿候选方向自选——证据支持时直接一步到位"
@@ -103,16 +111,16 @@ LOCKED_PROMPT = (
     "\"rationale\":str, \"expected_effect\":str, \"evidence_refs\":[str], \"guardrail_notes\":str}"
 )
 
-# regime playbook(§4.4 两张表按 regime 切片的先验,让 agent 不冷启动)
-REGIME_PLAYBOOK = {
+# 瓶颈处方(§4.4 两张表按瓶颈类型切片的先验,让 agent 不冷启动)
+BOTTLENECK_PLAYBOOK = {
     "A": "喂不饱:硬件有余、活没喂进去。**先看 running vs max_num_seqs**:running 峰值远低于"
          "max_num_seqs 且 waiting=0 → 准入闸没绑定,瓶颈在提供的负载(压测并发/客户端),提"
          "max_num_seqs 是空转,应 done 并如实说明。闸真绑定(running≈max_num_seqs 或 waiting>0)"
          "才提并发(max_num_seqs↑,KV 有余量时)/ 加 step 预算(max_num_batched_tokens↑)/ 短 prompt"
          "插队(max_num_partial_prefills↑)。注:chunked-prefill/async-sched/cudagraph 0.21 默认已开,别重复打开。",
-    "B": "带宽墙(decode 本性):提 batch 摊薄权重搬运(先查 D 余量)/ kv-cache fp8 / 投机解码(查接受率防 C 反噬)。",
-    "C": "算力墙(长 prompt prefill):attention-backend / fp8 / prefix-caching(仅当有公共前缀)。",
-    "D": "容量墙(KV 耗尽→抢占):扩 KV 池(gpu-util↑)/ kv-cache fp8 / 降 max-model-len / cpu-offload。"
+    "B": "带宽瓶颈(decode 本性):提 batch 摊薄权重搬运(先查 D 余量)/ kv-cache fp8 / 投机解码(查接受率防 C 反噬)。",
+    "C": "算力瓶颈(长 prompt prefill):attention-backend / fp8 / prefix-caching(仅当有公共前缀)。",
+    "D": "容量瓶颈(KV 耗尽→抢占):扩 KV 池(gpu-util↑)/ kv-cache fp8 / 降 max-model-len / cpu-offload。"
          "绝不提并发(max_num_seqs↑ 恶化 D)。",
 }
 
@@ -153,7 +161,7 @@ def build_messages(ctx: AgentContext, guidance: str = "", lang: str = "zh") -> t
         "round": ctx.round, "budget": ctx.budget,
         "current_config": ctx.current_config,
         "diagnosis": ctx.diagnosis,
-        "regime_playbook": REGIME_PLAYBOOK.get(bn, ""),
+        "bottleneck_playbook": BOTTLENECK_PLAYBOOK.get(bn, ""),
         "history": ctx.history,
         "tried_and_failed": [t["hash"] for t in ctx.tried_configs
                              if t.get("decision") in ("reverted", "tie")],
@@ -241,14 +249,14 @@ class StubAgent:
         tried = {t["hash"] for t in ctx.tried_configs
                  if t.get("decision") in ("reverted", "tie")}
         bn = ctx.diagnosis.get("bottleneck")
-        ev = list(ctx.diagnosis.get("evidence_refs", [])) or ([f"regime:{bn}"] if bn else [])
+        ev = list(ctx.diagnosis.get("evidence_refs", [])) or ([bottleneck_label(bn)] if bn else [])
         for c in ctx.candidates:
             if config_hash(c["config"]) in tried:
                 continue
             return AgentDecision(
                 done=False, knob=c["knob"], config=c["config"], from_val=c["from"],
                 to_val=c["to"], flag=c["flag"],
-                rationale=(f"命中 {bn or '双低'}:{c['knob']} {c['from']}→{c['to']} "
+                rationale=(f"命中{bottleneck_label(bn) if bn else '双低'}:{c['knob']} {c['from']}→{c['to']} "
                            f"({c.get('lever', '对症提升')},不伤当前瓶颈)。"),
                 expected_effect="主指标↑,不破 SLA", evidence_refs=ev,
                 guardrail_notes="范围内;launch-catch 兜底",
@@ -296,10 +304,14 @@ class _HTTPAgent:
         self.timeout_s = timeout_s
         self.lang = lang if lang in _LANG_DIRECTIVE else "zh"
         self._progress = None            # set_progress(cb):重试过程亮给直播,解释等待时长
+        self._stop_check = None          # set_stop_check(cb):用户手动停止时中断重试循环
         self._last_thinking = ""         # 最近一次调用的思考文本(provider 支持时)
 
     def set_progress(self, cb) -> None:
         self._progress = cb
+
+    def set_stop_check(self, cb) -> None:
+        self._stop_check = cb
 
     def _report(self, msg: str) -> None:
         if self._progress:
@@ -308,19 +320,53 @@ class _HTTPAgent:
             except Exception:  # noqa: BLE001
                 pass
 
+    def _should_stop(self) -> bool:
+        if self._stop_check is None:
+            return False
+        try:
+            return bool(self._stop_check())
+        except Exception:  # noqa: BLE001
+            return False
+
     def _call(self, system: str, user: str) -> str:  # pragma: no cover - 子类实现
         raise NotImplementedError
 
     def propose(self, ctx: AgentContext) -> AgentDecision:
         """调用 + JSON 解析整体纳入重试:响应被截断/非 JSON(JSONDecodeError)与网络失败
-        同等对待——一次坏响应不该把整轮打回启发式兜底。"""
+        同等对待——一次坏响应不该把整轮打回启发式兜底。
+
+        单次调用(self._call)放进守护线程里跑,主线程用短间隔轮询等它(而不是一次性
+        join(timeout_s))——真机复现(2026-07-22):agent 调用单次能拖到 90s+,用户点了
+        "停止调优"后,进程正卡在这个阻塞调用里对 SIGINT 反应不及时,bridge 等 10s 没等到
+        优雅退出就 SIGKILL 强杀,session 收不了尾(没有 stop_cause,没生成上线包)。短间隔
+        轮询让"检查是否要停"的粒度从"一整次调用(≤90s)"降到 0.5s,用户点停止后能很快
+        跳出——被弃置的调用线程仍是守护线程,自己去留不影响进程退出。"""
+        import threading as _threading
         import time as _time
         system, user = build_messages(ctx, self.guidance, self.lang)
         last: Exception | None = None
         for attempt in range(self.NET_RETRIES + 1):
+            if self._should_stop():
+                raise AgentStopRequested("用户手动停止")
+            self._last_thinking = ""
+            result: dict = {}
+
+            def _do_call() -> None:
+                try:
+                    result["text"] = self._call(system, user)
+                except Exception as e:  # noqa: BLE001 — 转交主线程处理,不在守护线程里抛
+                    result["error"] = e
+
+            worker = _threading.Thread(target=_do_call, daemon=True)
+            worker.start()
+            while worker.is_alive():
+                worker.join(timeout=0.5)
+                if worker.is_alive() and self._should_stop():
+                    raise AgentStopRequested("用户手动停止")
             try:
-                self._last_thinking = ""
-                text = self._call(system, user)
+                if "error" in result:
+                    raise result["error"]
+                text = result.get("text", "")
                 out = json.loads(text[text.find("{"):text.rfind("}") + 1])
                 dec = _decision_from_json(out, ctx)
                 dec.thinking = self._last_thinking       # provider 支持时:思考过程随决策带出
@@ -330,7 +376,14 @@ class _HTTPAgent:
                 if attempt < self.NET_RETRIES:
                     self._report(f"agent 调用失败({type(e).__name__}),"
                                  f"第 {attempt + 2}/{self.NET_RETRIES + 1} 次尝试…")
-                    _time.sleep(min(4.0, 0.5 * (2 ** attempt)))
+                    backoff = min(4.0, 0.5 * (2 ** attempt))
+                    slept = 0.0
+                    while slept < backoff:
+                        if self._should_stop():
+                            raise AgentStopRequested("用户手动停止") from None
+                        step = min(0.5, backoff - slept)
+                        _time.sleep(step)
+                        slept += step
         raise last  # type: ignore[misc]
 
 
@@ -435,11 +488,20 @@ class ResilientAgent:
         if hasattr(self._primary, "set_progress"):
             self._primary.set_progress(cb)
 
+    def set_stop_check(self, cb) -> None:
+        if hasattr(self._primary, "set_stop_check"):
+            self._primary.set_stop_check(cb)
+
     def propose(self, ctx: AgentContext) -> AgentDecision:
         last = None
         for _ in range(self._retries + 1):
             try:
                 return self._primary.propose(ctx)
+            except AgentStopRequested:
+                # 用户手动停止,不是"调用失败"——不重试、不退回启发式兜底,原样上抛给
+                # runner(它会记 stop_cause=user_stop 并正常收尾),否则会在用户已经点了
+                # 停止之后,还硬跑一次启发式决策再收尾,多余且延误。
+                raise
             except Exception as e:  # noqa: BLE001 — 网络/解析/超时
                 last = e
         dec = self._fallback.propose(ctx)

@@ -12,9 +12,16 @@ from __future__ import annotations
 import threading
 import time
 
-from pping_lang.autopilot.action_space import knob, propose_candidates, render_command
+from pping_lang.autopilot.action_space import (
+    action_space_stats,
+    bottleneck_label,
+    knob,
+    knobs_helping,
+    propose_candidates,
+    render_command,
+)
 from pping_lang.autopilot.agent import (
-    AgentContext, AgentDecision, RECOVERY_ACTIONS, config_hash, validate,
+    AgentContext, AgentDecision, AgentStopRequested, RECOVERY_ACTIONS, config_hash, validate,
 )
 from pping_lang.autopilot.config_review import review_config_diff
 from pping_lang.autopilot.kvfit import evaluate_kvfit
@@ -163,8 +170,8 @@ def kv_headroom(config: dict, diag: dict, sc: Scorecard | None = None) -> float:
 def diagnose(config: dict, sc: Scorecard) -> dict:
     """observe:从配置+实测推出当前命中瓶颈(sim 路由)。真路由换成读 /api/diagnoses。
 
-    KV 压力 = 并发 / KV 容量(∝ gpu_util)。<0.6 双低(A,喂不饱)/ 0.6–1 带宽墙(B,KV 在填)/
-    >1 容量墙(D,抢占)。
+    KV 压力 = 并发 / KV 容量(∝ gpu_util)。<0.6 双低(A,喂不饱)/ 0.6–1 带宽瓶颈(B,KV 在填)/
+    >1 容量瓶颈(D,抢占)。
     """
     seqs = float(config.get("max_num_seqs", 32))
     util = float(config.get("gpu_memory_utilization", 0.70))
@@ -178,7 +185,7 @@ def diagnose(config: dict, sc: Scorecard) -> dict:
         bn, det = "A", "roofline"
     return {
         "bottleneck": bn,
-        "evidence_refs": [f"{bn}:{det}", f"regime:{bn}",
+        "evidence_refs": [f"{bottleneck_label(bn)}:{det}",
                           f"metric:kv_pressure={round(pressure, 2)}"],
         "metrics": {"max_num_seqs": seqs, "gpu_memory_utilization": util,
                     "kv_pressure": round(pressure, 2), "output_tps": sc.output_tps,
@@ -269,6 +276,8 @@ class Runner(threading.Thread):
         if hasattr(self._agent, "set_progress"):   # LLM 网络重试过程亮出来,解释等待时长
             self._agent.set_progress(
                 lambda msg: self._event("propose", msg, round=self._cur_round, level="warn"))
+        if hasattr(self._agent, "set_stop_check"):  # 用户手动停止时能打断卡在重试里的 agent 调用
+            self._agent.set_stop_check(self._stopping.is_set)
 
     def stop(self) -> None:
         self._stopping.set()
@@ -667,7 +676,7 @@ class Runner(threading.Thread):
             diag["p2_search"] = {"mode": self._search_mode, "candidates": len(cands)}
             self._event(
                 "propose",
-                f"诊断命中 {diag.get('bottleneck') or 'N'}:从 {len(cands)} 个候选里请求 agent 选择",
+                f"诊断命中{bottleneck_label(diag.get('bottleneck'))}:从 {len(cands)} 个候选里请求 agent 选择",
                 round=rnd,
                 detail={
                     "bottleneck": diag.get("bottleneck"),
@@ -685,40 +694,31 @@ class Runner(threading.Thread):
                 history=history, tried_configs=tried,
                 best_so_far={"config": dict(self._best_cfg), "scorecard": self._best_sc.to_dict()})
             rounds_left = self._rounds_budget - rnd + 1
-            if not cands:                                                # 无对症候选 → 尝试 fallback
-                if rounds_left > 1 and not self._quality_gate:           # T1 耗尽,开 quality_gate 再搜 T2
-                    self._quality_gate = True
-                    cands = propose_candidates(diag["bottleneck"], effective_cfg,
-                                               kv_headroom=kv_headroom(effective_cfg, diag, self._best_sc),
-                                               quality_gate=True,
-                                               load_binding=binding)
-                    cands = prepare_search_candidates(
-                        cands, effective_cfg, diag["bottleneck"], history,
-                        mode=self._search_mode, max_values_per_knob=self._search_width)
-                    p0 = evaluate_kvfit(cands, effective_cfg, self._best_sc)
-                    for pc in p0.pruned:
-                        self._event("propose",
-                                    f"P0 预测剪枝:{pc['knob']} → {pc['to']}"
-                                    f"({(pc.get('p0') or {}).get('reason', '')[:70]})",
-                                    round=rnd, detail={"p0": pc.get("p0")})
-                    cands = p0.candidates
-                    diag["p0_kvfit"] = p0.summary()
-                    diag["p2_search"]["quality_gate_fallback"] = len(cands)
-                    self._event("propose",
-                                f"T1 候选耗尽,自动开启 quality_gate 重生成 {len(cands)} 个 T2 候选",
-                                round=rnd, detail={"candidate_count": len(cands)})
-                if not cands:                                            # 仍然空 → 才停止
-                    reason = ("瓶颈在提供的负载(bench 并发喂不满准入闸),server 旋钮无对症动作;"
-                              "提高压测并发或换真实 workload 再调"
-                              if diag.get("load_limited") else "无对症候选 → 近最优")
-                    self._event("decide", f"没有对症候选,准备停止并恢复 best({reason})", round=rnd)
-                    self._append_stop(rnd, AgentDecision(done=True, reason=reason), diag,
-                                      cause="no_candidates",
-                                      table=self._table_snapshot(cands, tried, p0))
-                    break
-            dec = self._heartbeat_run(                                  # LLM 思考+网络重试可达数分钟
-                "propose", "等待 agent 决策(LLM 思考/重试中)",
-                lambda: self._propose_valid(ctx))                       # 校验 ∈ 候选 + 防重(2 次非法→failed)
+            if not cands:                                                # 无对症候选 → 停止
+                # 曾经在这里 T1 耗尽就自动开 quality_gate 找 T2 候选凑轮次——T2 都是会降精度
+                # 的旋钮(quantization/kv-cache-dtype/speculative 等),不该在无对症候选时
+                # 自动顶上去,交给用户显式选择(§用户反馈:别碰这些旋钮,不提供这些动作)。
+                reason = ("瓶颈在提供的负载(bench 并发喂不满准入闸),server 旋钮无对症动作;"
+                          "提高压测并发或换真实 workload 再调"
+                          if diag.get("load_limited") else "无对症候选 → 近最优")
+                self._event("decide", f"没有对症候选,准备停止并恢复 best({reason})", round=rnd)
+                self._append_stop(rnd, AgentDecision(done=True, reason=reason), diag,
+                                  cause="no_candidates",
+                                  table=self._table_snapshot(cands, tried, p0))
+                break
+            try:
+                dec = self._heartbeat_run(                              # LLM 思考+网络重试可达数分钟
+                    "propose", "等待 agent 决策(LLM 思考/重试中)",
+                    lambda: self._propose_valid(ctx))                   # 校验 ∈ 候选 + 防重(2 次非法→failed)
+            except AgentStopRequested:
+                # 用户手动停止,且当时正卡在 agent 调用里——不等这轮跑完再在循环顶部发现
+                # self._stopping,立刻记 stop 轮 + 正常 return(_finalize 仍会跑,收尾干净:
+                # 恢复 best、生成上线包),不需要 bridge 硬发 SIGKILL(真机复现,2026-07-22:
+                # 卡在等 agent 时点停止,10s 优雅期不够,被强杀,session 没有 final 记录)。
+                self._event("decide", "用户手动停止", round=rnd)
+                self._append_stop(rnd, AgentDecision(done=True, reason="用户手动停止"), diag,
+                                  cause="user_stop", table=self._table_snapshot(cands, tried, p0))
+                return
             if dec is None:
                 self._event("decide", "agent 连续给出非法提案,session 标记失败", round=rnd, level="error")
                 self._append_stop(rnd,
@@ -992,6 +992,31 @@ class Runner(threading.Thread):
             agent_thinking=(getattr(dec, "thinking", "") or "")[:4000]))
         self._tick()
 
+    def _build_action_space_summary(self) -> dict:
+        """全量旋钮面里这次 session 实际"够得着"多少、试了多少——回答"为什么只调
+        这 2-3 个参数,不调其他的"(用户反馈,2026-07-22)。跳过原因分三类(见
+        action_space_stats 文档字符串);剩下候选池里,再按本次实际诊断到的瓶颈
+        (可能不止一种)筛出对症旋钮,跟实际试过的旋钮对照。"""
+        stats = action_space_stats()
+        rounds = self._store.current.rounds if self._store.current else []
+        bottlenecks_seen = sorted({
+            r.diagnosis.get("bottleneck") for r in rounds
+            if r.diagnosis and r.diagnosis.get("bottleneck")
+        })
+        relevant: set[str] = set()
+        for bn in bottlenecks_seen:
+            relevant.update(knobs_helping(bn))
+        tried = sorted({
+            r.action.get("knob") for r in rounds
+            if r.kind == "candidate" and r.action and r.action.get("knob")
+        })
+        stats.update({
+            "bottlenecks_seen": bottlenecks_seen,
+            "relevant_knobs": sorted(relevant),
+            "tried_knobs": tried,
+        })
+        return stats
+
     def _finalize(self) -> None:
         self._cur_round = None           # 收尾期心跳不再挂在最后一轮上
         self._store.set_state("finalizing")
@@ -1012,6 +1037,7 @@ class Runner(threading.Thread):
             config_review=review,
             recommended_command=render_command(self._model, self._best_cfg),
         ))
+        self._store.set_action_space_summary(self._build_action_space_summary())
         self._store.set_state("stopped" if self._stopping.is_set() else "done")
 
     def _tick(self) -> None:

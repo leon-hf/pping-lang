@@ -10,33 +10,35 @@
 """
 from __future__ import annotations
 
-# SLA 数值沿用 dashboard WORKLOAD_SLA 的产品共识;负载参数按 runw 0.5B~7B 真机
-# 校准区间给默认——喂得饱(消除 load_limited 假阳性)又不至于把分钟预算烧在排队上。
+# SLA 数值沿用 dashboard WORKLOAD_SLA / diagnosis_config._WORKLOAD_SLA 的产品共识
+# (交互聊天 TTFT 数百 ms、内联代码补全个位数百 ms、RAG/Agent 因检索或工具往返放宽、长推理
+# 输出以千 token 计因此 E2E 放到分钟级);负载参数按 runw 0.5B~7B 真机校准区间给默认——
+# 喂得饱(消除 load_limited 假阳性)又不至于把分钟预算烧在排队上。
 WORKLOAD_SHAPES: dict[str, dict] = {
     "chat": {
         "label": "对话(短进短出)",
         "bench": {"prompt_tokens": 500, "output_tokens": 128, "concurrency": 64},
-        "sla": {"ttft_p99_ms": 1000, "tpot_p99_ms": 50},
+        "sla": {"ttft_p99_ms": 1000, "tpot_p99_ms": 50, "e2e_p99_ms": 3000},
     },
     "rag": {
         "label": "RAG 问答(长 prompt)",
         "bench": {"prompt_tokens": 4000, "output_tokens": 256, "concurrency": 16},
-        "sla": {"ttft_p99_ms": 3000, "tpot_p99_ms": 50},
+        "sla": {"ttft_p99_ms": 3000, "tpot_p99_ms": 50, "e2e_p99_ms": 8000},
     },
     "agent": {
         "label": "Agent 工具循环",
         "bench": {"prompt_tokens": 2000, "output_tokens": 512, "concurrency": 32},
-        "sla": {"ttft_p99_ms": 1000, "tpot_p99_ms": 50},
+        "sla": {"ttft_p99_ms": 1000, "tpot_p99_ms": 50, "e2e_p99_ms": 15000},
     },
     "reasoning": {
         "label": "长推理(长输出)",
         "bench": {"prompt_tokens": 1000, "output_tokens": 4096, "concurrency": 16},
-        "sla": {"ttft_p99_ms": 1000, "tpot_p99_ms": 30},
+        "sla": {"ttft_p99_ms": 1000, "tpot_p99_ms": 30, "e2e_p99_ms": 90000},
     },
     "code": {
         "label": "代码补全(硬延迟闸)",
         "bench": {"prompt_tokens": 300, "output_tokens": 128, "concurrency": 16},
-        "sla": {"ttft_p99_ms": 100, "tpot_p99_ms": 20},
+        "sla": {"ttft_p99_ms": 100, "tpot_p99_ms": 20, "e2e_p99_ms": 2000},
     },
     "custom": {"label": "自定义(全手动)", "bench": {}, "sla": {}},
 }
@@ -66,8 +68,10 @@ def resolve_bench(shape: str, explicit: dict) -> dict:
     return out
 
 
-def resolve_sla(shape: str, ttft: float | None = None, tpot: float | None = None):
-    """显式值 > 形态默认;都没给 → (None, None)(不加闸,同引入形态前)。"""
+def resolve_sla(shape: str, ttft: float | None = None, tpot: float | None = None,
+                 e2e: float | None = None):
+    """显式值 > 形态默认;都没给 → (None, None, None)(不加闸,同引入形态前)。"""
     s = shape_sla(shape)
     return (ttft if ttft is not None else s.get("ttft_p99_ms"),
-            tpot if tpot is not None else s.get("tpot_p99_ms"))
+            tpot if tpot is not None else s.get("tpot_p99_ms"),
+            e2e if e2e is not None else s.get("e2e_p99_ms"))

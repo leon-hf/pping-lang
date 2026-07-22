@@ -3,7 +3,7 @@
 // 语言存 Alpine.store('i18n').lang(响应式,切换即时重渲染)+ localStorage 持久化。
 const I18N = {
   zh: {
-    'nav.live': '实时', 'nav.kernel': 'Kernel', 'nav.rules': '瓶颈诊断', 'nav.bench': '压测', 'nav.autopilot': 'Autopilot', 'nav.preview': 'M0',
+    'nav.live': '实时', 'nav.kernel': 'Kernel', 'nav.rules': '瓶颈诊断', 'nav.bench': '压测', 'nav.autopilot': 'Autopilot', 'nav.preview': 'beta',
     'brand.sub': 'vLLM 性能诊断',
     'btn.issue': '提 Issue', 'btn.star': 'Star',
     'hero.info': '查看 vLLM 启动命令、环境变量、解析配置',
@@ -24,12 +24,12 @@ const I18N = {
     'layer.L1': 'L1 实测 roofline（perf_stats:MFU/MBU）', 'layer.L2': 'L2 内核 stall（CUPTI PC sampling）', 'layer.L3': 'L3 调度态（vLLM 原生,永远在）', 'layer.L4': 'L4 请求时延', 'layer.L5': 'L5 GPU 硬件（NVML）',
     'rules.opTitle': '当前操作点 · 距各上限的余量', 'rules.opHint': '实测值;刻度为低/高阈值。逼近某一上限即命中对应瓶颈',
     'rules.computeRoof': '算力上限 · MFU', 'rules.bwRoof': '带宽上限 · HBM 占用(NVML)', 'rules.capacity': '容量 · KV 占用',
-    'rules.roofC': '逼近上限 → C 算力墙', 'rules.roofB': '逼近上限 → B 带宽墙', 'rules.roofD': '接近耗尽 → D 容量墙',
+    'rules.roofC': '逼近上限 → 算力瓶颈', 'rules.roofB': '逼近上限 → 带宽瓶颈', 'rules.roofD': '接近耗尽 → 容量瓶颈',
     'rules.zone.far': '有余量', 'rules.zone.mid': '上升中', 'rules.zone.wall': '逼近上限', 'rules.zone.na': '无数据',
-    'rules.runningNow': '在途请求', 'rules.guardArmed': '有在途请求(A 可触发)', 'rules.guardIdle': '空载(守卫生效,A 不触发)',
+    'rules.runningNow': '在途请求', 'rules.guardArmed': '有在途请求(可判定双低)', 'rules.guardIdle': '空载(守卫生效,不判定双低)',
     'rules.layersTitle': '检测层 · L1–L5 含义', 'rules.layersHint': '每个瓶颈由跨测量层的多条独立检测手段交叉印证 —— 层间越独立,越不易同时失效(优雅降级)',
     'rules.toAutopilotHint': '想据此自动调优?交给 Autopilot 在沙盒里迭代调参、压测验证(预览)。', 'rules.toAutopilotBtn': '交给 Autopilot →',
-    'regime.A': '双低', 'regime.B': '带宽墙', 'regime.C': '算力墙', 'regime.D': '容量墙', 'regime.N': '症状/其它',
+    'regime.A': '双低', 'regime.B': '带宽瓶颈', 'regime.C': '算力瓶颈', 'regime.D': '容量瓶颈', 'regime.N': '症状/其它',
     'common.close': '关闭', 'common.copy': '复制',
     'live.tier1': '用户感知指标', 'live.tier1hint': '最近 60 秒 · 每 2s 刷新', 'live.tier2': '效率与诊断',
     'kpi.ttft': 'TTFT 平均', 'kpi.ttft.sub': '首 token 延迟', 'kpi.reqs': '请求',
@@ -205,15 +205,10 @@ const I18N = {
     'bench.warmup': 'Warmup（秒）',
     'bench.timeout': 'Timeout（秒）',
     'bench.sloConstraint': 'SLO 约束（可选）',
-    'bench.addSloBtn': '+ 添加约束',
-    'bench.sloEmpty': '未设约束 · 提交后 SLO 状态会标记为 n/a',
-    'bench.sloMetricTtft': 'TTFT · 首 token',
-    'bench.sloMetricTpot': 'TPOT · token 间',
-    'bench.sloMetricE2e': 'E2E · 端到端',
-    'bench.sloMetricErrorRate': '错误率',
-    'bench.removeSloBtn': '删除这条约束',
+    'bench.sloShapeHint': '选形态带出三项 p99 默认值,可单独清空跳过该项',
+    'bench.sloOptional': '可选',
     'bench.sloPreviewLabel': '提交时生成：',
-    'bench.sloPreviewEmpty': '(空)',
+    'bench.sloPreviewEmpty': '(空,提交后 SLO 状态标记为 n/a)',
     'bench.submitBtn': '开始运行',
     'bench.submitting': '提交中…',
     'bench.running': '正在运行',
@@ -366,9 +361,9 @@ const I18N = {
     'rule.regime-classify.name': '算术强度 vs 脊点(Roofline 定位)',
     'rule.regime-classify.hypothesis': 'AI < 脊点 → 访存受限;否则计算受限(定义性派生)。memory-bound 且 SM util 高时:util 虚高是物理极限,非优化空间。',
     'rule.A.name': '双低(算力、带宽均有余量)', 'rule.A.hypothesis': '存在在途请求,但算力与带宽两个上限均未逼近 —— 二者皆有余量,瓶颈不在硬件(可能为批处理规模不足 / kernel launch 开销 / 小算子未融合)。空载守卫:无在途请求时不触发,以区分"双低"与"纯空载"。', 'rule.A.suggestion': '提高 max-num-seqs(并发未填满)/ 调整 chunked-prefill 的 partial-prefills。注:Continuous Batching、CUDA Graph、chunked-prefill 在 0.21 默认启用,请先确认未被 enforce-eager 等关闭,避免重复启用(无效操作)。',
-    'rule.B.name': '带宽墙(逼近显存带宽上限)', 'rule.B.hypothesis': '访存受限:decode 每步重新读取权重与 KV,带宽为上限。NVML HBM 控制器占用 / 内核 memory_throttle(访存管线饱和)/ memory_dependency(等待访存)交叉印证。(注:perf 实测 MBU 在小模型上因 L2 复用 >1,故不作为阈值。)', 'rule.B.suggestion': '投机解码(关注接受率,避免转为计算受限)/ KV 量化(FP8)/ 升级至更高带宽 GPU。',
-    'rule.C.name': '算力墙(算力饱和)', 'rule.C.hypothesis': '计算受限:FLOPs 饱和,算力为上限(长 prompt prefill 的固有特征)。实测 MFU 逼近上限 / 内核 math_pipe(FMA/ALU/Tensor 计算管线饱和)交叉印证。', 'rule.C.suggestion': '更换更快的 attention backend(0.21 按硬件自动选择,可用 --attention-backend 覆盖)/ 权重量化(FP8/FP4)/ 升级算力更强的 GPU。',
-    'rule.D.name': '容量墙(KV 耗尽并触发抢占)', 'rule.D.hypothesis': '显存无法容纳 KV → 并发受限 → 触发抢占。V1 抢占为纯重算(丢弃 KV、从头 re-prefill),一旦发生,decode 吞吐急剧下降。', 'rule.D.suggestion': 'KV 量化(FP8)/ 降低 max-model-len / KV offload / 降低 max-num-seqs。',
+    'rule.B.name': '带宽瓶颈(逼近显存带宽上限)', 'rule.B.hypothesis': '访存受限:decode 每步重新读取权重与 KV,带宽为上限。NVML HBM 控制器占用 / 内核 memory_throttle(访存管线饱和)/ memory_dependency(等待访存)交叉印证。(注:perf 实测 MBU 在小模型上因 L2 复用 >1,故不作为阈值。)', 'rule.B.suggestion': '投机解码(关注接受率,避免转为计算受限)/ KV 量化(FP8)/ 升级至更高带宽 GPU。',
+    'rule.C.name': '算力瓶颈(算力饱和)', 'rule.C.hypothesis': '计算受限:FLOPs 饱和,算力为上限(长 prompt prefill 的固有特征)。实测 MFU 逼近上限 / 内核 math_pipe(FMA/ALU/Tensor 计算管线饱和)交叉印证。', 'rule.C.suggestion': '更换更快的 attention backend(0.21 按硬件自动选择,可用 --attention-backend 覆盖)/ 权重量化(FP8/FP4)/ 升级算力更强的 GPU。',
+    'rule.D.name': '容量瓶颈(KV 耗尽并触发抢占)', 'rule.D.hypothesis': '显存无法容纳 KV → 并发受限 → 触发抢占。V1 抢占为纯重算(丢弃 KV、从头 re-prefill),一旦发生,decode 吞吐急剧下降。', 'rule.D.suggestion': 'KV 量化(FP8)/ 降低 max-model-len / KV offload / 降低 max-num-seqs。',
     'decode.vllmFusedRms': 'vLLM 自定义 · fused add + RMSNorm', 'decode.vllmRms': 'vLLM 自定义 · RMSNorm',
     'decode.vllmRope': 'vLLM 自定义 · RoPE', 'decode.vllmSilu': 'vLLM 自定义 · SiLU/激活',
     'decode.vllmCuda': 'vLLM 自定义 CUDA kernel', 'decode.flashinferSample': 'FlashInfer · 采样 kernel',
@@ -378,7 +373,7 @@ const I18N = {
     'lang.label': '语言 / Language',
   },
   en: {
-    'nav.live': 'Live', 'nav.kernel': 'Kernel', 'nav.rules': 'Bottleneck diagnosis', 'nav.bench': 'Bench', 'nav.autopilot': 'Autopilot', 'nav.preview': 'M0',
+    'nav.live': 'Live', 'nav.kernel': 'Kernel', 'nav.rules': 'Bottleneck diagnosis', 'nav.bench': 'Bench', 'nav.autopilot': 'Autopilot', 'nav.preview': 'beta',
     'brand.sub': 'vLLM perf diagnostics',
     'btn.issue': 'Issue', 'btn.star': 'Star',
     'hero.info': 'View vLLM launch command, env vars, resolved config',
@@ -399,12 +394,12 @@ const I18N = {
     'layer.L1': 'L1 measured roofline (perf_stats: MFU/MBU)', 'layer.L2': 'L2 kernel stall (CUPTI PC sampling)', 'layer.L3': 'L3 scheduler state (vLLM native, always on)', 'layer.L4': 'L4 request latency', 'layer.L5': 'L5 GPU hardware (NVML)',
     'rules.opTitle': 'Operating point · distance to each wall', 'rules.opHint': 'Measured; ticks = low/high thresholds. Hugging a roof = that bottleneck fires',
     'rules.computeRoof': 'Compute roof · MFU', 'rules.bwRoof': 'Bandwidth roof · HBM busy (NVML)', 'rules.capacity': 'Capacity · KV usage',
-    'rules.roofC': 'at roof → C compute wall', 'rules.roofB': 'at roof → B bandwidth wall', 'rules.roofD': 'near full → D capacity wall',
+    'rules.roofC': 'at roof → compute bottleneck', 'rules.roofB': 'at roof → bandwidth bottleneck', 'rules.roofD': 'near full → capacity bottleneck',
     'rules.zone.far': 'headroom', 'rules.zone.mid': 'climbing', 'rules.zone.wall': 'at the wall', 'rules.zone.na': 'no data',
-    'rules.runningNow': 'Running reqs', 'rules.guardArmed': 'has work (A can fire)', 'rules.guardIdle': 'idle (guard active, A suppressed)',
+    'rules.runningNow': 'Running reqs', 'rules.guardArmed': 'has work (under-utilized can fire)', 'rules.guardIdle': 'idle (guard active, under-utilized suppressed)',
     'rules.layersTitle': 'Measurement layers · what L1–L5 mean', 'rules.layersHint': 'Each bottleneck triangulated by independent methods across layers — more independent = less likely to fail together (graceful degradation)',
     'rules.toAutopilotHint': 'Auto-tune from these bottlenecks? Hand off to Autopilot for sandboxed iterative tuning, bench-verified (preview).', 'rules.toAutopilotBtn': 'Hand off to Autopilot →',
-    'regime.A': 'Under-utilized', 'regime.B': 'Bandwidth wall', 'regime.C': 'Compute wall', 'regime.D': 'Capacity wall', 'regime.N': 'Symptom/other',
+    'regime.A': 'Under-utilized', 'regime.B': 'Bandwidth bottleneck', 'regime.C': 'Compute bottleneck', 'regime.D': 'Capacity bottleneck', 'regime.N': 'Symptom/other',
     'common.close': 'Close', 'common.copy': 'Copy',
     'live.tier1': 'User-facing metrics', 'live.tier1hint': 'Last 60s · refreshed every 2s', 'live.tier2': 'Efficiency & diagnostics',
     'kpi.ttft': 'TTFT avg', 'kpi.ttft.sub': 'first-token latency', 'kpi.reqs': 'reqs',
@@ -580,15 +575,10 @@ const I18N = {
     'bench.warmup': 'Warmup (seconds)',
     'bench.timeout': 'Timeout (seconds)',
     'bench.sloConstraint': 'SLO Constraints (optional)',
-    'bench.addSloBtn': '+ Add Constraint',
-    'bench.sloEmpty': 'No constraints set · SLO status will be marked n/a after submission',
-    'bench.sloMetricTtft': 'TTFT · First Token',
-    'bench.sloMetricTpot': 'TPOT · Token-to-Token',
-    'bench.sloMetricE2e': 'E2E · End-to-End',
-    'bench.sloMetricErrorRate': 'Error Rate',
-    'bench.removeSloBtn': 'Delete this constraint',
+    'bench.sloShapeHint': 'Picking a shape fills in p99 defaults for all three; clear any field to skip it',
+    'bench.sloOptional': 'optional',
     'bench.sloPreviewLabel': 'Generated on submit:',
-    'bench.sloPreviewEmpty': '(empty)',
+    'bench.sloPreviewEmpty': '(empty — SLO status will be marked n/a after submission)',
     'bench.submitBtn': 'Start Run',
     'bench.submitting': 'Submitting...',
     'bench.running': 'Currently Running',
@@ -741,9 +731,9 @@ const I18N = {
     'rule.regime-classify.name': 'Arithmetic intensity vs ridge (Roofline locate)',
     'rule.regime-classify.hypothesis': 'AI < ridge → memory-bound; otherwise compute-bound (definitional). When memory-bound with high SM util: the high util is a physical ceiling, not headroom.',
     'rule.A.name': 'Under-utilized (compute & bandwidth both idle)', 'rule.A.hypothesis': 'Requests are running, yet neither roof is close — both compute and bandwidth have headroom, so the bottleneck isn’t hardware (likely: batch not assembled / launch overhead / small ops not fused). Idle-guarded: won’t fire with no requests running, separating "under-utilized" from "simply idle".', 'rule.A.suggestion': 'Raise max-num-seqs (batch not filled) / chunked-prefill’s partial-prefills sub-knobs. Note: Continuous Batching, CUDA Graph, and chunked-prefill are ON by default on 0.21 — first confirm none is force-disabled (e.g. enforce-eager); don’t re-enable what’s already on (a wasted round).',
-    'rule.B.name': 'Bandwidth wall (hugging the HBM bandwidth roof)', 'rule.B.hypothesis': 'Memory-bound: each decode step re-reads weights + KV; bandwidth is the ceiling. Confirmed by NVML HBM-controller busy / kernel memory_throttle (memory pipe saturated) / memory_dependency (waiting on memory loads). (Note: perf measured-MBU exceeds 1 on small models due to L2 reuse, so it is not used as a threshold.)', 'rule.B.suggestion': 'Speculative decoding (watch acceptance rate, avoid compute backlash) / KV quantization (FP8) / move to a higher-bandwidth GPU.',
-    'rule.C.name': 'Compute wall (compute saturated)', 'rule.C.hypothesis': 'Compute-bound: FLOPs saturated, compute is the ceiling (intrinsic to long-prompt prefill). Confirmed by measured MFU at the roof / kernel math_pipe (FMA/ALU/Tensor compute pipe saturated).', 'rule.C.suggestion': 'Switch to a faster attention backend (auto-selected by hardware on 0.21; try --attention-backend to override) / weight quantization (FP8/FP4) / upgrade the compute GPU.',
-    'rule.D.name': 'Capacity wall (KV overflows and preempts)', 'rule.D.hypothesis': 'VRAM can’t hold the KV → concurrency stalls → preemption. V1 preemption is pure recompute (KV dropped, re-prefilled from scratch); once it hits, decode throughput collapses off a cliff.', 'rule.D.suggestion': 'KV quantization (FP8) / lower max-model-len / KV offload / lower max-num-seqs.',
+    'rule.B.name': 'Bandwidth bottleneck (hugging the HBM bandwidth roof)', 'rule.B.hypothesis': 'Memory-bound: each decode step re-reads weights + KV; bandwidth is the ceiling. Confirmed by NVML HBM-controller busy / kernel memory_throttle (memory pipe saturated) / memory_dependency (waiting on memory loads). (Note: perf measured-MBU exceeds 1 on small models due to L2 reuse, so it is not used as a threshold.)', 'rule.B.suggestion': 'Speculative decoding (watch acceptance rate, avoid compute backlash) / KV quantization (FP8) / move to a higher-bandwidth GPU.',
+    'rule.C.name': 'Compute bottleneck (compute saturated)', 'rule.C.hypothesis': 'Compute-bound: FLOPs saturated, compute is the ceiling (intrinsic to long-prompt prefill). Confirmed by measured MFU at the roof / kernel math_pipe (FMA/ALU/Tensor compute pipe saturated).', 'rule.C.suggestion': 'Switch to a faster attention backend (auto-selected by hardware on 0.21; try --attention-backend to override) / weight quantization (FP8/FP4) / upgrade the compute GPU.',
+    'rule.D.name': 'Capacity bottleneck (KV overflows and preempts)', 'rule.D.hypothesis': 'VRAM can’t hold the KV → concurrency stalls → preemption. V1 preemption is pure recompute (KV dropped, re-prefilled from scratch); once it hits, decode throughput collapses off a cliff.', 'rule.D.suggestion': 'KV quantization (FP8) / lower max-model-len / KV offload / lower max-num-seqs.',
     'decode.vllmFusedRms': 'vLLM custom · fused add + RMSNorm', 'decode.vllmRms': 'vLLM custom · RMSNorm',
     'decode.vllmRope': 'vLLM custom · RoPE', 'decode.vllmSilu': 'vLLM custom · SiLU/activation',
     'decode.vllmCuda': 'vLLM custom CUDA kernel', 'decode.flashinferSample': 'FlashInfer · sampling kernel',
@@ -1106,6 +1096,13 @@ function _updateKernelTrends(data) {
   }
 }
 
+// 业务形态 → 三个 SLO 默认值(TTFT/TPOT/E2E p99 ms),同 Live/Autopilot 一套数值
+// (workload.py / diagnosis_config._WORKLOAD_SLA);custom = 全手动,不套默认。
+const BENCH_SLO_SHAPES = {
+  chat: [1000, 50, 3000], rag: [3000, 50, 8000], agent: [1000, 50, 15000],
+  reasoning: [1000, 30, 90000], code: [100, 20, 2000], custom: null,
+};
+
 function benchTab() {
   return {
     form: {
@@ -1121,7 +1118,8 @@ function benchTab() {
       warmup_s: 5,
       timeout_s: 30,
       api: 'chat',
-      sloRows: [],   // array of {metric, percentile, op, value, unit}
+      sloShape: 'chat',
+      sloTtft: 1000, sloTpot: 50, sloE2e: 3000,   // 可选:清空即不设该项约束
       prompt_source: 'synthetic',
     },
     promptSources: [
@@ -1286,34 +1284,21 @@ function benchTab() {
       });
     },
 
-    // ===== SLO row builder =====
-    addSloRow() {
-      this.form.sloRows.push({
-        metric: 'ttft', percentile: 'p99', op: '<', value: 500, unit: 'ms',
-      });
-    },
-    removeSloRow(i) {
-      this.form.sloRows.splice(i, 1);
-    },
-    onSloMetricChange(i) {
-      // error_rate has no percentile / unit; clamp sensible defaults
-      const row = this.form.sloRows[i];
-      if (row.metric === 'error_rate') {
-        if (row.value > 1) row.value = 0.01;
-      } else if (row.unit !== 'ms' && row.unit !== 's') {
-        row.unit = 'ms';
-      }
+    // ===== SLO 约束:业务形态套三个默认值,仍可单独清空/改小 =====
+    onSloShapeChange() {
+      const s = BENCH_SLO_SHAPES[this.form.sloShape];
+      if (s) { this.form.sloTtft = s[0]; this.form.sloTpot = s[1]; this.form.sloE2e = s[2]; }
+      // custom:不动,全手动(留着用户已填的值)
     },
     buildSloSpec() {
       const parts = [];
-      for (const r of this.form.sloRows) {
-        if (r.value == null || r.value === '' || isNaN(r.value)) continue;
-        if (r.metric === 'error_rate') {
-          parts.push(`${r.metric}${r.op}${r.value}`);
-        } else {
-          parts.push(`${r.metric}:${r.percentile}${r.op}${r.value}${r.unit}`);
-        }
-      }
+      const add = (metric, v) => {
+        if (v === '' || v == null || isNaN(v)) return;   // 空 = 不设该项约束
+        parts.push(`${metric}:p99<=${v}ms`);
+      };
+      add('ttft', this.form.sloTtft);
+      add('tpot', this.form.sloTpot);
+      add('e2e', this.form.sloE2e);
       return parts.join(';');
     },
 
@@ -1332,7 +1317,7 @@ function benchTab() {
           warmup_s: this.form.warmup_s,
           timeout_s: this.form.timeout_s,
           api: this.form.api,
-          slo: this.form.sloRows.length > 0 ? this.buildSloSpec() : null,
+          slo: this.buildSloSpec() || null,
           prompt_source: this.form.prompt_source || 'synthetic',
         };
         if (this.form.boundedBy === 'duration') {
@@ -1363,7 +1348,7 @@ function benchTab() {
 }
 
 function rulesTab() {
-  // 命中诊断的 rule_id 直接就是瓶颈字母(A 双低 / B 带宽墙 / C 算力墙 / D 容量墙);其它一律 N。
+  // 命中诊断的 rule_id 直接就是瓶颈字母(A 双低 / B 带宽瓶颈 / C 算力瓶颈 / D 容量瓶颈);其它一律 N。
   const BOTTLENECK = ['A', 'B', 'C', 'D'];
   return {
     rules: [], expandedDiag: [], cfg: {},
@@ -1434,9 +1419,11 @@ function rulesTab() {
 // 首页 SLO 面板:选业务形态 → 带出 TTFT/TPOT SLA 默认 → 监控当前 p99 是否达标(读父 dashboard 的 kpis)。
 // 高级阈值只放 4 瓶颈检测阈值(MFU/MBU/KV);改完热生效(/api/diagnosis_config)。
 function sloPanel() {
+  // (TTFT_p99_ms, TPOT_p99_ms, E2E_p99_ms) —— 同 autopilot 的 WORKLOAD_SHAPES /
+  // 后端 diagnosis_config._WORKLOAD_SLA 一套数值,三个 tab 说同一种 SLO 语言。
   const WORKLOAD_SLA = {
-    chat: [1000, 50], rag: [3000, 50], agent: [1000, 50],
-    reasoning: [1000, 30], code: [100, 20], custom: [2000, 50],
+    chat: [1000, 50, 3000], rag: [3000, 50, 8000], agent: [1000, 50, 15000],
+    reasoning: [1000, 30, 90000], code: [100, 20, 2000], custom: [2000, 50, 5000],
   };
   const ADV_LABELS = {
     min_running_reqs: ['cfg.min_running', 'reqs'],
@@ -1466,7 +1453,11 @@ function sloPanel() {
     onFormChange(form) {
       form = form || this.cfgDraft.workload_form;
       const sla = WORKLOAD_SLA[form];
-      if (sla) { this.cfgDraft.sla_ttft_p99_ms = sla[0]; this.cfgDraft.sla_tpot_p99_ms = sla[1]; }
+      if (sla) {
+        this.cfgDraft.sla_ttft_p99_ms = sla[0];
+        this.cfgDraft.sla_tpot_p99_ms = sla[1];
+        this.cfgDraft.sla_e2e_p99_ms = sla[2];
+      }
     },
     dirty() { return JSON.stringify(this.cfgDraft) !== JSON.stringify(this.config); },
     resetConfig() { this.cfgDraft = JSON.parse(JSON.stringify(this.config)); },
@@ -1500,28 +1491,40 @@ function autopilotTab() {
     baseline: { t: '基线', c: 'base' }, kept: { t: '✓ 保留', c: 'kept' },
     reverted: { t: '↩ 回滚', c: 'rev' }, tie: { t: '≈ 持平', c: 'tie' }, done: { t: '■ 完成', c: 'stop' },
   };
-  // 每个目标对应的合理 SLA 默认值(参照行业惯例:TTFT/TPOT 是 LLM serving SLO 的标准构成)。
-  // 吞吐优先:SLA 只是闸门,松一点没关系;延迟优先:SLA 字段本身就是要压低的东西,
-  // 必须收紧,不然"最小化延迟"在一个 8000ms 的松闸门下形同虚设;性价比同吞吐优先。
-  // E2E 默认留空(不设闸门)--交互式场景 TTFT+TPOT 已够,deadline/agent 场景用户自填。
-  const TARGET_SLA_DEFAULTS = {
-    throughput: { ttft: 8000, tpot: 50, e2e: '' },
-    latency: { ttft: 800, tpot: 30, e2e: '' },
-    cost: { ttft: 8000, tpot: 50, e2e: '' },
+  // 停机归因 → 人话(用户反馈:session 跑完没说明白"为什么",光看轮次/判定看不出
+  // 全局原因——同 stop_cause 枚举,见 runner.py append_stop 的 cause 取值)。
+  const STOP_LABELS = {
+    agent_done: 'Agent 判断已接近最优,主动收尾',
+    no_candidates: '已无对症旋钮可试(诊断到的瓶颈没有安全旋钮能缓解,或负载/参数已到边界)',
+    budget_rounds: '达到最大轮数上限',
+    budget_time: '达到时间预算上限(还没跑完计划轮数)',
+    no_improve_k: '连续多轮没有实质提升,判断已收敛',
+    user_stop: '用户手动停止',
+    failed: '会话出错终止',
   };
-  // 业务形态 WorkloadSpec(M1):形态是主维度——自带 bench 负载与默认 SLA(数值同后端
-  // autopilot/workload.py);目标降级为次级开关。动机:泛负载 load_limited 交白卷(ap-20260719-004104)。
+  // 瓶颈字母 → 人话(同后端 action_space.BOTTLENECK_LABEL)。这里不走 t(),因为整个
+  // Autopilot tab 本就是中文硬编码(WORKLOAD_SHAPES/VERDICT/STOP_LABELS 都不走 i18n)——
+  // 用 t('regime.'+bn) 会在英文界面下拼出"本次持续诊断到Bandwidth bottleneck"这种
+  // 中英混杂的病句,不如跟本 tab 其余文案保持一致,统一硬编码中文。
+  const BOTTLENECK_LABEL = { A: '双低', B: '带宽瓶颈', C: '算力瓶颈', D: '容量瓶颈' };
+  // 业务形态 WorkloadSpec(M1):形态是唯一主维度——自带 bench 负载与默认 SLA(数值同后端
+  // autopilot/workload.py)。"目标"(吞吐优先/延迟优先/性价比)UI 已去掉,调优统一"不破
+  // SLA 前提下最大化吞吐"(业界惯例;objective.py 后端仍支持 target,只是 UI 不再暴露选择,
+  // 免得用户在"形态"和"目标"两个维度间双重决策——ap-20260719-004104 那次泛形态+泛目标
+  // 组合在轻载下 load_limited 交白卷,正是这种维度纠缠的产物)。
   const WORKLOAD_SHAPES = {
-    chat:      { sla: [1000, 50], load: 'p500/o128 · c64' },
-    rag:       { sla: [3000, 50], load: 'p4000/o256 · c16' },
-    agent:     { sla: [1000, 50], load: 'p2000/o512 · c32' },
-    reasoning: { sla: [1000, 30], load: 'p1000/o4096 · c16' },
-    code:      { sla: [100, 20],  load: 'p300/o128 · c16' },
-    custom:    { sla: null,       load: '全手动(沿用旧默认)' },
+    chat:      { sla: [1000, 50, 3000],  load: 'p500/o128 · c64' },
+    rag:       { sla: [3000, 50, 8000],  load: 'p4000/o256 · c16' },
+    agent:     { sla: [1000, 50, 15000], load: 'p2000/o512 · c32' },
+    reasoning: { sla: [1000, 30, 90000], load: 'p1000/o4096 · c16' },
+    code:      { sla: [100, 20, 2000],   load: 'p300/o128 · c16' },
+    custom:    { sla: null,              load: '全手动(沿用旧默认)' },
   };
   return {
-    obj: { target: 'throughput', workload: 'chat', ttft: 1000, tpot: 50, e2e: '', latencyMetric: 'ttft', floor: '' },
-    budget: { rounds: 12, minutes: 30 },
+    // target 固定 throughput(不破 SLA 前提下最大化吞吐,业界惯例);UI 不再暴露"目标"选择,
+    // 只留形态 —— 后端 objective.py 的 target 仍支持 latency/cost,供 CLI/API 直调用。
+    obj: { workload: 'chat', ttft: 1000, tpot: 50, e2e: '' },
+    budget: { rounds: 30, minutes: 120 },
     agentOpen: false,
     preset: 'openrouter',
     agent: { provider: '', base_url: 'https://openrouter.ai/api/v1', api_key: '', model: 'anthropic/claude-opus-4' },
@@ -1529,7 +1532,7 @@ function autopilotTab() {
     agentTesting: false,
     advOpen: false,
     showPrompt: false,
-    adv: { guidance: '', temperature: 0.4, timeout_s: 90, retries: 2, allowQualityKnobs: false },
+    adv: { guidance: '', temperature: 0.4, timeout_s: 90, retries: 2 },
     LOCKED_PROMPT:
 `你是一个 LLM-serving 性能工程师(核心合约,不可改):
 ① 每轮只改 1 个旋钮,且只能从「动作范围」里选;
@@ -1608,6 +1611,79 @@ function autopilotTab() {
     _bestTps() { let b = 0; this.shownRounds.forEach(r => { if (r.decision === 'kept' && r.tps > b) b = r.tps; }); return b || this.baselineTps; },
     get best() { return { tps: this._bestTps(), cmd: (this.session && this.session.recommended_command) || (this.shownRounds.find(r => r.decision === 'kept') || {}).cmd || '' }; },
     get fallbackCount() { return this.shownRounds.filter(r => r.fallback).length; },
+    // 结果总结:session 跑完只甩一个吞吐比值(×1.00 也说不清是"没提升"还是"基线就没达标"),
+    // 用户反馈"很懵逼"——把 SLA 违规/回滚原因/停机原因拼成人话,别让用户自己倒推轮次表。
+    _violatesSla(sc) {
+      const sla = (this.session && this.session.objective && this.session.objective.sla) || {};
+      if (!sc) return [];
+      const bad = [];
+      if (sla.ttft_p99_ms != null && sc.ttft_p99_ms > sla.ttft_p99_ms) bad.push('TTFT');
+      if (sla.tpot_p99_ms != null && sc.tpot_p99_ms > sla.tpot_p99_ms) bad.push('TPOT');
+      if (sla.e2e_p99_ms != null && sc.e2e_p99_ms > sla.e2e_p99_ms) bad.push('E2E');
+      return bad;
+    },
+    get resultSummary() {
+      const rounds = (this.session && this.session.rounds) || [];
+      const baseline = rounds.find(r => r.kind === 'baseline');
+      const stopRound = [...rounds].reverse().find(r => r.kind === 'stop');
+      const cands = rounds.filter(r => r.kind === 'candidate');
+      const kept = cands.filter(r => r.decision === 'kept');
+      const tie = cands.filter(r => r.decision === 'tie');
+      const revertedSla = cands.filter(r => r.decision === 'reverted' && this._violatesSla(r.scorecard_after).length > 0);
+      const revertedWorse = cands.filter(r => r.decision === 'reverted' && this._violatesSla(r.scorecard_after).length === 0);
+      const baselineBad = this._violatesSla(baseline && baseline.scorecard_after);
+      return {
+        improved: kept.length > 0, triedCount: cands.length,
+        keptCount: kept.length, tieCount: tie.length,
+        revertedSlaCount: revertedSla.length, revertedWorseCount: revertedWorse.length,
+        baselineViolatesSla: baselineBad.length > 0, baselineViolatedMetrics: baselineBad,
+        stopReason: STOP_LABELS[(stopRound || {}).stop_cause] || '',
+      };
+    },
+    get resultSummaryText() {
+      const s = this.resultSummary;
+      const parts = [];
+      if (s.improved) {
+        parts.push(`找到 ${s.keptCount} 个更优配置并保留,已收敛到当前最优。`);
+      } else if (s.triedCount === 0) {
+        parts.push('本次没跑出任何候选(基线之后即停止)。');
+      } else if (s.baselineViolatesSla) {
+        parts.push(`基线本身就没达标(超出 ${s.baselineViolatedMetrics.join('/')} SLA),后续 ${s.triedCount} `
+          + `个候选也都没能拉回 SLA 内,因此全部回滚——更像是 SLA 阈值对当前硬件/模型偏紧,而不是旋钮没用。`);
+      } else if (s.revertedSlaCount > 0 && s.revertedWorseCount === 0 && s.tieCount === 0) {
+        parts.push(`试了 ${s.triedCount} 个候选,全部因破坏 SLA 被回滚,吞吐没能在达标前提下比较。`);
+      } else if (s.tieCount === s.triedCount && s.triedCount > 0) {
+        parts.push(`试了 ${s.triedCount} 个候选,吞吐变化都在噪声范围内(判定持平)——已接近当前配置能做到的上限。`);
+      } else {
+        parts.push(`试了 ${s.triedCount} 个候选:${s.revertedWorseCount} 个实测更差被回滚,`
+          + `${s.tieCount} 个持平,${s.revertedSlaCount} 个破 SLA。`);
+      }
+      if (s.stopReason) parts.push(`停止原因:${s.stopReason}。`);
+      return parts.join(' ');
+    },
+    // 用户反馈(2026-07-22):每次 session 只调 2-3 个参数,不知道剩下的参数是"不该调"
+    // 还是"没顾上调"。这里把后端 action_space_summary(见 runner.py _build_action_space_summary)
+    // 拼成人话:全量旋钮按跳过原因分类计数,再对照本次实际诊断到的瓶颈,列出对症但没试到的旋钮。
+    get actionSpaceSummaryText() {
+      const s = (this.session && this.session.action_space_summary) || {};
+      if (!s.total) return '';
+      const parts = [];
+      parts.push(`可调范围:全部 ${s.total} 个 vLLM 参数里,${s.default_on_count} 个已是引擎启动时自调的`
+        + `最优默认值、${s.unsupported_count} 个当前 vLLM 版本不支持、${s.precision_excluded_count} `
+        + `个会降精度按策略不提供,剩下 ${s.considerable_count} 个才是真正的候选池。`);
+      const seen = (s.bottlenecks_seen || []).map(bn => BOTTLENECK_LABEL[bn] || '症状/其它').join('/');
+      if (seen) {
+        const rel = s.relevant_knobs || [], tried = s.tried_knobs || [];
+        const untried = rel.filter(k => !tried.includes(k));
+        parts.push(`本次持续诊断到${seen},候选池里对症的有 ${rel.length} 个`
+          + (rel.length ? `(${rel.join(' / ')})` : '') + `,实际试了 ${tried.length} 个`
+          + (tried.length ? `(${tried.join(' / ')})` : '') + (untried.length
+            ? `,还剩 ${untried.length} 个对症但没轮到(${untried.join(' / ')},多因轮数/时间预算先耗尽)。`
+            : '——对症的都试过了。')
+          + `候选池里其余参数因为跟这次的瓶颈不对症,没有被提议。`);
+      }
+      return parts.join(' ');
+    },
     get etaText() {
       // 按已完成轮次平均节奏外推的上界(提前收敛/时间预算会更早停)
       if (!this.running) return '';
@@ -1635,27 +1711,13 @@ function autopilotTab() {
       if (this.running) return real ? '真实调优中…' : '调优中…';
       return '执行调优';
     },
-    setTarget(target) {
-      // 只在用户没手动改过 SLA 数值时才自动套用新目标的推荐值--不然切一下目标
-      // 就把用户特意填的阈值(比如"我们的真实 SLA 就是 1500ms")悄悄覆盖掉。
-      const prevDefaults = TARGET_SLA_DEFAULTS[this.obj.target];
-      const untouched = prevDefaults && Number(this.obj.ttft) === prevDefaults.ttft
-        && Number(this.obj.tpot) === prevDefaults.tpot
-        && (this.obj.e2e === '' || Number(this.obj.e2e) === prevDefaults.e2e);
-      this.obj.target = target;
-      if (untouched) {
-        const d = TARGET_SLA_DEFAULTS[target];
-        this.obj.ttft = d.ttft;
-        this.obj.tpot = d.tpot;
-        this.obj.e2e = d.e2e;
-      }
-    },
     applyWorkload() {
-      // 形态是显式主维度:直接套用形态 SLA(之后仍可手改);custom 不动任何字段(全手动透传)。
+      // 形态是唯一主维度:直接套用形态 SLA(之后仍可手改);custom 不动任何字段(全手动透传)。
       const s = WORKLOAD_SHAPES[this.obj.workload];
       if (s && s.sla) {
         this.obj.ttft = s.sla[0];
         this.obj.tpot = s.sla[1];
+        this.obj.e2e = s.sla[2];
       }
     },
     workloadHint() {
@@ -1785,16 +1847,12 @@ function autopilotTab() {
       const body = {
         workload: this.obj.workload,      // 业务形态:bridge/run.py 侧展开 bench 负载参数
         objective: {
-          target: this.obj.target,
+          // 固定 throughput——不破 SLA 前提下最大化吞吐,UI 不再暴露"目标"选择(见上方注释)。
+          target: 'throughput',
           sla: { ttft_p99_ms: Number(this.obj.ttft) || null, tpot_p99_ms: Number(this.obj.tpot) || null,
                  e2e_p99_ms: Number(this.obj.e2e) || null },
-          // latency_metric/floor 早就在后端(objective.py)支持,之前从没接过 UI:
-          // 延迟优先模式下"主看哪个指标""吞吐不能跌破多少"完全没法配置。
-          latency_metric: this.obj.target === 'latency' ? this.obj.latencyMetric : undefined,
-          floor: (this.obj.target === 'latency' && Number(this.obj.floor) > 0)
-            ? { output_tps: Number(this.obj.floor) } : undefined,
         },
-        budget: { rounds: Number(this.budget.rounds) || 12, minutes: Number(this.budget.minutes) || 30 },
+        budget: { rounds: Number(this.budget.rounds) || 30, minutes: Number(this.budget.minutes) || 120 },
         agent: Object.assign({}, this.agent, {
           guidance: this.adv.guidance, temperature: this.adv.temperature,
           timeout_s: this.adv.timeout_s, retries: this.adv.retries,

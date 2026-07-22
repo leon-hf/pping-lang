@@ -17,8 +17,17 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-# regime 词汇与诊断引擎一致:A 喂不饱 / B 带宽墙 / C 算力墙 / D 容量墙(§4.3)
+# 瓶颈字母与诊断引擎一致:A 喂不饱 / B 带宽瓶颈 / C 算力瓶颈 / D 容量瓶颈(§4.3)
 REGIMES = ("A", "B", "C", "D")
+
+# 裸字母(如事件消息/evidence_refs 里的 "B"、"B:live")没有上下文,用户看不出是什么——
+# 统一换成人话(如"带宽瓶颈"),字母本身不再出现在任何用户可见文本里
+# (2026-07-21 用户反馈:连"(B)"这种带字母的括注都别留,谁都看不出字母指代什么)。
+BOTTLENECK_LABEL: dict[str, str] = {"A": "双低", "B": "带宽瓶颈", "C": "算力瓶颈", "D": "容量瓶颈"}
+
+
+def bottleneck_label(bn: str | None) -> str:
+    return BOTTLENECK_LABEL.get(bn, "症状/其它")
 
 
 @dataclass(frozen=True)
@@ -292,6 +301,37 @@ _EA_DEFAULTS = _introspect_engine_args(_VLLM_SOURCE_ROOT)
 KNOBS: tuple[Knob, ...] = tuple(
     _build_knob(m, _EA_DEFAULTS) for m in _KNOB_REGISTRY)
 _BY_KEY = {k.key: k for k in KNOBS}
+
+
+def action_space_stats() -> dict:
+    """全量旋钮面按分类计数(§4.2)——给 session 收尾"为什么只调这些参数"的总结用。
+    用户反馈(2026-07-22):每次 session 就调 2-3 个参数,看不出剩下的 ~250 个 vLLM 参数
+    是"不该调"还是"没顾上调"。三类跳过原因:default_on=vLLM 启动已自调最优,不用碰;
+    unsupported=当前 vLLM build 没这个 flag,提了必 LaunchError;precision=会降精度,
+    按产品策略不提供。剩下的才是真正可能被提议的候选池。"""
+    default_on = sum(1 for k in KNOBS if k.default_on)
+    unsupported = sum(1 for k in KNOBS if k.unsupported)
+    precision = sum(1 for k in KNOBS if k.output_impact != "none")
+    considerable = [k for k in KNOBS if not k.default_on and not k.unsupported
+                    and k.output_impact == "none"]
+    return {
+        "total": len(KNOBS),
+        "default_on_count": default_on,
+        "unsupported_count": unsupported,
+        "precision_excluded_count": precision,
+        "considerable_count": len(considerable),
+        "considerable_knobs": sorted(k.key for k in considerable),
+    }
+
+
+def knobs_helping(bn: str) -> list[str]:
+    """候选池(非 default_on/unsupported/precision)里对症给定瓶颈字母的旋钮 key——
+    含 B↔D 共生并集(§4.3,同 propose_candidates 的耦合逻辑),否则耦合旋钮(如
+    cpu_offload_gb/num_gpu_blocks_override)会被试过却不在"相关旋钮"里,总结自相矛盾。"""
+    bns = {bn} | set(_COUPLED_REGIMES.get(bn, ()))
+    return sorted(k.key for k in KNOBS
+                  if not k.default_on and not k.unsupported
+                  and k.output_impact == "none" and bns & set(k.helps))
 
 
 # === introspect:读 vLLM 源码 EngineArgs 默认值,填 default_0_21(§4.6.1)===

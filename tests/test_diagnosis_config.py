@@ -20,23 +20,26 @@ def test_default_custom():
     assert c.workload_form == "custom"
     assert c.sla_ttft_p99_ms == 2000.0
     assert c.sla_tpot_p99_ms == 50.0
+    assert c.sla_e2e_p99_ms == 5000.0
     # 阈值用 dataclass 默认(MBU 用 NVML HBM 繁忙%,有界)
     assert c.mbu_high_pct == 85.0 and c.mbu_low_pct == 50.0
     assert c.mfu_low_ratio == 0.20 and c.min_running_reqs == 0.5
     assert c.stall_memory_throttle_pct == 25.0 and c.stall_memory_dep_pct == 25.0 and c.stall_math_pipe_pct == 25.0
 
 
-@pytest.mark.parametrize("form,ttft,tpot", [
-    ("chat", 1000.0, 50.0),
-    ("rag", 3000.0, 50.0),
-    ("reasoning", 1000.0, 30.0),
-    ("code", 100.0, 20.0),
+@pytest.mark.parametrize("form,ttft,tpot,e2e", [
+    ("chat", 1000.0, 50.0, 3000.0),
+    ("rag", 3000.0, 50.0, 8000.0),
+    ("agent", 1000.0, 50.0, 15000.0),
+    ("reasoning", 1000.0, 30.0, 90000.0),
+    ("code", 100.0, 20.0, 2000.0),
 ])
-def test_workload_brings_sla_defaults(form, ttft, tpot):
+def test_workload_brings_sla_defaults(form, ttft, tpot, e2e):
     c = default_config(form)
     assert c.workload_form == form
     assert c.sla_ttft_p99_ms == ttft
     assert c.sla_tpot_p99_ms == tpot
+    assert c.sla_e2e_p99_ms == e2e
 
 
 def test_unknown_form_falls_back_to_custom():

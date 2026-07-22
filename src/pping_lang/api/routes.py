@@ -673,6 +673,9 @@ def build_app(
             tpot_source = "itl"
         tpot = _summary(tpot_vals)
 
+        # 端到端请求延迟——首页 SLO 三件套(TTFT/TPOT/E2E)的第三项。
+        e2e = _summary(values_in_window(M.VLLM_REQ_E2E_LATENCY_MS))
+
         # Output throughput: sum gen tokens / window seconds (system aggregate)
         gen_vals = values_in_window(M.VLLM_ITER_GEN_TOKENS)
         output_tps = (sum(gen_vals) / window) if gen_vals else None
@@ -691,6 +694,7 @@ def build_app(
                 "ttft": ttft,                       # {p50, p95, p99, avg, n}
                 "tpot": tpot,                       # ditto
                 "tpot_source": tpot_source,         # "tpot" | "itl"
+                "e2e": e2e,                          # ditto — 端到端(vLLM e2e_latency 直方图)
                 # Throughput pair: system-aggregate + per-request feel
                 "output_tps": output_tps,
                 "per_req_decode_tps": per_req_decode_tps,
@@ -699,6 +703,8 @@ def build_app(
                 "ttft_p99_ms": ttft["p99"],
                 "tpot_p50_ms": tpot["p50"],
                 "tpot_p99_ms": tpot["p99"],
+                "e2e_p50_ms": e2e["p50"],
+                "e2e_p99_ms": e2e["p99"],
                 # Scheduler & efficiency latches
                 "kv_cache": latest_val(M.VLLM_SCHEDULER_KV_CACHE_USAGE_RATIO),
                 "running_reqs": latest_val(M.VLLM_SCHEDULER_RUNNING_REQS),

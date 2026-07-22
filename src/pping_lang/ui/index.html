@@ -140,6 +140,10 @@
               <span class="cfg-lbl">TPOT p99 SLA</span>
               <span class="cfg-unit"><input type="number" step="any" x-model.number="cfgDraft.sla_tpot_p99_ms"><i>ms</i></span>
             </div>
+            <div class="cfg-seg">
+              <span class="cfg-lbl">E2E p99 SLA</span>
+              <span class="cfg-unit"><input type="number" step="any" x-model.number="cfgDraft.sla_e2e_p99_ms"><i>ms</i></span>
+            </div>
             <div class="cfg-spacer"></div>
             <div class="cfg-acts">
               <button class="cfg-adv-toggle" :class="{ open: advancedOpen }" @click="advancedOpen = !advancedOpen">
@@ -180,6 +184,15 @@
             </div>
             <div class="slo-card-val"><span x-text="fmt(kpis.tpot_p99_ms, 0)"></span><i>ms</i>
               <span class="slo-card-sla">/ SLA <span x-text="fmt(cfgDraft.sla_tpot_p99_ms, 0)"></span>ms</span></div>
+          </div>
+          <div class="slo-card" :class="{ ok: slaPass(kpis.e2e_p99_ms, cfgDraft.sla_e2e_p99_ms) === true, bad: slaPass(kpis.e2e_p99_ms, cfgDraft.sla_e2e_p99_ms) === false }">
+            <div class="slo-card-head">
+              <span class="slo-card-name">E2E p99</span>
+              <span class="slo-badge" x-show="slaPass(kpis.e2e_p99_ms, cfgDraft.sla_e2e_p99_ms) !== null"
+                    x-text="slaPass(kpis.e2e_p99_ms, cfgDraft.sla_e2e_p99_ms) ? t('slo.pass') : t('slo.fail')"></span>
+            </div>
+            <div class="slo-card-val"><span x-text="fmt(kpis.e2e_p99_ms, 0)"></span><i>ms</i>
+              <span class="slo-card-sla">/ SLA <span x-text="fmt(cfgDraft.sla_e2e_p99_ms, 0)"></span>ms</span></div>
           </div>
         </div>
         <div x-show="toast" x-cloak class="toast" :class="{ error: toastError }" x-text="toast"></div>
@@ -1173,7 +1186,7 @@
         </template>
       </div>
 
-      <!-- ===== 当前操作点:离三面墙有多远(实测,瓶颈判据的原始证据)===== -->
+      <!-- ===== 当前操作点:离三个瓶颈边界有多远(实测,瓶颈判据的原始证据)===== -->
       <div class="section-head">
         <h2 x-text="t('rules.opTitle')"></h2>
         <span class="hint" x-text="t('rules.opHint')"></span>
@@ -1326,44 +1339,37 @@
           <div class="full slo-section">
             <div class="slo-head">
               <span class="slo-label" x-text="t('bench.sloConstraint')"></span>
-              <button type="button" class="slo-add-btn" @click="addSloRow()" x-text="t('bench.addSloBtn')"></button>
             </div>
-            <div class="slo-empty" x-show="form.sloRows.length === 0" x-text="t('bench.sloEmpty')"></div>
-            <template x-for="(row, i) in form.sloRows" :key="i">
-              <div class="slo-row">
-                <select x-model="row.metric" class="slo-field metric"
-                        @change="onSloMetricChange(i)">
-                  <option value="ttft" x-text="t('bench.sloMetricTtft')"></option>
-                  <option value="tpot" x-text="t('bench.sloMetricTpot')"></option>
-                  <option value="e2e" x-text="t('bench.sloMetricE2e')"></option>
-                  <option value="error_rate" x-text="t('bench.sloMetricErrorRate')"></option>
-                </select>
-                <select x-model="row.percentile" class="slo-field pct"
-                        :disabled="row.metric === 'error_rate'">
-                  <option value="p50">p50</option>
-                  <option value="p90">p90</option>
-                  <option value="p95">p95</option>
-                  <option value="p99">p99</option>
-                  <option value="mean">mean</option>
-                </select>
-                <select x-model="row.op" class="slo-field op">
-                  <option value="<">&lt;</option>
-                  <option value="<=">≤</option>
-                  <option value=">">&gt;</option>
-                  <option value=">=">≥</option>
-                </select>
-                <input type="number" step="any" x-model.number="row.value"
-                       class="slo-field value">
-                <select x-model="row.unit" class="slo-field unit"
-                        :disabled="row.metric === 'error_rate'">
-                  <option value="ms">ms</option>
-                  <option value="s">s</option>
-                </select>
-                <button type="button" class="slo-remove-btn"
-                        @click="removeSloRow(i)" :title="t('bench.removeSloBtn')">×</button>
+            <div class="slo-shape-row">
+              <span class="cfg-lbl" x-text="t('slo.form')"></span>
+              <select x-model="form.sloShape" @change="onSloShapeChange()">
+                <option value="chat">对话</option>
+                <option value="rag">RAG 问答</option>
+                <option value="agent">Agent</option>
+                <option value="reasoning">长推理</option>
+                <option value="code">代码补全</option>
+                <option value="custom">自定义</option>
+              </select>
+              <span class="hint-inline" x-text="t('bench.sloShapeHint')"></span>
+            </div>
+            <div class="slo-fixed-rows">
+              <div class="slo-fixed-row">
+                <span class="slo-fixed-name">TTFT p99 ≤</span>
+                <input type="number" step="any" x-model.number="form.sloTtft" :placeholder="t('bench.sloOptional')">
+                <span class="slo-fixed-unit">ms</span>
               </div>
-            </template>
-            <div class="slo-preview" x-show="form.sloRows.length > 0">
+              <div class="slo-fixed-row">
+                <span class="slo-fixed-name">TPOT p99 ≤</span>
+                <input type="number" step="any" x-model.number="form.sloTpot" :placeholder="t('bench.sloOptional')">
+                <span class="slo-fixed-unit">ms</span>
+              </div>
+              <div class="slo-fixed-row">
+                <span class="slo-fixed-name">E2E p99 ≤</span>
+                <input type="number" step="any" x-model.number="form.sloE2e" :placeholder="t('bench.sloOptional')">
+                <span class="slo-fixed-unit">ms</span>
+              </div>
+            </div>
+            <div class="slo-preview">
               <span class="slo-preview-label" x-text="t('bench.sloPreviewLabel')"></span>
               <code x-text="buildSloSpec() || t('bench.sloPreviewEmpty')"></code>
             </div>
@@ -1550,7 +1556,7 @@
   <div class="ap-agent">
     <div class="ap-agent-head" @click="agentOpen=!agentOpen">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-      <b>Agent（出主意的 LLM）</b>
+      <b>Agent（调优决策 LLM）</b>
       <span class="cur" x-text="agent.model || '未配置'"></span>
       <span class="chev" x-text="agentOpen ? '▲' : '▼'"></span>
     </div>
@@ -1586,20 +1592,15 @@
         <div class="ap-field num"><label>重试</label><input type="number" x-model="adv.retries"></div>
 
         <div class="ap-scope">
-          <label>动作范围 · vLLM 全量 − 身份(~7) − 硬件收窄</label>
+          <label>动作范围 · vLLM 全量 − 身份(~7) − 硬件收窄 − 降精度类</label>
           <div class="ap-deny">
             <span class="dl">model / host / port（身份,~7）</span>
             <span class="dl">tensor / pipeline-parallel（按卡数收窄）</span>
-            <template x-if="!adv.allowQualityKnobs"><span class="dl q">quantization（待开质量门）</span></template>
-            <template x-if="!adv.allowQualityKnobs"><span class="dl q">kv-cache-dtype（待开质量门）</span></template>
+            <span class="dl q">quantization（会降精度,不提供）</span>
+            <span class="dl q">kv-cache-dtype（会降精度,不提供）</span>
           </div>
-          <div class="ap-agent-note" style="margin-top:0">这 ~250 个里大半 vLLM 启动时已自调到最优（KV block 数 / attention backend / 兼容门）；agent 实际只动 <b style="color:var(--coral-strong)">max-num-seqs / max-num-batched-tokens / gpu-util / performance_mode</b> 这一小撮 + 诊断点名的对症旋钮。安全不靠黑名单,靠 launch-catch + 一次性容器兜底。</div>
+          <div class="ap-agent-note" style="margin-top:0">这 ~250 个里大半 vLLM 启动时已自调到最优（KV block 数 / attention backend / 兼容门）；agent 实际只动 <b style="color:var(--coral-strong)">max-num-seqs / max-num-batched-tokens / gpu-util / performance_mode</b> 这一小撮 + 诊断点名的对症旋钮。安全不靠黑名单,靠 launch-catch + 一次性容器兜底 + 降精度旋钮永不提供。</div>
         </div>
-        <label class="ap-switch" @click="adv.allowQualityKnobs=!adv.allowQualityKnobs">
-          <span class="track" :class="{on: adv.allowQualityKnobs}"><span class="knob"></span></span>
-          开「质量门」· 纳入 quantization / kv-cache-dtype（T2,加等价闸）
-        </label>
-        <div class="ap-agent-note" x-show="adv.allowQualityKnobs" style="color:var(--amber);margin-top:0">⚠ 已纳入 → 记分牌自动加<b>质量门(等价闸)</b>：每个候选额外跑固定 prompt 比对基线输出，质量掉超阈值即判负（防 Agent 靠降质量刷吞吐）。</div>
 
         <div style="flex-basis:100%">
           <button class="ap-linkbtn" @click="showPrompt=!showPrompt" x-text="showPrompt ? '收起核心 prompt 合约' : '查看核心 prompt 合约（只读 · 不可改）'"></button>
@@ -1609,7 +1610,8 @@
     </div>
   </div>
 
-  <!-- 目标条 -->
+  <!-- 形态条:形态是唯一主维度——自带 bench 负载 + 默认 SLA(同 Live tab 业务形态一套词汇);
+       调优目标固定为"不破 SLA 前提下最大化吞吐"(业界惯例),不再单独选 -->
   <div class="ap-bar">
     <div class="ap-goal">
       <b>形态</b>
@@ -1622,25 +1624,13 @@
         <option value="custom">自定义</option>
       </select>
       <span style="font-size:11.5px;color:var(--muted-2);" x-text="workloadHint()" title="形态自带 bench 负载参数与默认 SLA;SLA 仍可手改"></span>
-      <b>目标</b>
-      <div class="ap-seg">
-        <button :class="{active: obj.target==='throughput'}" @click="setTarget('throughput')">吞吐优先</button>
-        <button :class="{active: obj.target==='latency'}" @click="setTarget('latency')">延迟优先</button>
-        <button :class="{active: obj.target==='cost'}" @click="setTarget('cost')">性价比</button>
-      </div>
       <span>SLA · TTFT p99 ≤ <input type="number" x-model="obj.ttft"> ms · TPOT p99 ≤ <input type="number" x-model="obj.tpot"> ms · E2E p99 ≤ <input type="number" x-model="obj.e2e" placeholder="可选" style="width:80px"> ms</span>
-      <!-- 延迟优先专属:SLA 在这个模式下是"要最小化的东西"本身,不是纯闸门——
-           得说清楚主看哪个、吞吐不能跌破多少,否则"最小化延迟"可能极端到吞吐归零 -->
-      <span x-show="obj.target==='latency'">
-        主看 <select x-model="obj.latencyMetric"><option value="ttft">TTFT</option><option value="tpot">TPOT</option></select>
-        · 吞吐下限 ≥ <input type="number" x-model="obj.floor" placeholder="可选" style="width:70px"> tok/s
-      </span>
       <span>最多 <input type="number" x-model="budget.rounds"> 轮 / <input type="number" x-model="budget.minutes"> min</span>
       <span style="font-size:11.5px;color:var(--muted-2);" title="轮数和分钟都是上限,不是目标">轮数是上限:多数 session 3-5 轮诚实收敛,提前停属正常</span>
     </div>
     <button class="ap-start" @click="start()" :disabled="running">
       <svg x-show="!running" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
-      <svg x-show="running" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="9" stroke-opacity=".3"/><path d="M21 12a9 9 0 0 0-9-9"/></svg>
+      <svg class="ap-spin" x-show="running" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="9" stroke-opacity=".3"/><path d="M21 12a9 9 0 0 0-9-9"/></svg>
       <span x-text="startLabel()"></span>
     </button>
     <button class="ap-stop" x-show="running" @click="stop()" :disabled="stopping">
@@ -1662,7 +1652,7 @@
       <span class="arr">→</span>
       <div class="st"><span class="n">5</span><b>decide</b><span>留下/回滚</span></div>
     </div>
-    <p>点开始后，Autopilot 会启动一个调优 session。Agent 在候选集中选一个 vLLM 旋钮,沙盒重启后跑同一套 bench,只有实测更好才 kept,破 SLA 或收益不足就 reverted。真实 runw 模式需要先配置 LLM agent;生产上线仍走人工 promote。</p>
+    <p>点开始后，Autopilot 会启动一个调优 session。Agent 在候选集中选一个 vLLM 旋钮,沙盒重启后跑同一套 bench,只有实测更好才保留,破 SLA 或收益不足就回滚。真实 runw 模式需要先配置 LLM agent;生产上线仍走人工确认上线包。</p>
     <div class="moat"><b>👁 眼睛</b>(深度诊断) + <b>✋ 手</b>(压测+serve控制) + <b>📊 记分牌</b>(基线/Δ) 同进程</div>
   </div>
 
@@ -1777,7 +1767,9 @@
           <div class="coldnote" x-show="session.coldLoaded" style="font-size:12px;color:var(--muted-2,#8a8a99);margin-bottom:8px">
             📋 上次调优结果<span x-show="session.started_ts"> · <span x-text="session.started_ts"></span></span>（非本次刚跑完，页面重新打开后自动带出）
           </div>
-          <div class="hl">吞吐 <b><span x-text="fmt(baselineTps)"></span> → <span x-text="fmt(best.tps)"></span> tok/s（×<span x-text="(best.tps/baselineTps).toFixed(2)"></span>）</b>，仍满足 TTFT SLA</div>
+          <div class="hl">吞吐 <b><span x-text="fmt(baselineTps)"></span> → <span x-text="fmt(best.tps)"></span> tok/s（×<span x-text="(best.tps/baselineTps).toFixed(2)"></span>）</b></div>
+          <div class="summary" :class="{warn: !resultSummary.improved}" x-text="resultSummaryText"></div>
+          <div class="summary" x-show="actionSpaceSummaryText" x-text="actionSpaceSummaryText"></div>
           <div class="ap-cmd"><span class="pfx">$</span> <span x-text="best.cmd"></span> <span class="copy" @click="copyCmd($event)">复制</span></div>
           <div class="honest">「×3」只在「现实但没调过」的默认基线上成立 —— 那正是大量真实部署的现状。已调过的基线则是诚实的边际收益（+5~15%），Agent 会如实报「已近最优」。</div>
           <div class="actions">

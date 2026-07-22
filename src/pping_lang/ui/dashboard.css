@@ -1376,80 +1376,56 @@
     text-transform: uppercase;
     letter-spacing: 0.04em;
   }
-  .slo-add-btn {
+  .slo-shape-row {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    flex-wrap: wrap;
+  }
+  .slo-shape-row select {
+    font-family: inherit;
+    font-size: 13.5px;
+    color: var(--text);
     background: var(--surface);
     border: 1px solid var(--border-strong);
-    color: var(--text);
-    font-family: inherit;
-    font-size: 12px;
-    font-weight: 500;
-    padding: 5px 12px;
-    border-radius: 7px;
-    cursor: pointer;
-    letter-spacing: -0.005em;
-    transition: background 0.12s, border-color 0.12s;
+    border-radius: 8px;
+    padding: 7px 10px;
   }
-  .slo-add-btn:hover {
-    background: var(--surface-tint);
-    border-color: var(--coral);
-    color: var(--coral);
+  .slo-fixed-rows {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
   }
-  .slo-empty {
-    padding: 10px 14px;
-    background: var(--surface-tint);
-    border: 1px dashed var(--border);
-    border-radius: 7px;
+  .slo-fixed-row {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+  }
+  .slo-fixed-name {
+    font-size: 12.5px;
+    font-weight: 600;
     color: var(--muted);
-    font-size: 12px;
-    text-align: center;
+    white-space: nowrap;
   }
-  .slo-row {
-    display: grid;
-    grid-template-columns: 1.4fr 0.7fr 0.5fr 1fr 0.6fr auto;
-    gap: 8px;
-    align-items: stretch;
-  }
-  .slo-field {
+  .slo-fixed-row input {
+    width: 90px;
     font-family: inherit;
     font-size: 13px;
+    font-variant-numeric: tabular-nums;
     padding: 7px 10px;
     border: 1px solid var(--border-strong);
     border-radius: 7px;
     background: var(--surface);
     color: var(--text);
-    text-transform: none;
-    letter-spacing: 0;
-    font-weight: 400;
-    transition: border-color 0.15s, box-shadow 0.15s;
   }
-  .slo-field:focus {
+  .slo-fixed-row input:focus {
     outline: none;
     border-color: var(--coral);
     box-shadow: 0 0 0 3px rgba(91, 91, 214, 0.12);
   }
-  .slo-field:disabled {
-    background: var(--surface-alt);
+  .slo-fixed-unit {
+    font-size: 12px;
     color: var(--muted-2);
-    cursor: not-allowed;
-  }
-  .slo-field.op { text-align: center; font-weight: 600; }
-  .slo-field.value { font-variant-numeric: tabular-nums; }
-  .slo-remove-btn {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    color: var(--muted);
-    width: 32px;
-    border-radius: 7px;
-    cursor: pointer;
-    font-size: 18px;
-    line-height: 1;
-    font-weight: 400;
-    transition: background 0.12s, color 0.12s, border-color 0.12s;
-  }
-  .slo-remove-btn:hover {
-    background: var(--rose-soft);
-    color: var(--rose);
-    border-color: rgba(190, 21, 86, 0.2);
   }
   .slo-preview {
     display: flex;
@@ -1561,11 +1537,7 @@
   .tl-block:hover { outline: 1.5px solid var(--text-strong); z-index: 3; filter: brightness(1.1); }
   .tl-block.tl-sel { outline: 2px solid var(--text-strong); z-index: 4; box-shadow: 0 0 0 2px var(--surface); }
   @media (max-width: 720px) {
-    .slo-row {
-      grid-template-columns: 1fr 1fr;
-    }
-    .slo-field.value { grid-column: 1 / -1; }
-    .slo-remove-btn { grid-column: 1 / -1; }
+    .slo-fixed-rows { flex-direction: column; align-items: flex-start; }
   }
 
   /* === Bench tab === */
@@ -2029,6 +2001,13 @@
   .ap-start:hover:not(:disabled){transform:translateY(-1px);box-shadow:var(--shadow-lg)}
   .ap-start:disabled{opacity:.65;cursor:default}
   .ap-start svg{width:16px;height:16px}
+  /* 用户反馈(2026-07-22):"真实调优中"按钮的图标是静态的,不转,看起来像挂了——
+     其实一直在跑,只是这颗 loading 图标(圆环+缺口弧线,天生长得像 spinner)从没接
+     旋转动画。真机复现:agent 单次调用可拖到 90s+(kimi-for-coding 直连 api.kimi.com
+     偶发 TLS RST,§_HTTPAgent 重试注释),这几十秒里页面上唯一还在动的只有状态条那个
+     心跳圆点(.ap-state .pulse),按钮本身长时间看着一动不动,像卡死,容易被误按"停止"。
+     补上旋转动画,复用 apspin(见 .ap-rtput 附近定义)。 */
+  .ap-start svg.ap-spin{animation:apspin .8s linear infinite}
   .ap-stop{display:inline-flex;align-items:center;gap:8px;font-family:inherit;font-size:14px;font-weight:700;color:var(--coral-strong);background:var(--surface);border:1px solid var(--coral-soft);border-radius:9px;padding:10px 14px;cursor:pointer;box-shadow:var(--shadow-sm);transition:.15s}
   .ap-stop:hover:not(:disabled){transform:translateY(-1px);border-color:var(--coral);box-shadow:var(--shadow-md)}
   .ap-stop:disabled{opacity:.65;cursor:default}
@@ -2104,6 +2083,8 @@
   .ap-cmd .copy{margin-left:auto;flex:none;cursor:pointer;color:var(--muted-3);font-size:11px;border:1px solid #44444f;border-radius:5px;padding:2px 8px}
   .ap-cmd .copy:hover{color:#fff}
   .ap-result .honest{font-size:12px;color:var(--muted);margin-top:11px;line-height:1.55;border-left:2px solid var(--coral-soft);padding-left:12px}
+  .ap-result .summary{font-size:13px;color:var(--text);line-height:1.6;background:var(--surface);border:1px solid var(--border);border-radius:9px;padding:10px 13px;margin-bottom:12px}
+  .ap-result .summary.warn{border-color:rgba(217,119,6,.35);background:rgba(217,119,6,.07)}
   .ap-result .actions{display:flex;gap:9px;margin-top:13px}
   .ap-result .actions button{font-family:inherit;font-size:12.5px;font-weight:600;border:1px solid var(--border-strong);background:var(--surface);color:var(--text-strong);border-radius:8px;padding:7px 13px;cursor:pointer}
   .ap-result .actions .promote{border-color:var(--coral);color:var(--coral-strong)}

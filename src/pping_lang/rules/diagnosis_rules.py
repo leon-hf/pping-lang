@@ -1,4 +1,4 @@
-"""诊断规则:只围绕 4 个瓶颈(A 双低 / B 带宽墙 / C 算力墙 / D 容量墙)。
+"""诊断规则:只围绕 4 个瓶颈(A 双低 / B 带宽瓶颈 / C 算力瓶颈 / D 容量瓶颈)。
 
 每个瓶颈有**多条独立检测手段**(`Detector`),分布在不同测量层(L1 roofline 实测 / L2 内核 stall /
 L3 调度态),**任一手段命中即认该瓶颈**(OR)—— 多手段 = 三角互证(几条同时中 = 高置信)+ 优雅降级
@@ -82,9 +82,9 @@ _A = FactRule(
                "注:Continuous Batching、CUDA Graph、chunked-prefill 在 0.21 默认启用,"
                "请先确认未被 enforce-eager 等关闭,避免重复启用(无效操作)。",
 )
-# ── B 带宽墙:三条独立手段(L1 实测 + 两条 L2 内核)──
+# ── B 带宽瓶颈:三条独立手段(L1 实测 + 两条 L2 内核)──
 _B = FactRule(
-    id="B", name="带宽墙(逼近显存带宽上限)", severity="warning",
+    id="B", name="带宽瓶颈(逼近显存带宽上限)", severity="warning",
     detectors=(
         Detector("hbm_busy", "HBM 控制器占用(NVML mem-util)", "L5", (
             FactCheck("gpu.mem_util_pct", ">", "mbu_high_pct", None, 30, "avg"),
@@ -101,9 +101,9 @@ _B = FactRule(
                "(注:perf 实测 MBU 在小模型上因 L2 复用 >1,故不作为阈值,仅用于 roofline 定位。)",
     suggestion="投机解码(关注接受率,避免转为计算受限)/ KV 量化(FP8)/ 升级至更高带宽 GPU。",
 )
-# ── C 算力墙:两条独立手段(L1 实测 + L2 内核)──
+# ── C 算力瓶颈:两条独立手段(L1 实测 + L2 内核)──
 _C = FactRule(
-    id="C", name="算力墙(算力饱和)", severity="warning",
+    id="C", name="算力瓶颈(算力饱和)", severity="warning",
     detectors=(
         Detector("measured_mfu", "实测 MFU 逼近上限", "L1", (
             FactCheck("vllm.perf.mfu_ratio", ">", "mfu_high_ratio", None, 60, "avg"),
@@ -117,9 +117,9 @@ _C = FactRule(
     suggestion="更换更快的 attention backend(0.21 按硬件自动选择,可用 --attention-backend 覆盖)"
                "/ 权重量化(FP8/FP4)/ 升级算力更强的 GPU。",
 )
-# ── D 容量墙:两条独立手段(都 L3 调度态,永远在)──
+# ── D 容量瓶颈:两条独立手段(都 L3 调度态,永远在)──
 _D = FactRule(
-    id="D", name="容量墙(KV 耗尽并触发抢占)", severity="critical",
+    id="D", name="容量瓶颈(KV 耗尽并触发抢占)", severity="critical",
     detectors=(
         Detector("kv_pressure", "KV 池接近耗尽", "L3", (
             FactCheck("vllm.scheduler.kv_cache_usage_ratio", ">=", "kv_pressure_ratio", None, 10, "avg"),

@@ -232,9 +232,12 @@ class AutopilotController:
         s = self._store
         if s is not None:
             return s.status_dict()
-        # 没内存 session → 读 session_dir 最新 JSONL(host CLI 跑的真 session,跑完即见)
+        # 没内存 session → 读 session_dir 最新 JSONL(host CLI 跑的真 session,跑完即见)。
+        # 按 mtime 排序,不按文件名字典序——sid 一旦带非日期后缀(如 ap-expA-2026...),
+        # 字典序 'e' > 数字,会把陈旧的手工实验 session 误判成"最新",把真正刚跑完的
+        # 会话晾在一边(真机复现:ap-expA-20260718-... 挡住了 ap-20260721-...)。
         if self._session_dir and self._session_dir.exists():
-            files = sorted(self._session_dir.glob("*.jsonl"))   # sid=ap-时间戳 → 字典序即时序
+            files = sorted(self._session_dir.glob("*.jsonl"), key=lambda p: p.stat().st_mtime)
             if files:
                 return SessionStore.load_status(files[-1])
         return None

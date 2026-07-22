@@ -1,7 +1,7 @@
 """沙盒 —— serve 生命周期(§7)。
 
 接口:apply(config) 起+就绪、measure(obj) 跑标准 bench 打分、teardown() 干净停。
-- **SimSandbox**:确定性公式(无 GPU、无网络),复现 mock 那条"提并发→撞 KV 容量墙"的
+- **SimSandbox**:确定性公式(无 GPU、无网络),复现 mock 那条"提并发→撞 KV 容量瓶颈"的
   调优曲线;M0 本层跑通闭环 + 单测用。
 - **DockerSandbox**:真起 `vllm/vllm-openai` 一次性容器 → 真 bench → `docker rm -f`。
   独占整张卡(决策 G2),会顶掉在跑的 serve;作下一增量,**未单测**(需 runw)。
@@ -14,6 +14,7 @@ import time
 from typing import Any
 from urllib.parse import urlencode
 
+from pping_lang.autopilot.action_space import bottleneck_label
 from pping_lang.autopilot.objective import ObjectiveSpec, Scorecard
 from pping_lang.autopilot.scorecard import BENCH_SPEC, BenchError, bench_scorecard
 
@@ -433,7 +434,7 @@ class DockerSandbox:
         ctx = top.get("context") or {}
         return {
             "bottleneck": bn,
-            "evidence_refs": [f"{bn}:live", f"diagnosis:{top.get('message', '')}",
+            "evidence_refs": [f"{bottleneck_label(bn)}·实时确认", f"diagnosis:{top.get('message', '')}",
                               *[f"{k}={round(v, 3)}" for k, v in list(ctx.items())[:3]]],
             "metrics": ctx,
             "source": "live:/api/diagnoses",

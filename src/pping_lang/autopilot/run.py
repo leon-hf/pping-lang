@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -77,13 +78,13 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--bench-duration", type=int, default=30)
     p.add_argument("--bench-warmup", type=int, default=20)
     p.add_argument("--bench-timeout", type=float, default=BENCH_SPEC["timeout_s"],
-                   help="单请求超时秒数(长上下文/容量墙工况需拉高)")
+                   help="单请求超时秒数(长上下文/容量瓶颈工况需拉高)")
     p.add_argument("--bench-prompt-source", default=BENCH_SPEC["prompt_source"],
                    help="prompt 来源:synthetic / builtin:<name> / file:<path>")
     p.add_argument("--bench-prompt-tokens", type=int, default=None,
-                   help="synthetic prompt 的目标 token 数(造 D/KV 容量墙时拉高);不给则按形态")
+                   help="synthetic prompt 的目标 token 数(造 D/KV 容量瓶颈时拉高);不给则按形态")
     p.add_argument("--bench-output-tokens", type=int, default=None,
-                   help="解码长度(拉长填 KV 造容量墙 D);不给则按形态,再无形态兜底 128")
+                   help="解码长度(拉长填 KV 造容量瓶颈 D);不给则按形态,再无形态兜底 128")
     p.add_argument("--bench-repeats", type=int, default=1, help="每个 baseline/candidate 重复 bench 次数(M1 去噪)")
     p.add_argument("--search-mode", default="agent", choices=["agent", "grid", "bo"],
                    help="P2 搜索模式:agent=旧单步候选,grid=坐标小网格,bo=热启动 BO v1 排序")
@@ -92,8 +93,8 @@ def main(argv: list[str] | None = None) -> int:
                    help="业务形态:自带 bench 负载参数与默认 SLA(M1 业务形态 WorkloadSpec);"
                         "显式 --bench-*/--ttft/--tpot 优先于形态,custom=全手动透传")
     p.add_argument("--quality-gate", action="store_true", help="放开 T2 质量类候选(默认只 T1)")
-    p.add_argument("--rounds", type=int, default=12)
-    p.add_argument("--minutes", type=int, default=30)
+    p.add_argument("--rounds", type=int, default=30)
+    p.add_argument("--minutes", type=int, default=120)
     p.add_argument("--target", default="throughput", choices=["throughput", "latency", "cost"])
     p.add_argument("--ttft", type=float, default=None, help="TTFT p99 SLA(ms)")
     p.add_argument("--tpot", type=float, default=None, help="TPOT p99 SLA(ms)")
@@ -137,7 +138,7 @@ def main(argv: list[str] | None = None) -> int:
     _rb = resolve_bench(shape, {"prompt_tokens": args.bench_prompt_tokens,
                                 "output_tokens": args.bench_output_tokens,
                                 "concurrency": args.bench_concurrency})
-    sla_ttft, sla_tpot = resolve_sla(shape, args.ttft, args.tpot)
+    sla_ttft, sla_tpot, sla_e2e = resolve_sla(shape, args.ttft, args.tpot, args.e2e)
     bench_spec = {**BENCH_SPEC, "concurrency": _rb.get("concurrency", 8),
                   "duration_s": args.bench_duration, "warmup_s": args.bench_warmup,
                   "timeout_s": args.bench_timeout,
@@ -169,7 +170,7 @@ def main(argv: list[str] | None = None) -> int:
     else:
         objective = {"target": args.target,
                      "sla": {"ttft_p99_ms": sla_ttft, "tpot_p99_ms": sla_tpot,
-                             "e2e_p99_ms": args.e2e}}
+                             "e2e_p99_ms": sla_e2e}}
         if shape:
             objective["workload"] = shape          # 报告/status 可见本次按什么业务形态调的
         if args.latency_metric:
@@ -193,16 +194,28 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"[autopilot] session {sid} · model={args.model} · agent={getattr(agent, 'model', '?')}"
           f"{' · resume' if args.resume else ''}")
+    runner = Runner(store=store, sandbox=sandbox, agent=agent,
+                    obj=build_objective(objective), budget=budget, model=args.model,
+                    step_delay_s=0.0, baseline_config=baseline_config,
+                    quality_gate=args.quality_gate, bench_repeats=args.bench_repeats,
+                    search_mode=args.search_mode, search_width=args.search_width,
+                    elapsed_s=elapsed_s)
+    # bridge 停止 session 是靠 os.killpg(SIGINT)(跨进程,没法直接调 Python 方法)。默认
+    # SIGINT 行为是抛 KeyboardInterrupt——真机复现(2026-07-22):这个进程正卡在 agent 的
+    # HTTPS 阻塞调用里时,KeyboardInterrupt 经常没能及时打断(ssl 模块内部重试对信号不够
+    # 敏感,是 Python 生态的已知灰色地带),bridge 10s 优雅期等不到,只能 SIGKILL 强杀,
+    # session 没有 stop_cause、没走 _finalize()。改成显式接管 SIGINT/SIGTERM:只 set
+    # runner._stopping,不抛异常——agent.propose() 的重试循环现在按 0.5s 粒度轮询这个
+    # 标志(见 agent.py _HTTPAgent.propose),能在整次阻塞调用完成前就跳出。
+    def _on_stop_signal(signum, frame):  # noqa: ARG001
+        runner.stop()
+    signal.signal(signal.SIGINT, _on_stop_signal)
+    signal.signal(signal.SIGTERM, _on_stop_signal)
     try:
         if serve_was_up:
             print(f"[autopilot] 停主 serve 容器 '{serve}' 腾卡 …")
             _docker("stop", serve)
-        Runner(store=store, sandbox=sandbox, agent=agent,
-               obj=build_objective(objective), budget=budget, model=args.model,
-               step_delay_s=0.0, baseline_config=baseline_config,
-               quality_gate=args.quality_gate, bench_repeats=args.bench_repeats,
-               search_mode=args.search_mode, search_width=args.search_width,
-               elapsed_s=elapsed_s).run()                        # 同步跑到底
+        runner.run()                                             # 同步跑到底
     finally:
         sandbox.teardown()                                       # 兜底清候选容器
         if serve_was_up and args.skip_serve_restart:

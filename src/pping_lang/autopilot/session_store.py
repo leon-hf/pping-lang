@@ -6,10 +6,29 @@
 from __future__ import annotations
 
 import json
+import math
 import threading
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+
+
+def _json_safe(obj):
+    """把 ±inf/NaN 换成 null,使输出对严格 JSON 解析器(浏览器 JSON.parse())合法。
+
+    objective.py 用 float('-inf') 当"SLA 破/候选起不来"的合法内部哨兵(§ objective_score);
+    Python 的 json.dumps 默认原样写成 Infinity/-Infinity/NaN——这不是标准 JSON(ECMA-404
+    不允许裸的这三个记号),Python 自己的 json.loads 能读回来,但浏览器原生 fetch().json()
+    对它直接抛 SyntaxError。一旦破 SLA 的轮次(哪怕就是 baseline 本身)把这个值写进
+    JSONL,dashboard 后续每次轮询 /api/autopilot/status 都会解析失败,UI 误报"失败"且
+    永不自愈——因为坏掉的是数据本身,不是网络抖动。"""
+    if isinstance(obj, float):
+        return obj if math.isfinite(obj) else None
+    if isinstance(obj, dict):
+        return {k: _json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_json_safe(v) for v in obj]
+    return obj
 
 
 @dataclass
@@ -72,12 +91,13 @@ class Session:
     applies_to: dict = field(default_factory=dict)
     config_review: dict = field(default_factory=dict)
     promote_package: dict = field(default_factory=dict)
+    action_space_summary: dict = field(default_factory=dict)
     agent_model: str = ""
     error: str | None = None
     resume_from_state: str | None = None
 
     def status_dict(self) -> dict:
-        return {
+        return _json_safe({
             "session_id": self.session_id, "state": self.state,
             "objective": self.objective, "budget": self.budget,
             "rounds": [r.to_dict() for r in self.rounds],
@@ -90,8 +110,9 @@ class Session:
             "applies_to": self.applies_to,
             "config_review": self.config_review,
             "promote_package": self.promote_package,
+            "action_space_summary": self.action_space_summary,
             "agent_model": self.agent_model, "error": self.error,
-        }
+        })
 
 
 def _now_iso() -> str:
@@ -155,6 +176,7 @@ class SessionStore:
                 applies_to=st.get("applies_to") or {},
                 config_review=st.get("config_review") or {},
                 promote_package=st.get("promote_package") or {},
+                action_space_summary=st.get("action_space_summary") or {},
                 agent_model=st.get("agent_model", ""),
                 error=st.get("error"),
                 resume_from_state=old_state,
@@ -224,13 +246,18 @@ class SessionStore:
             if self._current:
                 self._current.promote_package = dict(package)
 
+    def set_action_space_summary(self, summary: dict) -> None:
+        with self._lock:
+            if self._current:
+                self._current.action_space_summary = dict(summary)
+
     def status_dict(self) -> dict | None:
         with self._lock:
             return self._current.status_dict() if self._current else None
 
     def _write(self, obj: dict) -> None:
         if self._fh:
-            self._fh.write(json.dumps(obj, ensure_ascii=False) + "\n")
+            self._fh.write(json.dumps(_json_safe(obj), ensure_ascii=False) + "\n")
             self._fh.flush()
 
     def close(self) -> None:

@@ -5,7 +5,13 @@ import json
 
 import pytest
 
-from pping_lang.autopilot.action_space import propose_candidates, render_command
+from pping_lang.autopilot.action_space import (
+    action_space_stats,
+    bottleneck_label,
+    knobs_helping,
+    propose_candidates,
+    render_command,
+)
 from pping_lang.autopilot.agent import StubAgent
 from pping_lang.autopilot.api import AutopilotController, build_objective
 from pping_lang.autopilot.objective import (
@@ -127,7 +133,7 @@ def test_propose_for_underfed_raises_concurrency():
 
 
 def test_propose_excludes_hurting_knob():
-    # 容量墙 D:max_num_seqs 伤 D(hurts),不能"提并发";给"降并发"或"扩 KV 池"
+    # 容量瓶颈 D:max_num_seqs 伤 D(hurts),不能"提并发";给"降并发"或"扩 KV 池"
     cands = propose_candidates("D", {"max_num_seqs": 128, "gpu_memory_utilization": 0.70})
     knobs = {c["knob"]: c for c in cands}
     assert knobs["max_num_seqs"]["to"] == 64           # 降并发缓解 KV
@@ -145,6 +151,41 @@ def test_propose_skips_default_on_knobs():
     cands = propose_candidates("A", {"max_num_seqs": 32, "gpu_memory_utilization": 0.70})
     keys = {c["knob"] for c in cands}
     assert "enable_chunked_prefill" not in keys and "async_scheduling" not in keys
+
+
+def test_bottleneck_label_gives_context_not_bare_letter():
+    """用户反馈(2026-07-21,分两轮):① "诊断命中 B"/"B:live" 这种裸字母没上下文,不知道
+    B 是什么,"墙"的比喻也要换成"瓶颈";② 后续追加——连"(B)"这种带字母的括注也别留,
+    字母本身不该出现在任何用户可见文本里,一律换成具体人话。"""
+    assert bottleneck_label("A") == "双低"
+    assert bottleneck_label("B") == "带宽瓶颈"
+    assert bottleneck_label("C") == "算力瓶颈"
+    assert bottleneck_label("D") == "容量瓶颈"
+    assert bottleneck_label(None) == "症状/其它"
+    assert bottleneck_label("Z") == "症状/其它"
+
+
+def test_action_space_stats_categorizes_all_knobs():
+    """用户反馈(2026-07-22):每次 session 只调 2-3 个参数,看不出剩下的参数是"不该调"
+    还是"没顾上调"。action_space_stats() 给出全量分类计数,四类互斥且总数对得上。"""
+    s = action_space_stats()
+    assert s["total"] == (s["default_on_count"] + s["unsupported_count"]
+                           + s["precision_excluded_count"] + s["considerable_count"])
+    assert s["considerable_count"] == len(s["considerable_knobs"])
+    assert "max_num_seqs" in s["considerable_knobs"]           # T1 常规杠杆
+    assert "quantization" not in s["considerable_knobs"]       # T2 降精度,已排除
+    assert "num_scheduler_steps" not in s["considerable_knobs"]  # 当前 vLLM build 不支持
+
+
+def test_knobs_helping_includes_bd_coupling():
+    """knobs_helping 要跟 propose_candidates 的 B↔D 共生逻辑(§4.3)对齐,否则耦合旋钮
+    (如 cpu_offload_gb)被试过却不在"相关旋钮"列表里,总结文案会自相矛盾。"""
+    helping_b = knobs_helping("B")
+    assert "gpu_memory_utilization" in helping_b      # 直接对症 B
+    assert "cpu_offload_gb" in helping_b              # D 缓解类,因 B↔D 耦合并入
+    assert "quantization" not in helping_b            # T2,candidate 池本就排除
+    helping_c = knobs_helping("C")
+    assert "cpu_offload_gb" not in helping_c          # C 不耦合 D,不应该混进来
 
 
 def test_propose_t2_gated_by_quality_gate():
@@ -177,6 +218,21 @@ def test_propose_quality_gate_opens_mtp_and_speculative_knobs():
     assert "ngram_prompt_lookup_max" not in off and "ngram_prompt_lookup_max" in on
 
 
+def test_runner_does_not_auto_escalate_to_quality_gate_when_t1_exhausted():
+    """曾经 T1(不降精度)候选耗尽时,runner 会自动开 quality_gate 找 T2 候选
+    (quantization/kv-cache-dtype 等)凑轮次续跑——用户反馈(2026-07-21)明确不要
+    碰这些会降精度的旋钮、不提供这些动作,所以耗尽就该老实停(cause=no_candidates),
+    不该悄悄换个更激进的候选池接着凑。真机上这条路径已经被 runw bridge 的硬编码
+    --quality-gate 长期掩盖过(见 deploy/runw/autopilot_bridge.py),这里锁死源码
+    层面不会再有这条自动切换。"""
+    import inspect
+
+    from pping_lang.autopilot import runner as runner_mod
+    src = inspect.getsource(runner_mod)
+    assert "self._quality_gate = True" not in src
+    assert "T1 候选耗尽" not in src
+
+
 def test_render_flags_skips_zero_default_overrides():
     """num_gpu_blocks_override=0 等 0 默认值应跳过渲染,避免 vLLM 报错。"""
     from pping_lang.autopilot.action_space import render_flags
@@ -187,10 +243,33 @@ def test_render_flags_skips_zero_default_overrides():
     assert "--ngram-prompt-lookup-max" not in flags
 
 
-def test_introspect_engine_args_reads_defaults_from_vllm_source():
-    """半自动 introspect:从本地 vLLM 源码读取 EngineArgs 默认值,不导入 torch/vllm。"""
+def test_introspect_engine_args_reads_defaults_from_vllm_source(tmp_path):
+    """半自动 introspect:从 vLLM 源码读取 EngineArgs 默认值,不导入 torch/vllm。
+
+    用 tmp_path 现搭一份最小 EngineArgs 源码骨架驱动同一段正则解析逻辑,而不是指向
+    某台机器上才存在的真实 vllm checkout——原先硬编码 D:\\GitCode\\vllm,只在原作者
+    自己的 Windows 开发机上能过,其它机器/CI 上 arg_utils.py 不存在只会拿到 {}。"""
     from pping_lang.autopilot.action_space import _introspect_engine_args
-    defaults = _introspect_engine_args(r"D:\GitCode\vllm")
+
+    arg_utils = tmp_path / "vllm" / "engine" / "arg_utils.py"
+    arg_utils.parent.mkdir(parents=True)
+    arg_utils.write_text(
+        "class EngineArgs:\n"
+        "    gpu_memory_utilization: float = 0.9\n"
+        "    num_scheduler_steps: int = 1\n"
+        "    max_seq_len_to_capture: int = 8192\n"
+        "    num_lookahead_slots: int = 0\n"
+        "    max_num_seqs: int = SchedulerConfig.max_num_seqs\n",
+        encoding="utf-8",
+    )
+    # EngineArgs 里不少字段默认值写成 SomeConfig.field(如上面的 max_num_seqs),
+    # 需要额外一份 config.py 供 introspect 先解析出各 Config 类的字段默认值。
+    (tmp_path / "vllm" / "config.py").write_text(
+        "class SchedulerConfig:\n"
+        "    max_num_seqs: int = None\n",
+        encoding="utf-8",
+    )
+    defaults = _introspect_engine_args(str(tmp_path))
     assert isinstance(defaults, dict)
     # 这些字段能从源码字面量直接解析
     assert defaults.get("gpu_memory_utilization") == 0.9
@@ -413,6 +492,32 @@ def test_session_store_roundtrip(tmp_path):
     assert loaded["events"][0]["message"] == "读取诊断"
 
 
+def test_status_dict_sanitizes_infinite_scores_for_strict_json(tmp_path):
+    """objective_score() 用 float('-inf') 当"SLA 破/候选起不来"的合法内部哨兵——
+    这条一旦真机复现:tight SLA 形态(如代码补全 ttft<=100ms)下 baseline 自己都可能
+    破线,round 0 起就带 -inf 分。Python 的 json.dumps 默认把它原样写成 -Infinity,
+    Python 自己的 json.loads 认,但浏览器原生 fetch().json() 直接 SyntaxError——
+    dashboard 每 2s 轮询 /api/autopilot/status 从此永久解析失败,UI 误报"失败"且
+    不会自愈(数据本身坏了,不是网络抖动)。status_dict() 和落盘的 JSONL 都必须
+    把 ±inf/NaN 换成 null 才是合法 JSON。"""
+    store = SessionStore(tmp_path / "inf.jsonl")
+    store.new_session("ap-inf", {"target": "throughput"}, {"rounds": 1})
+    store.append_round(Round(round=0, kind="baseline", decision="baseline",
+                              objective_score_after=float("-inf"),
+                              scorecard_after={"ttft_p99_ms": float("inf")}))
+    text = json.dumps(store.status_dict())
+    assert "Infinity" not in text and "NaN" not in text
+    data = json.loads(text)
+    assert data["rounds"][0]["objective_score_after"] is None
+    assert data["rounds"][0]["scorecard_after"]["ttft_p99_ms"] is None
+    store.close()
+    # JSONL 落盘同样干净(bridge/CLI 从磁盘回放走的是这份数据)
+    raw = (tmp_path / "inf.jsonl").read_text(encoding="utf-8")
+    assert "Infinity" not in raw and "NaN" not in raw
+    loaded = SessionStore.load_status(tmp_path / "inf.jsonl")
+    assert loaded["rounds"][0]["objective_score_after"] is None
+
+
 # ---- runner 闭环(sim + stub)----
 
 def test_runner_full_session_improves(tmp_path):
@@ -442,6 +547,54 @@ def test_runner_full_session_improves(tmp_path):
     phases = [e["phase"] for e in d["events"]]
     for phase in ["baseline", "observe", "propose", "apply", "benchmark", "decide", "finalize"]:
         assert phase in phases
+    # action_space_summary(用户反馈,2026-07-22):"为什么只调这 2-3 个参数"要有据可查。
+    aas = d["action_space_summary"]
+    assert aas["total"] > aas["considerable_count"] > 0
+    assert set(aas["tried_knobs"]) <= set(aas["relevant_knobs"]) <= set(aas["considerable_knobs"])
+    assert aas["bottlenecks_seen"]                       # 至少诊断到过一种瓶颈
+    store.close()
+
+
+def test_runner_stops_cleanly_when_agent_raises_stop_requested(tmp_path):
+    """agent.propose() 抛 AgentStopRequested(用户手动停止,卡在阻塞调用里被打断)时,
+    _run_loop 要记一条 stop_cause=user_stop 的 stop 轮就 return,而不是当成异常走
+    run() 顶层的 except → state=failed;_finalize() 仍要正常跑完(恢复 best、生成
+    上线包、算 action_space_summary),不能因为是"被打断"就少一截收尾。"""
+    from pping_lang.autopilot.agent import AgentDecision, AgentStopRequested
+
+    class StopOnSecondRound:
+        model = "stop-on-second-round"
+
+        def __init__(self):
+            self.calls = 0
+            self.runner = None       # 测试里手动接上,模拟"外部信号已经把 runner._stopping set 了"
+
+        def propose(self, ctx):
+            self.calls += 1
+            if self.calls >= 2:
+                self.runner.stop()   # 对应真机:_should_stop() 命中时 runner._stopping 已被 set
+                raise AgentStopRequested("用户手动停止")
+            cand = ctx.candidates[0]
+            return AgentDecision(knob=cand["knob"], config=cand["config"],
+                                 from_val=cand["from"], to_val=cand["to"], flag=cand["flag"],
+                                 rationale="第一轮正常提案")
+
+    store = SessionStore(tmp_path / "stop.jsonl")
+    store.new_session("ap-stop", {"target": "throughput"}, {"rounds": 6})
+    agent = StopOnSecondRound()
+    runner = Runner(store=store, sandbox=SimSandbox("M"), agent=agent, obj=OBJ,
+                    budget={"rounds": 6, "seconds": 900}, model="M", step_delay_s=0.0)
+    agent.runner = runner
+    runner.run()
+
+    d = store.status_dict()
+    assert d["state"] == "stopped"                      # 不是 failed,也不是 done
+    assert agent.calls == 2                              # 第二轮就被打断,没有继续跑满 6 轮
+    stop_rounds = [r for r in d["rounds"] if r["kind"] == "stop"]
+    assert len(stop_rounds) == 1 and stop_rounds[0]["stop_cause"] == "user_stop"
+    assert d["recommended_command"].startswith("vllm serve")  # _finalize 仍正常收尾
+    assert d["promote_package"]["state"] == "ready"
+    assert d["action_space_summary"]["total"] > 0
     store.close()
 
 
@@ -1103,6 +1256,36 @@ def test_kimi_agent_captures_thinking(monkeypatch):
     assert "一步到位" in d.thinking
 
 
+def test_http_agent_propose_stops_promptly_without_waiting_for_call_to_finish(monkeypatch):
+    """真机复现(2026-07-22):agent 调用单次能拖到 90s+,用户点停止后进程卡在阻塞调用里对
+    SIGINT 反应不及时,10s 优雅期不够被 SIGKILL 强杀。_HTTPAgent.propose() 现在把 _call 放
+    进守护线程轮询(0.5s 粒度),stop_check 一旦为真就该在秒级内跳出,不必等 _call 真正返回。"""
+    import threading
+    import time as _time
+
+    from pping_lang.autopilot.agent import AgentStopRequested, OpenAIAgent
+
+    call_finished = threading.Event()
+
+    def _slow_call(_system, _user):
+        _time.sleep(5.0)          # 远大于 stop_check 该生效的秒级窗口
+        call_finished.set()
+        return '{"done":true,"reason":"不该跑到这"}'
+
+    a = OpenAIAgent("http://x/v1", "k", "m")
+    monkeypatch.setattr(a, "_call", _slow_call)
+    stop_after = _time.monotonic() + 0.6
+    a.set_stop_check(lambda: _time.monotonic() >= stop_after)
+
+    t0 = _time.monotonic()
+    with pytest.raises(AgentStopRequested):
+        a.propose(_ctx([], bottleneck="B"))
+    elapsed = _time.monotonic() - t0
+
+    assert elapsed < 2.0                 # 秒级跳出,不是等满 5s 阻塞调用
+    assert not call_finished.is_set()    # 弃置的调用线程还没跑完(是守护线程,不阻塞退出)
+
+
 def test_runner_persists_thinking_and_streams_decision(tmp_path):
     """思考落 round 记录(agent_thinking)+ 决策到达即刻直播(不等 bench 落定)。"""
     from pping_lang.autopilot.agent import AgentDecision
@@ -1143,6 +1326,33 @@ def test_resilient_agent_falls_back_to_stub():
     cands = propose_candidates("A", {"max_num_seqs": 32, "gpu_memory_utilization": 0.70})
     d = r.propose(_ctx(cands))
     assert d.knob == "max_num_seqs" and "兜底" in d.rationale     # 启发式接管,透明标注
+
+
+def test_resilient_agent_propagates_stop_without_falling_back():
+    """用户手动停止不是"调用失败"——ResilientAgent 不该吞掉 AgentStopRequested 去重试或
+    退回 StubAgent 硬跑一次启发式决策,那样多余且延误(见 agent.py AgentStopRequested 文档)。"""
+    from pping_lang.autopilot.agent import AgentStopRequested, ResilientAgent
+
+    fallback_calls = []
+
+    class StoppedPrimary:
+        model = "stopped-primary"
+
+        def propose(self, ctx):
+            raise AgentStopRequested("用户手动停止")
+
+    class TrackingFallback:
+        model = "tracking-fallback"
+
+        def propose(self, ctx):
+            fallback_calls.append(ctx)
+            return StubAgent().propose(ctx)
+
+    r = ResilientAgent(StoppedPrimary(), TrackingFallback(), retries=2)
+    cands = propose_candidates("A", {"max_num_seqs": 32, "gpu_memory_utilization": 0.70})
+    with pytest.raises(AgentStopRequested):
+        r.propose(_ctx(cands))
+    assert not fallback_calls              # 没有重试,也没有退回兜底
 
 
 def test_validate_rejects_offmenu_and_repeat():
@@ -1399,7 +1609,7 @@ def test_docker_sandbox_read_diagnosis_picks_most_severe(monkeypatch):
     sb = DockerSandbox("M", "img", dash_port=8013)
     payload = {"window_seconds": 120, "diagnoses": [
         {"rule_id": "A", "severity": "info", "message": "双低", "ts_ns": 1, "context": {"mfu": 0.1}},
-        {"rule_id": "D", "severity": "critical", "message": "容量墙", "ts_ns": 2, "context": {"kv_pressure": 0.95}}]}
+        {"rule_id": "D", "severity": "critical", "message": "容量瓶颈", "ts_ns": 2, "context": {"kv_pressure": 0.95}}]}
 
     class _Resp:
         def __enter__(self): return self
@@ -2082,6 +2292,31 @@ def test_controller_status_reads_disk(tmp_path):
     assert s and s["session_id"] == "ap-done" and s["state"] == "done"
 
 
+def test_controller_status_reads_disk_by_mtime_not_filename(tmp_path):
+    """真机复现:sid 带非日期后缀(如 ap-expA-20260718-...)时,字典序 'e' > 数字,
+    会排在同一天甚至更晚的 ap-20260721-... 后面——bridge/controller 重启后没了
+    内存 session,退回读磁盘"最新"JSONL 时,曾经按文件名字典序取 files[-1],把陈旧
+    的手工实验 session 误判成刚跑完的,用户看不到真正最近一次 session 的结果。
+    必须按 mtime 排序,不按文件名。"""
+    import os
+    import time
+
+    old = tmp_path / "ap-expA-20260718-113858.jsonl"
+    new = tmp_path / "ap-20260721-025947.jsonl"
+    for path, sid in ((old, "ap-expA-20260718-113858"), (new, "ap-20260721-025947")):
+        st = SessionStore(path)
+        st.new_session(sid, {"target": "throughput"}, {"rounds": 1})
+        st.set_state("done")
+        st.close()
+    now = time.time()
+    os.utime(old, (now - 100, now - 100))   # 旧文件,mtime 更早
+    os.utime(new, (now, now))               # 新文件,mtime 更晚(文件名字典序却相反)
+
+    ctrl = AutopilotController(model="M", session_dir=tmp_path)
+    s = ctrl.status()
+    assert s and s["session_id"] == "ap-20260721-025947"
+
+
 # ---- host CLI orchestrator(mock docker,SimSandbox 顶替免 GPU)----
 
 def test_run_cli_orchestrates_session(tmp_path, monkeypatch):
@@ -2235,7 +2470,7 @@ def test_workload_shape_table_integrity():
         if name == "custom":
             continue
         assert {"prompt_tokens", "output_tokens", "concurrency"} <= set(s["bench"]), name
-        assert {"ttft_p99_ms", "tpot_p99_ms"} <= set(s["sla"]), name
+        assert {"ttft_p99_ms", "tpot_p99_ms", "e2e_p99_ms"} <= set(s["sla"]), name
 
 
 def test_workload_resolve_bench_explicit_beats_shape():
@@ -2253,10 +2488,11 @@ def test_workload_resolve_bench_explicit_beats_shape():
 
 def test_workload_resolve_sla():
     from pping_lang.autopilot.workload import resolve_sla
-    assert resolve_sla("code") == (100, 20)                 # 形态默认(硬延迟闸)
-    assert resolve_sla("code", ttft=250) == (250, 20)       # 显式优先
-    assert resolve_sla("custom") == (None, None)            # 透传不加闸
-    assert resolve_sla("") == (None, None)
+    assert resolve_sla("code") == (100, 20, 2000)                    # 形态默认(硬延迟闸)
+    assert resolve_sla("code", ttft=250) == (250, 20, 2000)          # 显式优先
+    assert resolve_sla("code", e2e=1500) == (100, 20, 1500)          # e2e 也可单独覆盖
+    assert resolve_sla("custom") == (None, None, None)               # 透传不加闸
+    assert resolve_sla("") == (None, None, None)
 
 
 def test_run_cli_workload_resolution(monkeypatch, tmp_path):
@@ -2308,6 +2544,7 @@ def test_run_cli_workload_resolution(monkeypatch, tmp_path):
     assert (bs["concurrency"], bs["prompt_tokens"], bs["output_tokens"]) == (64, 500, 128)
     assert c["objective"]["sla"]["ttft_p99_ms"] == 1000
     assert c["objective"]["sla"]["tpot_p99_ms"] == 50
+    assert c["objective"]["sla"]["e2e_p99_ms"] == 3000
     assert c["objective"]["workload"] == "chat"
 
     # 显式 flag 覆盖形态;未显式给的仍由形态补
@@ -2322,6 +2559,74 @@ def test_run_cli_workload_resolution(monkeypatch, tmp_path):
     assert c["bench_spec"]["output_tokens"] == 128
     assert c["bench_spec"]["prompt_tokens"] == BENCH_SPEC["prompt_tokens"]
     assert c["objective"]["sla"]["ttft_p99_ms"] is None
+    assert c["objective"]["sla"]["e2e_p99_ms"] is None
     c = _run(base)
     assert c["bench_spec"]["concurrency"] == 8
     assert "workload" not in c["objective"]
+
+
+def test_run_cli_registers_signal_handlers_that_stop_runner(monkeypatch, tmp_path):
+    """bridge 跨进程停止 session 只能靠 os.killpg(SIGINT/SIGTERM)(没法直接调 Python 方法)。
+    真机复现(2026-07-22):默认 SIGINT→KeyboardInterrupt 在进程卡着阻塞 HTTPS 调用时不可靠,
+    bridge 10s 优雅期等不到就 SIGKILL 强杀,session 没有 stop_cause、没走 _finalize()。main()
+    现在必须显式接管 SIGINT/SIGTERM,转译成 runner.stop()(配合 agent.py 里 0.5s 粒度轮询,
+    能在阻塞调用完成前跳出)——这里锁死"注册了这两个信号且 handler 确实调用了 runner.stop()",
+    不依赖真的给测试进程发信号(避免污染 pytest 自身的信号处理)。"""
+    import signal as signal_mod
+
+    from pping_lang.autopilot import run as run_cli
+
+    instances = []
+
+    class _FakeRunner:
+        def __init__(self, **kw):
+            self.stopped = False
+            instances.append(self)
+
+        def run(self):
+            pass
+
+        def stop(self):
+            self.stopped = True
+
+    class _FakeSandbox:
+        def __init__(self, *a, **kw):
+            pass
+
+        def teardown(self):
+            pass
+
+    class _FakeStore:
+        def __init__(self, path):
+            pass
+
+        def new_session(self, sid, objective, budget, agent_model=""):
+            pass
+
+        def close(self):
+            pass
+
+        def status_dict(self):
+            return {"state": "done", "rounds": []}
+
+    registered = {}
+
+    def _fake_signal(sig, handler):
+        registered[sig] = handler
+
+    monkeypatch.setattr(run_cli, "Runner", _FakeRunner)
+    monkeypatch.setattr(run_cli, "DockerSandbox", _FakeSandbox)
+    monkeypatch.setattr(run_cli, "SessionStore", _FakeStore)
+    monkeypatch.setattr(run_cli, "_serve_running", lambda name: False)
+    monkeypatch.setattr(run_cli, "_docker", lambda *a: None)
+    monkeypatch.setattr(run_cli.signal, "signal", _fake_signal)
+
+    rc = run_cli.main(["--model", "M", "--image", "I", "--session-id", "ap-sig",
+                       "--session-dir", str(tmp_path)])
+    assert rc == 0
+    assert signal_mod.SIGINT in registered and signal_mod.SIGTERM in registered
+
+    runner_instance = instances[-1]
+    assert not runner_instance.stopped
+    registered[signal_mod.SIGINT](signal_mod.SIGINT, None)
+    assert runner_instance.stopped        # 信号 → runner.stop(),不靠抛异常打断阻塞调用

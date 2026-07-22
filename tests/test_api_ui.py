@@ -80,19 +80,27 @@ def test_autopilot_cold_open_shows_last_result_as_past(client):
     assert "上次调优结果" in body
 
 
-def test_autopilot_target_switch_adjusts_sla_defaults(client):
-    """三个目标按钮切换时 SLA 数值之前纹丝不动(延迟优先复用吞吐优先的松阈值,形同虚设)。
-    现在按目标切换合理默认值,且不覆盖用户已手动改过的数值;延迟优先额外露出
-    latency_metric(主看哪个指标)+ floor(吞吐硬下限)——后端 objective.py 早就支持,
-    UI 之前从没接过。"""
-    body = client.get("/").text + client.get("/dashboard.js").text
-    assert "setTarget(" in body                        # 目标按钮走专门的切换方法,不是裸赋值
-    assert "TARGET_SLA_DEFAULTS" in body
-    assert "latencyMetric" in body and "obj.floor" in body
-    assert "latency_metric: this.obj.target" in body    # start() payload 真的带上了这两个字段
-    assert "floor: (this.obj.target" in body
-    assert "obj.e2e" in body                            # E2E p99 SLA 输入(agent/deadline 场景)
-    assert "e2e_p99_ms" in body                         # start() payload 带上 e2e SLA
+def test_autopilot_workload_shape_is_sole_dimension_no_target_picker(client):
+    """"目标"(吞吐优先/延迟优先/性价比)三键已从 Autopilot tab 去掉——形态(WORKLOAD_SHAPES)
+    是唯一主维度,自带三个 SLA 默认(TTFT/TPOT/E2E p99),同 Live tab 业务形态一套词汇。
+    调优统一"不破 SLA 前提下最大化吞吐",start() payload 固定 target:'throughput'
+    (后端 objective.py 仍支持 latency/cost,只是 UI 不再暴露选择)。"""
+    html = client.get("/").text
+    body = html + client.get("/dashboard.js").text
+    assert "setTarget(" not in body                     # 目标切换方法已删
+    assert "TARGET_SLA_DEFAULTS" not in body
+    # 目标按钮(3 个 segmented button)已从模板删除——只查 HTML,JS 里的迁移注释仍可提这几个词
+    assert ">吞吐优先<" not in html and ">延迟优先<" not in html and ">性价比<" not in html
+    assert "obj.workload" in body and "applyWorkload()" in body
+    assert "obj.ttft" in body and "obj.tpot" in body and "obj.e2e" in body   # 三个 SLA 输入仍在
+    assert "target: 'throughput'" in body               # start() payload 固定吞吐优先
+
+
+def test_autopilot_workload_shapes_carry_e2e_sla_default(client):
+    """形态表(WORKLOAD_SHAPES)三元组 sla:[ttft,tpot,e2e],applyWorkload() 三项都套。"""
+    js = client.get("/dashboard.js").text
+    assert "chat:      { sla: [1000, 50, 3000]" in js
+    assert "this.obj.e2e = s.sla[2];" in js
 
 
 def test_autopilot_start_button_uses_execute_label(client):
@@ -102,10 +110,42 @@ def test_autopilot_start_button_uses_execute_label(client):
     assert "重新真实调优" not in js
 
 
+def test_autopilot_result_card_explains_outcome_not_just_ratio(client):
+    """用户反馈:session 跑完只甩一句"仍满足 TTFT SLA"(还写死,基线破 SLA 时是假话)+
+    一个吞吐比值,看不出到底是"没提升"还是"基线本身就没达标",很懵逼。结果卡现在要带
+    上 resultSummary/resultSummaryText 拼出的解释(是否保留了候选、SLA 违规/持平/更差
+    各几个、停机原因人话),不能再是裸的写死断言。"""
+    html = client.get("/").text
+    js = client.get("/dashboard.js").text
+    assert "，仍满足 TTFT SLA" not in html          # 写死的假话已删
+    assert "resultSummaryText" in html and "resultSummary" in js
+    assert "class=\"summary\"" in html
+    # stop_cause 映射到人话,而不是裸甩英文枚举值
+    for cause in ("agent_done", "no_candidates", "budget_rounds",
+                  "budget_time", "no_improve_k", "user_stop", "failed"):
+        assert cause in js
+    assert "STOP_LABELS" in js
+
+
+def test_autopilot_result_card_explains_which_knobs_were_considered(client):
+    """用户反馈(2026-07-22):每次 session 只调 2-3 个参数,不知道剩下的参数是"不该调"
+    还是"没顾上调"——结果卡(吞吐提升那张卡,指令行上方)现在还要带上 action_space_summary
+    拼出的解释:全量旋钮按跳过原因分类计数(默认已优/当前版本不支持/降精度排除),
+    再对照本次实际诊断到的瓶颈,列出对症但没试到的旋钮。"""
+    html = client.get("/").text
+    js = client.get("/dashboard.js").text
+    assert "actionSpaceSummaryText" in html and "actionSpaceSummaryText" in js
+    assert "action_space_summary" in js
+    # 挂在结果卡里,指令行(ap-cmd)上方,同一张卡
+    idx_summary = html.index('x-text="actionSpaceSummaryText"')
+    idx_cmd = html.index('class="ap-cmd"')
+    assert idx_summary < idx_cmd
+
+
 def test_autopilot_budget_is_max_rounds_not_fixed_six(client):
     body = client.get("/").text + client.get("/dashboard.js").text
-    assert "budget: { rounds: 12, minutes: 30 }" in body
-    assert "Number(this.budget.rounds) || 12" in body
+    assert "budget: { rounds: 30, minutes: 120 }" in body
+    assert "Number(this.budget.rounds) || 30" in body
     assert "最多 <input" in body
     assert "已评估" in body and "最多 <span x-text=\"budget.rounds\"></span> 轮" in body
 
@@ -214,7 +254,11 @@ def test_ui_assets_split_and_under_budget():
     # 改成"优先用 API 值、不走 en 兜底"再删中文那份(t() 现在 I18N[lang]||I18N.en||key,
     # 直接删中文会让中文显示英文)。在那之前抬到 140KB,gzip 后仍十几 KB。
     # Autopilot 预览 tab 的 autopilotTab()(mock 轨迹 + 脚本播放)过了 140KB → 抬到 155KB。
-    assert js < 155_000, f"dashboard.js is {js} bytes, exceeds 155KB"
+    # 结果卡加 resultSummary/resultSummaryText + STOP_LABELS(把 stop_cause/SLA 违规/
+    # 回滚原因拼成人话,不然用户看完只有一个吞吐比值,看不出"为什么")过了 155KB → 抬到 160KB。
+    # 结果卡再加 actionSpaceSummaryText(用户反馈,2026-07-22:说清楚为什么只调 2-3 个
+    # 参数,剩下的是"不该调"还是"没顾上调")过了 160KB → 抬到 165KB。
+    assert js < 165_000, f"dashboard.js is {js} bytes, exceeds 165KB"
 
 
 def test_css_and_js_served(client):
