@@ -1,6 +1,6 @@
 """真实 vLLM + CUPTI kernel 级 dashboard —— 自搭服务版(不依赖 stat_logger 插件)。
 
-为什么要这个脚本:
+为什么要这个脚本：
     vLLM **离线** `LLM()` 不会触发 stat_logger_plugins(那只在 `vllm serve` 在线
     模式触发)。所以这里手动把 CuptiKernelCollector + NvmlSampler + HTTP API 拼起来,
     vLLM 在主线程持续生成,CUPTI 进程级捕获照样抓到它的 kernel。
@@ -9,12 +9,12 @@
     PYTHONPATH=src python examples/embedded/vllm_dashboard.py
     # 然后浏览器开 http://127.0.0.1:8765/  → Kernel tab
 
-前置:
+前置：
     - 驱动 ≥ 580 / CUDA 13(vLLM 0.20+ 的 torch cu130 要求);老驱动用 CUDA-12 栈
     - pip: vllm、cupti-python(版本配 CUDA major)、cuda-python、pping-lang 本体
-    - 国内: VLLM_USE_MODELSCOPE=True(默认已设)走魔搭下载模型
+    - 国内： VLLM_USE_MODELSCOPE=True(默认已设)走魔搭下载模型
 
-可用环境变量覆盖:
+可用环境变量覆盖：
     PPING_DEMO_MODEL        默认 Qwen/Qwen2.5-0.5B-Instruct
     PPING_DEMO_PORT         默认 8765
     PPING_DEMO_GPU_MEM      默认 0.75(gpu_memory_utilization)
@@ -29,7 +29,7 @@ import time
 
 # --- vLLM 行为(必须在 import vllm 前设)---
 os.environ.setdefault("VLLM_USE_MODELSCOPE", "True")          # 国内走魔搭下载
-os.environ.setdefault("VLLM_ENABLE_V1_MULTIPROCESSING", "0")  # 进程内:CUPTI 才抓得到 kernel
+os.environ.setdefault("VLLM_ENABLE_V1_MULTIPROCESSING", "0")  # 进程内：CUPTI 才抓得到 kernel
 os.environ.setdefault("VLLM_USE_FLASHINFER_SAMPLER", "0")     # 免 flashinfer 的 nvcc JIT
 os.environ.setdefault("VLLM_LOGGING_LEVEL", "WARNING")
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
@@ -62,7 +62,7 @@ def main() -> int:
         os.remove(db)
     sink = LocalSink(db_path=db, instance_id="vllm-demo", flush_interval_s=1.0)
 
-    # CUPTI 采集器:进程级捕获,必须在 vLLM 建 CUDA context 前 start。
+    # CUPTI 采集器：进程级捕获,必须在 vLLM 建 CUDA context 前 start。
     # capture_stacks=True 开调用栈火焰图(on-demand 深度模式,抓 Python 栈,贵)。
     kcoll = CuptiKernelCollector(sink, rollup_interval_s=2.0, top_n=100, capture_stacks=True)
     kcoll.start()

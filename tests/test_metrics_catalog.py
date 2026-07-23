@@ -90,7 +90,7 @@ def test_naming_unit_suffix_or_whitelisted():
         if name.startswith(UNITLESS_OK_PREFIXES):
             continue
         assert name.endswith(UNIT_SUFFIXES), (
-            f"{name!r} 缺少单位 suffix。允许: {UNIT_SUFFIXES}，"
+            f"{name!r} 缺少单位 suffix。允许： {UNIT_SUFFIXES}，"
             f"或加入 UNITLESS_OK_PREFIXES 白名单（需审稿）。"
         )
 
@@ -104,5 +104,5 @@ def test_naming_starts_with_known_domain():
     domains = ("gpu.", "kernel.", "vllm.", "pping_lang.")
     for name in ALLOWED_METRICS:
         assert name.startswith(domains), (
-            f"{name!r} 的 domain 未知。允许: {domains}"
+            f"{name!r} 的 domain 未知。允许： {domains}"
         )

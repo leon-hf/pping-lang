@@ -117,7 +117,7 @@ def _load_cudart():  # noqa: ANN202
                 return ctypes.CDLL(p)
             except OSError:
                 continue
-    return ctypes.CDLL("libcudart.so")  # 兜底:靠 ld 找
+    return ctypes.CDLL("libcudart.so")  # 兜底：靠 ld 找
 
 
 def read_gpu_peak(device: int = 0) -> GPUPeak | None:

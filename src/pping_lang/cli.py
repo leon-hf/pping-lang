@@ -1,10 +1,10 @@
-"""pping-vllm:一条命令把 pping-lang 接到 vllm(纯 pip 装上即用)。
+"""pping-vllm：一条命令把 pping-lang 接到 vllm(纯 pip 装上即用)。
 
     pping-vllm serve <model> [vllm 的参数...]
 
-等价于:现编/取缓存 libppingcupti.so → 设好注入 + PC sampling 的环境变量 → `vllm serve ...`。
+等价于：现编/取缓存 libppingcupti.so → 设好注入 + PC sampling 的环境变量 → `vllm serve ...`。
 之后 CUDA 驱动在 cuInit 注入 .so、EngineCore 的 general_plugin 采样、前端 dashboard 读结果
-(见 engine_pcs.py)。.so 编不出来时自动降级:仍有 KPI / roofline / NVML / 诊断,只是没 Kernel 级采集。
+(见 engine_pcs.py)。.so 编不出来时自动降级：仍有 KPI / roofline / NVML / 诊断,只是没 Kernel 级采集。
 """
 from __future__ import annotations
 
@@ -45,13 +45,13 @@ def pping_vllm_main() -> None:
             ld = os.environ.get("LD_LIBRARY_PATH", "")
             os.environ["LD_LIBRARY_PATH"] = cupti_libdir + (f":{ld}" if ld else "")
         os.environ.setdefault("PPING_LANG_ENABLE_PCS", "1")
-        # P3 行级归因:开 per-PC 直方图(源码行/SASS 热点)。每样本多一次 hash,默认开,
+        # P3 行级归因：开 per-PC 直方图(源码行/SASS 热点)。每样本多一次 hash,默认开,
         # 想省这点开销可显式设 0。
         os.environ.setdefault("PPING_LANG_PCS_PC_HIST", "1")
-        # P3 launch 栈:kernel ← 启动它的 host 代码(向外归因,闭源 GEMM ← nn.Linear)。
+        # P3 launch 栈：kernel ← 启动它的 host 代码(向外归因,闭源 GEMM ← nn.Linear)。
         # 首见某 kernel 抓一次栈,开销极小;默认开。
         os.environ.setdefault("PPING_LANG_PCS_LAUNCH_STACK", "1")
-        print(f"[pping-vllm] PC sampling 就绪:.so={so}", file=sys.stderr)
+        print(f"[pping-vllm] PC sampling 就绪：.so={so}", file=sys.stderr)
     except Exception as e:  # noqa: BLE001
         print(f"[pping-vllm] .so 准备失败,降级(无 Kernel 级采集,其余照常):{e}", file=sys.stderr)
 

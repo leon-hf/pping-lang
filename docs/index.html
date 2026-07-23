@@ -566,7 +566,7 @@ footer{border-top:1px solid var(--border);padding:48px 0 60px;margin-top:40px}
     </div>
     <div class="pos-punch">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/><path d="M11 8v6M8 11h6"/></svg>
-      <p data-i18n="pos.punch"><b>Nsight 是实验室显微镜</b> —— 偶尔抓一段、离线看、给原始证据；<b>pping-lang 是常驻听诊器</b> —— 一直跑、说人话、还告诉你该调哪个旋钮。<span class="pos-note">要对单个自定义 kernel 做穷尽式微架构调优，Nsight Compute 仍是那把专业手术刀；pping-lang 主打的是常驻、serving 级、结论驱动的那条线。</span></p>
+      <p data-i18n="pos.punch"><b>Nsight 是实验室显微镜</b> —— 偶尔抓一段、离线看、给原始证据；<b>pping-lang 是常驻听诊器</b> —— 一直跑、说人话、还告诉你该调哪个参数。<span class="pos-note">要对单个自定义 kernel 做穷尽式微架构调优，Nsight Compute 仍是那把专业手术刀；pping-lang 主打的是常驻、serving 级、结论驱动的那条线。</span></p>
     </div>
   </div>
 </section>
@@ -805,13 +805,13 @@ footer{border-top:1px solid var(--border);padding:48px 0 60px;margin-top:40px}
     <div class="sec-head">
       <div class="sec-tag" style="display:flex;align-items:center;gap:10px"><span data-i18n="ap.tag">旗舰方向</span><span class="ap-badge" data-i18n="ap.badge">runw 真机已验证 · M0</span></div>
       <h2 class="sec" data-i18n="ap.h2">Autopilot —— 诊断驱动的自主调优</h2>
-      <p class="sec-sub" data-i18n="ap.sub">一条命令起 pping-lang → 点「自动调优」→ Agent 在<b>沙盒</b>里迭代「诊断 → 改一个旋钮 → 压测 → Δ → 留下 / 回滚」→ 给出<b>实测验证过</b>的最优配置 + 全程推理。把 LLM 变成一个会看证据、自己动手、用压测打分的 LLM-serving 性能工程师。</p>
+      <p class="sec-sub" data-i18n="ap.sub">一条命令起 pping-lang → 点「自动调优」→ Agent 在<b>沙盒</b>里迭代「诊断 → 改一个参数 → 压测 → Δ → 留下 / 回滚」→ 给出<b>实测验证过</b>的最优配置 + 全程推理。把 LLM 变成一个会看证据、自己动手、用压测打分的 LLM-serving 性能工程师。</p>
     </div>
 
     <div class="ap-grid">
       <div class="ap-loop">
         <div class="ap-stage"><span class="n">1</span><div><b>observe</b><span data-i18n="ap.s1">读当前诊断 + 配置 + 历史</span></div></div>
-        <div class="ap-stage"><span class="n">2</span><div><b>hypothesize</b><span data-i18n="ap.s2">挂在诊断上选一个旋钮</span></div></div>
+        <div class="ap-stage"><span class="n">2</span><div><b>hypothesize</b><span data-i18n="ap.s2">挂在诊断上选一个参数</span></div></div>
         <div class="ap-stage"><span class="n">3</span><div><b>act</b><span data-i18n="ap.s3">沙盒带新 flag 重启</span></div></div>
         <div class="ap-stage"><span class="n">4</span><div><b>measure</b><span data-i18n="ap.s4">跑同一套压测打分</span></div></div>
         <div class="ap-stage"><span class="n">5</span><div><b>decide</b><span data-i18n="ap.s5">更好留下 / 破 SLA 回滚</span></div></div>
@@ -824,7 +824,7 @@ footer{border-top:1px solid var(--border);padding:48px 0 60px;margin-top:40px}
           <span class="ap-eye"><b data-i18n="ap.eye2">✋ 手</b><span data-i18n="ap.eye2d">压测 + serve 控制</span></span>
           <span class="ap-eye"><b data-i18n="ap.eye3">📊 记分牌</b><span data-i18n="ap.eye3d">基线 / Δ</span></span>
         </div>
-        <p data-i18n="ap.moat.p"><b>三件套在同一进程。</b>别人的 AI infra agent = 把 nvidia-smi 喂给 GPT 盲调；Autopilot = 诊断驱动（只动对症旋钮）→ 3–5 轮收敛，而非盲搜几十轮。每步改动必须 bench 验证才留下，LLM 无权声明压测没证实的收益。</p>
+        <p data-i18n="ap.moat.p"><b>三件套在同一进程。</b>别人的 AI infra agent = 把 nvidia-smi 喂给 GPT 盲调；Autopilot = 诊断驱动（只动对症参数）→ 3–5 轮收敛，而非盲搜几十轮。每步改动必须 bench 验证才留下，LLM 无权声明压测没证实的收益。</p>
       </div>
     </div>
 
@@ -889,7 +889,7 @@ footer{border-top:1px solid var(--border);padding:48px 0 60px;margin-top:40px}
         <div class="ap-honest" data-i18n="ap.honest">这是一次 runw 真机 session：RTX 5060 Ti、vLLM 0.21、Qwen2.5-0.5B、mixed-short/c32。收益来自故意朴素的常见起点；已调过的基线只应期待诚实的边际收益。</div>
       </div>
 
-      <!-- 信任时刻:敢回滚、会认账(真机 session,非演绎) -->
+      <!-- 信任时刻：敢回滚、会认账(真机 session,非演绎) -->
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px;margin-top:16px">
         <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px 18px">
           <div style="font-weight:800;font-size:13.5px;margin-bottom:6px" data-i18n="ap.t1.h">⚖️ 压测是唯一真相 —— ×5.1 也照样回滚</div>
@@ -913,7 +913,7 @@ footer{border-top:1px solid var(--border);padding:48px 0 60px;margin-top:40px}
       </div>
       <div class="ap-lvl now">
         <span class="lv">L1</span>
-        <div class="lbody"><div class="t" data-i18n="lvl.1t">调参</div><div class="d" data-i18n="lvl.1d">改 vllm serve 旋钮（introspect 全量参数面）· bench + SLA 验证</div></div>
+        <div class="lbody"><div class="t" data-i18n="lvl.1t">调参</div><div class="d" data-i18n="lvl.1d">改 vllm serve 参数（introspect 全量参数面）· bench + SLA 验证</div></div>
         <span class="ltag m0">M0</span>
       </div>
       <div class="ap-lvl">
@@ -1086,13 +1086,13 @@ footer{border-top:1px solid var(--border);padding:48px 0 60px;margin-top:40px}
         <div class="rcard now">
           <span class="badge-now" data-i18n="road.ap.m0tag">已验证</span>
           <div class="rv">M0</div><div class="rmode" data-i18n="road.ap.m0mode">M0</div>
-          <h3 data-i18n="road.ap.m0h">沙盒 + 受守卫旋钮 + LLM loop</h3>
+          <h3 data-i18n="road.ap.m0h">沙盒 + 受守卫参数 + LLM loop</h3>
           <p data-i18n="road.ap.m0p">吞吐-under-SLA 目标 + Autopilot UI，runw 真机跑出 986 → 6,094 tok/s（×6.18）。不碰源码、不碰生产，promote 永远人工确认。</p>
         </div>
         <div class="rcard">
           <div class="rv">M1 / M2</div><div class="rmode" data-i18n="road.ap.m1mode">多目标 / 源码级建议</div>
-          <h3 data-i18n="road.ap.m1h">更多旋钮 + advisory</h3>
-          <p data-i18n="road.ap.m1p">多旋钮 / 多目标 / 去噪 / promote-to-prod；M2 用 PC sampling 给 kernel / 源码级建议（仅建议，不自动改）。</p>
+          <h3 data-i18n="road.ap.m1h">更多参数 + advisory</h3>
+          <p data-i18n="road.ap.m1p">多参数 / 多目标 / 去噪 / promote-to-prod；M2 用 PC sampling 给 kernel / 源码级建议（仅建议，不自动改）。</p>
         </div>
         <div class="rcard">
           <div class="rv">M3+</div><div class="rmode" data-i18n="road.ap.m3mode">数据飞轮</div>

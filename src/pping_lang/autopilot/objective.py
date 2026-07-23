@@ -1,8 +1,10 @@
 """目标 spec + 打分 + 胜负判定(§6.2,G1)。
 
-字典序:SLA 闸门(硬约束)→ 主指标。`sla_ok` 用 client-side bench p99;延迟目标的
+字典序：SLA 闸门(硬约束)→ 主指标。`sla_ok` 用 client-side bench p99;延迟目标的
 吞吐下限走独立 `objective.floor`。统一"越大越好"(延迟取负)。decide 用 noise_margin
 挡住噪声内的伪胜利(记 tie)。纯函数,无副作用,可单测。
+
+SLA 三项里只有 ttft/tpot 进闸门,e2e 仅监控上报不参与判定(2026-07-23,见 sla_ok 内注释)。
 """
 from __future__ import annotations
 
@@ -17,7 +19,7 @@ Target = Literal["throughput", "latency", "cost"]
 class SLA:
     ttft_p99_ms: float | None = None
     tpot_p99_ms: float | None = None
-    e2e_p99_ms: float | None = None          # 端到端完成时间(agent/工具调用场景的 deadline)
+    e2e_p99_ms: float | None = None          # 端到端完成时间(仅监控上报,不进 sla_ok 闸门)
 
 
 @dataclass(frozen=True)
@@ -60,8 +62,11 @@ def sla_ok(sc: Scorecard, obj: ObjectiveSpec) -> bool:
         ok &= sc.ttft_p99_ms <= obj.sla.ttft_p99_ms
     if obj.sla.tpot_p99_ms is not None:
         ok &= sc.tpot_p99_ms <= obj.sla.tpot_p99_ms
-    if obj.sla.e2e_p99_ms is not None:
-        ok &= sc.e2e_p99_ms <= obj.sla.e2e_p99_ms
+    # e2e_p99_ms 不进闸门(仅监控上报,见 SLA.e2e_p99_ms 字段注释)：E2E ≈ TTFT + TPOT×输出
+    # token 数,后者是负载形态的固定属性,不受 vLLM 参数影响——硬卡一个调参移不动的目标,
+    # 真机复现(2026-07-23):7B-AWQ 上 chat/code 形态的默认 E2E 阈值本身就比基线还紧,
+    # 基线一开局就判 -inf,后续候选无论怎么改都过不了这道闸,session 全程"无改进",
+    # 但 TTFT/TPOT 实际都在变好——硬门槛把真实收益整个盖住了。
     if obj.target == "latency" and obj.floor is not None:        # 吞吐下限作硬约束
         ok &= sc.output_tps >= obj.floor.output_tps
     if sc.error_rate > 0.5:                                       # 高错误率不可接受
@@ -93,7 +98,7 @@ def decide(cand_score: float, best_score: float, noise_margin: float = 0.03) -> 
     if cand_score < best_score - margin:
         return "reverted"                                        # 真变差了(不是噪声内)→ 回滚,
                                                                    # 别标"持平"掩盖真实退化
-    return "tie"                                                 # 噪声内:不替换 best
+    return "tie"                                                 # 噪声内：不替换 best
 
 
 def primary_delta_pct(cand: Scorecard, best: Scorecard, obj: ObjectiveSpec) -> float | None:

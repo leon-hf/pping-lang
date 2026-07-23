@@ -1,8 +1,8 @@
 """规则条件 helper —— 窗口聚合 + 比较算子。
 
-历史:这里曾是 `RuleEngine`(周期查 DuckDB 做窗口聚合的扁平规则引擎)。它已被
+历史：这里曾是 `RuleEngine`(周期查 DuckDB 做窗口聚合的扁平规则引擎)。它已被
 `rules.diagnosis_runtime.DiagnosisEngine`(纯内存环评估的事实规则引擎)完全取代,
-并随「插件进程去 DuckDB」一并退役。仅保留两个仍被复用的纯函数:
+并随「插件进程去 DuckDB」一并退役。仅保留两个仍被复用的纯函数：
 
 - `_agg_in_memory` —— Python 侧窗口聚合(DiagnosisEngine 的 metric_fn 用)。
 - `_OP_TO_FN`      —— 条件比较算子表(/api/rules/{id}/test 预览用)。

@@ -1,12 +1,12 @@
 """DiagnosisEngine 运行时 —— 周期跑诊断规则,把触发的诊断推到 sink。
 
-**纯内存评估**(不碰 DuckDB):每个 eval 周期都读 sink 的内存环(`sink.recent`),
+**纯内存评估**(不碰 DuckDB)：每个 eval 周期都读 sink 的内存环(`sink.recent`),
 不再每秒查 DuckDB(去掉了进程内分析库的读争用 + 刷盘滞后)。
 
-每个 eval 周期:
+每个 eval 周期：
   ① 从内存环取近窗 token 计数 + 真 flops/bytes(perf_stats) → compute_operating_point →
      regime + MFU + MBU(**实测优先**:perf_stats 在则真 AI/MFU/MBU 含 KV,死则解析兜底);
-  ② metric_fn = 内存环聚合(_agg_in_memory),并解析两个"最佳来源"信号:
+  ② metric_fn = 内存环聚合(_agg_in_memory),并解析两个"最佳来源"信号：
      `vllm.perf.mfu_ratio` 缺时用 op.mfu 覆盖(喂 D1c/D3a);
      `gpu.mem_util_pct` 解析成 MBU% —— 实测 MBU 优先、NVML 兜底(喂 D2a/D3a);
   ③ evaluate(metric_fn, config, 规则, regime) → findings;
@@ -127,16 +127,16 @@ class DiagnosisEngine:
         op = compute_operating_point(
             self._fetch_token_points(),
             self._params, self._dtype_b, self._peak_c, self._peak_bw,
-            perf_points=self._fetch_perf_points(),   # 实测优先:有 perf_stats 则真 AI/MFU/MBU(含 KV)
+            perf_points=self._fetch_perf_points(),   # 实测优先：有 perf_stats 则真 AI/MFU/MBU(含 KV)
         )
 
         def metric_fn(metric: str, window_s: int, agg: str):
-            # MFU:实测优先(perf bf16-flops/peak,有界);perf_stats 死时用解析 MFU 覆盖(喂 A/C)。
+            # MFU：实测优先(perf bf16-flops/peak,有界);perf_stats 死时用解析 MFU 覆盖(喂 A/C)。
             if metric == M.VLLM_PERF_MFU_RATIO:
                 pts = self._sink.recent(metric, window_s)
                 v = _agg_in_memory([val for val, _ in pts], agg) if pts else None
                 return v if v is not None else op.mfu
-            # 带宽:用 NVML gpu.mem_util_pct 原值(HBM 控制器繁忙%,有界 0-100)。
+            # 带宽：用 NVML gpu.mem_util_pct 原值(HBM 控制器繁忙%,有界 0-100)。
             # 不再解析成 perf 实测 MBU —— 后者是 logical-bytes/HBM_peak,小模型 L2 复用会 >1(无界、且 >1 反而表示"缓存友好、非带宽受限"),不适合做"贴屋顶"阈值。
             pts = self._sink.recent(metric, window_s)
             if not pts:

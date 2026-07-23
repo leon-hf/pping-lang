@@ -1,9 +1,9 @@
 """CUPTI kernel 级采集 — 阶段 1a，部署级调优(见 _design-notes/phase-1a-采集设计.md)。
 
-把 GPU kernel 的时间分解采集进现有 Sink/DuckDB 管道,填上"层级 2"空缺:
+把 GPU kernel 的时间分解采集进现有 Sink/DuckDB 管道,填上"层级 2"空缺：
 不只是"MFU 低 / padding 多",而是"attention kernel 占 step 42%"。
 
-架构基石 —— 语言边界:
+架构基石 —— 语言边界：
     采集源藏在 `KernelActivitySource` 接口后面,可替换。
     1a:   `CuptiPythonSource`(进程内 cupti-python,纯 Python,Linux-only)
     1b/2: 未来换成原生 libppingcupti.so 经共享内存喂同一聚合层,本文件其余部分不动。
@@ -13,7 +13,7 @@
 故障隔离(design §3.1):source 不可用(Win / 无 cupti / 无 GPU)→ 优雅 no-op + warning,
 永不阻塞 vLLM。回调里的任何异常被吞掉并计数,不向上传播。
 
-5% 预算自守:回调里只做记忆化分类 + 累加(O(1)/条),周期 roll-up 才 push 派生标量。
+5% 预算自守：回调里只做记忆化分类 + 累加(O(1)/条),周期 roll-up 才 push 派生标量。
 丢弃数与回调耗时作为自我观测指标暴露;后续可据此自动降级(拉长 rollup / 砍 kind)。
 """
 from __future__ import annotations
@@ -116,7 +116,7 @@ class KernelActivitySource(Protocol):
 
 # === kernel 名 → 语义类(vLLM 语义层,带记忆化) =======================
 
-# (子串列表, 类名)。小写子串匹配,首个命中胜出 —— 顺序敏感:
+# (子串列表, 类名)。小写子串匹配,首个命中胜出 —— 顺序敏感：
 # 先 comm(nccl 含 reduce)再 gemm,先 attention 再其它。未命中 → "other"。
 DEFAULT_CLASSIFY_RULES: list[tuple[tuple[str, ...], str]] = [
     (("flash", "attention", "paged_attn", "paged_attention", "fmha", "mha"), "attention"),
@@ -127,7 +127,7 @@ DEFAULT_CLASSIFY_RULES: list[tuple[tuple[str, ...], str]] = [
     (("rms_norm", "rmsnorm", "layernorm", "layer_norm", "fused_add_rms"), "norm"),
     (("rotary", "rope"), "rotary"),
     (("silu", "swiglu", "geglu", "gelu", "act_and_mul", "activation"), "activation"),
-    # 采样/解码(softmax/argmax/分布采样)—— 必须在 elementwise 之前:分布采样核名里
+    # 采样/解码(softmax/argmax/分布采样)—— 必须在 elementwise 之前：分布采样核名里
     # 含 "elementwise"(distribution_elementwise_grid_stride_kernel),否则会被误归逐元素。
     (("softmax", "argmax", "distribution", "exponential", "multinomial",
       "topk", "top_k", "gumbel"), "sampling"),
@@ -141,7 +141,7 @@ DEFAULT_CLASSIFY_RULES: list[tuple[tuple[str, ...], str]] = [
 class KernelClassifier:
     """mangled kernel 名 → 语义类,结果按名记忆化。
 
-    记忆化是 5% 预算的关键:同批就那 ~20 个 kernel 反复出现,首次分类后退化成
+    记忆化是 5% 预算的关键：同批就那 ~20 个 kernel 反复出现,首次分类后退化成
     一次 dict 命中(~80ns/条),避免每条都跑子串匹配(见采集设计 §0)。
     """
 
@@ -179,7 +179,7 @@ class KernelClassifier:
 #   - not_selected 必须在 selected 之前(前者含后者子串);selected=已发射,非 stall。
 DEFAULT_STALL_RULES: list[tuple[tuple[str, ...], str]] = [
     (("not_selected",), "scheduler_slack"),          # 必须先于 selected
-    (("selected",), "issued"),                        # 非 stall:已发射指令
+    (("selected",), "issued"),                        # 非 stall：已发射指令
     (("long_scoreboard",), "memory_dependency"),
     (("short_scoreboard",), "shared_dependency"),
     (("mio_throttle", "lg_throttle", "tex_throttle", "imc_miss"), "memory_throttle"),
@@ -227,7 +227,7 @@ class StallClassifier:
 class WindowAggregator:
     """累加一个时间窗内的 kernel 时间,roll-up 时算出派生占比指标。
 
-    线程安全:add() 在采集源线程调用,snapshot_and_reset() 在 collector 调用,
+    线程安全：add() 在采集源线程调用,snapshot_and_reset() 在 collector 调用,
     用一把锁护住(都很轻)。tumbling 窗(roll-up 即清零),非滑动窗 —— 1a 够用。
     """
 
@@ -238,7 +238,7 @@ class WindowAggregator:
 
     def _reset_locked(self) -> None:
         self._class_ns: dict[str, int] = defaultdict(int)
-        # per-kernel 原始明细:raw name → [count, total_ns, in_graph_ns]。
+        # per-kernel 原始明细：raw name → [count, total_ns, in_graph_ns]。
         # 这是"未洗过"的钻取数据,kernel_table() 读它出原始表。
         self._kernel_stats: dict[str, list[int]] = defaultdict(lambda: [0, 0, 0])
         self._memcpy_ns = 0
@@ -279,12 +279,12 @@ class WindowAggregator:
             total_kernel_ns = sum(self._class_ns.values())
             out: dict[str, float] = {}
 
-            # kernel 类占比:占总 kernel 计算时间(各类相加 ≈ 100)
+            # kernel 类占比：占总 kernel 计算时间(各类相加 ≈ 100)
             for cls in KERNEL_CLASSES:
                 pct = 100.0 * self._class_ns.get(cls, 0) / total_kernel_ns if total_kernel_ns else 0.0
                 out[KERNEL_CLASS_TO_METRIC[cls]] = pct
 
-            # memcpy / sync / gpu_busy:占墙钟窗口
+            # memcpy / sync / gpu_busy：占墙钟窗口
             wall = wall_ns if wall_ns > 0 else 0
             if wall:
                 out[M.KERNEL_MEMCPY_SHARE_PCT] = 100.0 * self._memcpy_ns / wall
@@ -312,7 +312,7 @@ class WindowAggregator:
         """当前窗的 per-kernel 原始明细(未聚合),按占比降序取 top-N。
 
         只读,不 reset —— collector 在 snapshot_and_reset 前调它快照本窗明细。
-        每行:raw name(未洗的 mangled 名)+ 分类 + 调用次数 + 总/平均耗时 + 占比。
+        每行：raw name(未洗的 mangled 名)+ 分类 + 调用次数 + 总/平均耗时 + 占比。
         """
         with self._lock:
             total = sum(v[1] for v in self._kernel_stats.values())
@@ -338,7 +338,7 @@ class StallSample:
     """一条已聚合的 stall 记录 —— 原生 .so 每次 drain 在库内预聚合后吐过来的最小载荷。
 
     不是单个 PC 样本(那是百万/s,绝不过桥);而是 (kernel, reason) 在本批的累计样本数。
-    这就是 5% 预算的命门:原生侧聚合,Python 只收这种小行。
+    这就是 5% 预算的命门：原生侧聚合,Python 只收这种小行。
     """
 
     kernel: str       # kernel 名(mangled / demangled)
@@ -348,7 +348,7 @@ class StallSample:
 
 @dataclass(slots=True, frozen=True)
 class PcSample:
-    """P3:一条 per-PC 聚合行(某 kernel 内某指令地址的累计样本)。
+    """P3：一条 per-PC 聚合行(某 kernel 内某指令地址的累计样本)。
 
     cubinCrc + pcOffset 是连到源码行/SASS 偏移的钥匙(见 native/sass_source.py)。
     同样在库内预聚合,只在 deep-evidence 窗末取一次,不过单样本桥。
@@ -362,7 +362,7 @@ class PcSample:
 
 @dataclass(slots=True, frozen=True)
 class LaunchSample:
-    """P3 launch 栈(MVP):某 kernel 的 native 启动栈 + 本批 launch 次数。
+    """P3 launch 栈(MVP)：某 kernel 的 native 启动栈 + 本批 launch 次数。
 
     向外归因 —— 即便闭源 GEMM 进不去,也知道它从哪段 host 代码(nn.Linear / vLLM 自定义算子)
     launch。kernel 名可能是 cuFuncGetName 解析的真名,或解析失败时的 func_<ptr>(此时靠 stack
@@ -380,7 +380,7 @@ _LAUNCH_PRIM_PREFIXES = ("cudaLaunchKernel", "cuLaunchKernel", "cublas")
 
 def _launch_identity(stack: str) -> str:
     """从 launch 栈取算子身份 token —— 跳过启动原语帧,取第一帧算子名的基名。
-    例:'cudaLaunchKernel <- fused_add_rms_norm(at::Tensor&...) <- ...' → 'fused_add_rms_norm'。"""
+    例：'cudaLaunchKernel <- fused_add_rms_norm(at::Tensor&...) <- ...' → 'fused_add_rms_norm'。"""
     for frame in stack.split(" <- "):
         f = frame.strip()
         if any(f.startswith(p) for p in _LAUNCH_PRIM_PREFIXES):
@@ -400,7 +400,7 @@ def _launch_identity(stack: str) -> str:
 class StallAggregator:
     """累加一窗内的 stall 样本,roll-up 时算出语义类占比 + per-kernel stall 画像。
 
-    口径(设计文档 §11):各语义类占 **stall 样本**(= 总样本 − issued);`issued`(selected)
+    口径(设计文档 §11)：各语义类占 **stall 样本**(= 总样本 − issued);`issued`(selected)
     是已发射、非 stall,单独占总样本。线程安全同 WindowAggregator。
     """
 
@@ -457,13 +457,13 @@ class StallAggregator:
             return out
 
     def kernel_stall_table(self, limit: int = 25) -> list[dict[str, Any]]:
-        """per-kernel stall 画像(未 reset):每行含样本数 + 主导 stall 类 + 明细。
+        """per-kernel stall 画像(未 reset)：每行含样本数 + 主导 stall 类 + 明细。
 
         主导类**排除** issued(非 stall)与 scheduler_slack(高值常是好事,非瓶颈),
         这样"主导"指的是真正值得动手的 stall。按总样本降序。
         """
         with self._lock:
-            # 总样本数:PC sampling 按固定周期采样,故某 kernel 的样本数 ∝ 它占用的 GPU
+            # 总样本数：PC sampling 按固定周期采样,故某 kernel 的样本数 ∝ 它占用的 GPU
             # 时间。time_pct = 该 kernel 样本 / 全部样本 = 这个 kernel 的 GPU 时间占比
             # (采样估计,非精确 μs)。这让同一次采样既给"为什么慢",也给"时间花在哪"。
             grand_total = sum(c.get("_total", 0) for c in self._kernel.values())
@@ -597,7 +597,7 @@ class FlamegraphAggregator:
             return tree
 
 
-# === 执行时间线(Nsight-style:保留最近 N 条原始 kernel 的时间戳) =========
+# === 执行时间线(Nsight-style：保留最近 N 条原始 kernel 的时间戳) =========
 
 class TimelineBuffer:
     """最近 N 条 kernel/memcpy 的有界环,带 GPU 时间戳。时间线视图用。
@@ -639,7 +639,7 @@ class TimelineBuffer:
     def chrome_trace(self) -> dict[str, Any] | None:
         """导出 Chrome Trace Event 格式(Perfetto / chrome://tracing 直接打开)。
 
-        对齐 PyTorch Kineto 的写法:ph=M 元数据命名 track(stream),ph=X 完整事件,
+        对齐 PyTorch Kineto 的写法：ph=M 元数据命名 track(stream),ph=X 完整事件,
         ts/dur 单位微秒。专业 trace 查看器(缩放/搜索/测量)直接用,不自己画。
         """
         with self._lock:
@@ -664,12 +664,12 @@ class TimelineBuffer:
         return {"displayTimeUnit": "ms", "traceEvents": events}
 
 
-# === collector(编排:source → classifier → aggregator → sink) =========
+# === collector(编排：source → classifier → aggregator → sink) =========
 
 class CuptiKernelCollector:
     """编排 kernel 采集。镜像 NvmlSampler 的生命周期与故障隔离哲学。
 
-    roll-up 在采集源回调线程里按 clock 节奏触发(无额外线程):每批记录累加进
+    roll-up 在采集源回调线程里按 clock 节奏触发(无额外线程)：每批记录累加进
     aggregator,距上次 roll-up ≥ interval 就 snapshot + push 派生指标。
     """
 
@@ -755,7 +755,7 @@ class CuptiKernelCollector:
     @property
     def last_snapshot_ts(self) -> int | None:
         """最近一次"有数据"的 rollup 快照时刻(monotonic ns)。None=从未有过。
-        注意:空窗(无流量)会被跳过,所以这个时间戳只在有 GPU 活动时推进 ——
+        注意：空窗(无流量)会被跳过,所以这个时间戳只在有 GPU 活动时推进 ——
         前端据此判断数据是实时还是"无流量后停在最后一窗"。"""
         return self._last_kernels_ts
 
@@ -829,7 +829,7 @@ class CuptiKernelCollector:
             self._last_rollup_ns = now
             return
         if not self._agg.has_data:
-            # 窗内无任何 GPU 活动(stop 收尾的空窗 / 纯 idle):不 push 误导性全 0
+            # 窗内无任何 GPU 活动(stop 收尾的空窗 / 纯 idle)：不 push 误导性全 0
             self._last_rollup_ns = now
             return
         # 先快照 per-kernel 原始明细(读,不 reset),再 snapshot_and_reset 出标量指标
@@ -843,7 +843,7 @@ class CuptiKernelCollector:
         ei = self._engine_index
         for name, value in stats.items():
             push(MetricPoint(now, name, value, ei))
-        # 自我观测:回调耗时 + 累计丢弃(预算自守的输入)
+        # 自我观测：回调耗时 + 累计丢弃(预算自守的输入)
         push(MetricPoint(now, M.PPING_LANG_CUPTI_CB_MS, self._cb_total_ns / 1e6, ei))
         try:
             dropped = self._source.dropped_records()
@@ -909,7 +909,7 @@ class CuptiPythonSource:
         self._pending: dict[int, tuple[str, ...]] = {}
         self._pending_lock = Lock()
         self._subscriber: int | None = None
-        self._cb_fn: Any = None     # 保活:cupti 持有回调引用
+        self._cb_fn: Any = None     # 保活：cupti 持有回调引用
         self._enter_site: Any = None
 
     def available(self) -> bool:
@@ -949,7 +949,7 @@ class CuptiPythonSource:
         if self._cupti is None:
             return
         c = self._cupti
-        c.activity_flush_all(1)  # flag 1 = forced:强制交付未满 buffer 的残留记录,别丢尾部
+        c.activity_flush_all(1)  # flag 1 = forced：强制交付未满 buffer 的残留记录,别丢尾部
         for kind in (
             c.ActivityKind.CONCURRENT_KERNEL,
             c.ActivityKind.MEMCPY,
@@ -972,7 +972,7 @@ class CuptiPythonSource:
         # 句柄,接线时补。原型先返回 0。
         return 0
 
-    # --- Callback API:在 launch 处抓 Python 栈(launch 线程,同步) ---
+    # --- Callback API：在 launch 处抓 Python 栈(launch 线程,同步) ---
     def _launch_callback(self, userdata, domain, cbid, cbdata) -> None:  # noqa: ANN001
         try:
             if cbdata.callback_site != self._enter_site:
@@ -987,7 +987,7 @@ class CuptiPythonSource:
                 f = f.f_back
             frames.reverse()  # root→leaf
             with self._pending_lock:
-                if len(self._pending) > 300_000:  # 安全上限:防未匹配栈无限涨
+                if len(self._pending) > 300_000:  # 安全上限：防未匹配栈无限涨
                     self._pending.clear()
                 self._pending[cbdata.correlation_id] = tuple(frames)
         except Exception:
@@ -1013,7 +1013,7 @@ class CuptiPythonSource:
                 if cid > max_cid:
                     max_cid = cid
                 if self._capture_stacks:
-                    # .get 不 pop:一次 cuGraphLaunch 下的所有 kernel 共享同一个
+                    # .get 不 pop：一次 cuGraphLaunch 下的所有 kernel 共享同一个
                     # correlation_id,pop 会让除第一个外的 graph kernel 全丢栈。
                     with self._pending_lock:
                         stack = pending.get(cid)
@@ -1028,7 +1028,7 @@ class CuptiPythonSource:
                 ))
             elif kind == c.ActivityKind.SYNCHRONIZATION:
                 events.append(KernelEvent("sync", "sync", a.start, a.end))
-        # 批末清理:本批已消费的 launch(cid <= 本批最大 kernel cid)删掉,防膨胀;
+        # 批末清理：本批已消费的 launch(cid <= 本批最大 kernel cid)删掉,防膨胀;
         # cid > max 的留着(其 kernel 还没交付)。比 pop 安全,又不无限涨。
         if self._capture_stacks and max_cid:
             with self._pending_lock:
@@ -1091,7 +1091,7 @@ class _PpingLaunchRow(ctypes.Structure):
 
 
 def _default_so_path() -> str:
-    """libppingcupti.so 路径:env 覆盖 > 仓库内 native/ 构建产物。"""
+    """libppingcupti.so 路径：env 覆盖 > 仓库内 native/ 构建产物。"""
     env = os.environ.get("PPING_LANG_PCS_SO")
     if env:
         return env
@@ -1115,7 +1115,7 @@ class CtypesPcSamplingLib:
     """真实 libppingcupti.so via ctypes(RTLD_DEEPBIND)。
 
     加载失败(非 Linux / 无 .so / 缺 CUPTI)→ available() False,fail-closed。
-    DEEPBIND:进程里可能并存多个 libcupti,让 .so 优先用自己 rpath 的版本(§12)。
+    DEEPBIND：进程里可能并存多个 libcupti,让 .so 优先用自己 rpath 的版本(§12)。
     """
 
     _MAX_ROWS = 16384
@@ -1202,7 +1202,7 @@ class CtypesPcSamplingLib:
         return out
 
     def drain_pc(self) -> list[PcSample]:
-        """P3:拉走 per-PC 直方图(snapshot-swap)。需 .so 带 drain_pc 符号 + 运行时
+        """P3：拉走 per-PC 直方图(snapshot-swap)。需 .so 带 drain_pc 符号 + 运行时
         PPING_LANG_PCS_PC_HIST=1 才有数据;否则返回空(优雅降级)。"""
         if self._lib is None or not hasattr(self._lib, "pping_pcs_drain_pc"):
             return []
@@ -1221,7 +1221,7 @@ class CtypesPcSamplingLib:
         return out
 
     def drain_launches(self) -> list[LaunchSample]:
-        """P3:拉走 per-kernel launch 栈。需 .so 带符号 + PPING_LANG_PCS_LAUNCH_STACK=1。"""
+        """P3：拉走 per-kernel launch 栈。需 .so 带符号 + PPING_LANG_PCS_LAUNCH_STACK=1。"""
         if self._lib is None or not hasattr(self._lib, "pping_pcs_drain_launches"):
             return []
         if getattr(self, "_lc_buf", None) is None:
@@ -1302,10 +1302,10 @@ class FakePcSamplingLib:
 
 
 class PcSamplingController:
-    """Deep Evidence 编排:**早 prime 一次** + 按需 drain 短窗,聚合成"为什么慢"的结论。
+    """Deep Evidence 编排：**早 prime 一次** + 按需 drain 短窗,聚合成"为什么慢"的结论。
 
     ★ 关键(真机验证,设计文档 §12):PC Sampling 的 enable 必须在 workload 干重活**之前**
-    调(否则 `getNumStallReasons` 返 0)。所以模型不是"按需晚 start/stop",而是:
+    调(否则 `getNumStallReasons` 返 0)。所以模型不是"按需晚 start/stop",而是：
       prime()  —— 早期(vLLM 启动前/warmup 后)enable+start 一次,drain 线程持续累。
       run_window() —— 按需 drain 一段时间,取这段窗的 stall 分解;**不重新 start、不 stop**。
     所有失败 fail-closed 成 {available: False, error: ...}。
@@ -1355,9 +1355,9 @@ class PcSamplingController:
         return {"available": True}
 
     def reprime(self, period_log2: int = 16) -> dict[str, Any]:
-        """停止再启动采样 —— 自愈被打断的采样(实测:cudagraph capture 会把早 prime 的
+        """停止再启动采样 —— 自愈被打断的采样(实测：cudagraph capture 会把早 prime 的
         采样打停,之后 drain 全是空窗;capture 后重启即恢复)。start-after-workload 实测可行
-        (与 §12 的"enable 须早于 workload"不冲突:那是首次 enable 的硬约束,重启是已 enable
+        (与 §12 的"enable 须早于 workload"不冲突：那是首次 enable 的硬约束,重启是已 enable
         过的 reconfigure)。"""
         try:
             self._lib.stop()
@@ -1379,13 +1379,13 @@ class PcSamplingController:
         self,
         *,
         window_s: float = 5.0,
-        period_log2: int = 16,   # 2^16:防 HW 缓冲溢出楔死(见 engine_pcs 注释)
+        period_log2: int = 16,   # 2^16：防 HW 缓冲溢出楔死(见 engine_pcs 注释)
         drain_interval_s: float = 0.5,
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
     ) -> dict[str, Any]:
         """drain 一段窗,返回这段的 stall 结论。同一时刻只允许一个窗(busy 锁)。
-        若尚未 prime 则懒 prime(注意:晚 prime 在 vLLM 已跑重活时会失败)。"""
+        若尚未 prime 则懒 prime(注意：晚 prime 在 vLLM 已跑重活时会失败)。"""
         if not self._busy.acquire(blocking=False):
             return {"available": False, "error": "another deep-evidence window is running"}
         try:
@@ -1395,13 +1395,13 @@ class PcSamplingController:
                     return p
             agg = StallAggregator(self._classifier)
             self._lib.drain()  # 清掉窗开始前已累计的,只取本窗
-            self._lib.drain_pc()  # P3:同样清掉 per-PC 直方图,只取本窗
+            self._lib.drain_pc()  # P3：同样清掉 per-PC 直方图,只取本窗
             t0 = clock()
             while clock() - t0 < window_s:
                 sleep(drain_interval_s)
                 agg.add(self._lib.drain())
             agg.add(self._lib.drain())  # 收尾再 drain 一次
-            pcs = self._lib.drain_pc()  # P3:窗末取 per-PC 直方图(整窗累计)
+            pcs = self._lib.drain_pc()  # P3：窗末取 per-PC 直方图(整窗累计)
             launches = self._lib.drain_launches()  # P3:per-kernel launch 栈
             getdata_ms, dropped, hwfull = self._lib.overhead()
             table = agg.kernel_stall_table(self._top_n)
@@ -1434,7 +1434,7 @@ class PcSamplingController:
         finally:
             self._busy.release()
 
-    # P3 行级归因:每窗最多关联的 kernel 数 / 每 kernel 取样关联的热点 PC 数(界定开销)
+    # P3 行级归因：每窗最多关联的 kernel 数 / 每 kernel 取样关联的热点 PC 数(界定开销)
     _PC_TOP_KERNELS = 12
     _PC_TOP_OFFSETS = 40
     # top-N 之外再多扫这么多 kernel,专门捞"能映射到源码行"的(让源码行轨即使不在最热也可见)
@@ -1451,7 +1451,7 @@ class PcSamplingController:
         return self._correlator
 
     def _pc_hotspots(self, pcs: list[PcSample]) -> list[dict[str, Any]]:
-        """把 per-PC 直方图压成 per-kernel"最深热点"(双轨:源码行 / SASS 偏移+名解码)。
+        """把 per-PC 直方图压成 per-kernel"最深热点"(双轨：源码行 / SASS 偏移+名解码)。
 
         可映射(Triton/带 lineinfo)→ 按源码行聚合,给 top 行 + 占比;
         闭源(cutlass/flash)→ 给最热 SASS 偏移 + kernel 名解码(tile/dtype)。
@@ -1495,7 +1495,7 @@ class PcSamplingController:
                                            "pct": round(100.0 * r["samples"] / total, 1),
                                            "code": corr.source_line(r["path"], r["line"])})
             else:
-                for s in samples[:3]:  # 闭源轨:最热 SASS 偏移(top 3)
+                for s in samples[:3]:  # 闭源轨：最热 SASS 偏移(top 3)
                     entry["sass"].append({"offset": f"0x{s.pc_offset:x}",
                                           "pct": round(100.0 * s.samples / total, 1)})
             return entry
@@ -1518,7 +1518,7 @@ class PcSamplingController:
 
     def _attach_launch_stacks(self, hotspots: list[dict[str, Any]],
                               launches: list[LaunchSample]) -> None:
-        """P3:把 launch 栈接到 pc_hotspots —— 向外归因(闭源 GEMM ← nn.Linear)。
+        """P3：把 launch 栈接到 pc_hotspots —— 向外归因(闭源 GEMM ← nn.Linear)。
 
         join:① 精确名匹配(cuFuncGetName 解析到名的 cutlass/cuBLAS,与 PC functionName 同源);
         ② 解析不到名(runtime 注册 kernel,func_<ptr>)→ 从栈里第一帧算子名取 token,

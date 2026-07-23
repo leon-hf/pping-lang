@@ -1,17 +1,17 @@
 """EngineCore 侧 PC sampling 驱动 + 跨进程回流(① 多进程 serve 方案)。
 
-背景:`vllm serve` 是 **2 进程**(前端 APIServer + EngineCore)。GPU kernel 在
+背景：`vllm serve` 是 **2 进程**(前端 APIServer + EngineCore)。GPU kernel 在
 EngineCore 里跑,注入的 .so 也在那个进程抢到 CUPTI subscriber;但 stat_logger
 插件(含 dashboard)在前端进程、没有 CUDA context,无法驱动 PC sampling。
 
-桥接方案:
-  - **EngineCore 侧**:通过 `vllm.general_plugins` 入口点(vLLM 在 EngineCore.__init__
+桥接方案：
+  - **EngineCore 侧**：通过 `vllm.general_plugins` 入口点(vLLM 在 EngineCore.__init__
     里 `load_general_plugins()` 调用每个入口点函数),起一个后台线程,等 CUDA 就绪后
     prime PC sampling,持续 drain,把每个窗口的 Deep-Evidence 结果**原子写入共享 JSON 文件**。
   - **前端**:`FilePcSampling`(实现与 PcSamplingController 同样的接口)只读那个共享文件,
     喂给 dashboard 的 Deep Evidence。两进程靠同一个文件路径(PPING_LANG_PCS_RESULT_FILE)对接。
 
-幂等:general_plugin 会在多个进程被调用(前端也会),靠"等 CUDA 就绪"自然只在
+幂等：general_plugin 会在多个进程被调用(前端也会),靠"等 CUDA 就绪"自然只在
 EngineCore 真 prime;前端那次等不到 CUDA、超时退出。
 """
 from __future__ import annotations
@@ -27,7 +27,7 @@ logger = logging.getLogger("pping_lang.engine_pcs")
 
 DEFAULT_RESULT_FILE = "/tmp/pping-lang-pcs-result.json"
 
-# 心跳 + 看门狗:run_window 若卡死(无异常,纯阻塞),N 秒后把**所有线程的 Python 栈**dump
+# 心跳 + 看门狗：run_window 若卡死(无异常,纯阻塞),N 秒后把**所有线程的 Python 栈**dump
 # 到 .STALL 文件(faulthandler,无需 ptrace)→ 直接定位死锁卡在哪一行。
 import faulthandler  # noqa: E402
 
@@ -104,7 +104,7 @@ def _driver_loop() -> None:
             break
         time.sleep(0.2)
     else:
-        logger.info("[pping-lang] PCS 驱动:等不到 CUDA(大概率前端进程),退出")
+        logger.info("[pping-lang] PCS 驱动：等不到 CUDA(大概率前端进程),退出")
         return
 
     # 2) 把 CUDA context 绑到本线程(prime 走驱动 API 查当前线程 context)
@@ -113,16 +113,16 @@ def _driver_loop() -> None:
         torch.zeros(1, device="cuda")
         torch.cuda.synchronize()
     except Exception as e:  # noqa: BLE001
-        logger.warning("[pping-lang] PCS 驱动:绑定 CUDA context 失败 %s", e)
+        logger.warning("[pping-lang] PCS 驱动：绑定 CUDA context 失败 %s", e)
         return
 
     # 3) prime。
-    #    (历史勘误:曾误判"cudagraph 图回放采不到样是底层限制" —— 真因是 2^12 周期下
+    #    (历史勘误：曾误判"cudagraph 图回放采不到样是底层限制" —— 真因是 2^12 周期下
     #    样本产率打满 CUPTI HW 缓冲、会话永久楔死,见上方 period_log2 注释。2^16 后
     #    cudagraph/eager 都持续工作,无需延迟 prime。延迟开关留作排查工具。)
     prime_delay_s = float(os.environ.get("PPING_LANG_PCS_PRIME_DELAY_S", "0"))
     if prime_delay_s > 0:
-        logger.info("[pping-lang] PCS 驱动:延迟 %.0fs 再 prime", prime_delay_s)
+        logger.info("[pping-lang] PCS 驱动：延迟 %.0fs 再 prime", prime_delay_s)
         time.sleep(prime_delay_s)
 
     from pping_lang.collector.cupti import (  # noqa: PLC0415
@@ -134,19 +134,19 @@ def _driver_loop() -> None:
     prime = ctl.prime(period_log2)
     logger.info("[pping-lang] PCS 驱动 prime=%s available=%s", prime, lib.available())
     if not prime.get("available"):
-        logger.warning("[pping-lang] PCS 驱动:prime 失败,Deep Evidence 不可用")
+        logger.warning("[pping-lang] PCS 驱动：prime 失败,Deep Evidence 不可用")
         return
 
     # 4) 持续 drain → 每窗原子写共享文件
-    logger.info("[pping-lang] PCS 驱动:开始持续采样,结果写 %s", result_file)
-    # 自愈:cudagraph capture 会把早 prime 的采样打停(实测:capture 后 drain 全空窗,
+    logger.info("[pping-lang] PCS 驱动：开始持续采样,结果写 %s", result_file)
+    # 自愈：cudagraph capture 会把早 prime 的采样打停(实测：capture 后 drain 全空窗,
     # 但 capture 后重启采样即恢复)。检测"曾有样本→连续空窗"的打断特征,重启采样。
     # 纯空闲(从未有样本)不触发,避免无谓重启;重启有冷却,避免抖动。
     # ★ reprime 安全边界(py-spy 实锤,见设计文档 §cudagraph):
     #   - cudagraph capture 会把早 prime 的采样打哑(之后全空窗)→ 需要一次 reprime 救活;
     #   - 但 reprime 的 cuptiPCSamplingStop 若在引擎**带载推理中**执行,会与在飞的图回放
     #     在驱动层互等 → EngineCore 静默挂死(MainThread 卡 CUDA 调用,我们卡在 stop())。
-    #   解:reprime 全程**最多 1 次**(正好落在 capture 后、流量前的空闲间隙,实测把采样
+    #   解：reprime 全程**最多 1 次**(正好落在 capture 后、流量前的空闲间隙,实测把采样
     #   救活后稳定工作);空窗阈值 2(防瞬时空窗误触发);用完配额后空窗只记不动。
     seen_samples = False
     dry_windows = 0
@@ -156,7 +156,7 @@ def _driver_loop() -> None:
     reprime_cooldown_s = float(os.environ.get("PPING_LANG_PCS_REPRIME_COOLDOWN_S", "20"))
     dry_threshold = int(os.environ.get("PPING_LANG_PCS_REPRIME_DRY_WINDOWS", "2"))
     # ★ 默认 0(禁用 reprime):reprime 调 cuptiPCSamplingStop,在 Blackwell+CUDA13 上与在飞推理
-    #   kernel 在驱动层互等 → EngineCore 永久死锁(.STALL 实锤:reprime→stop 卡在 cuptiPCSamplingStop,
+    #   kernel 在驱动层互等 → EngineCore 永久死锁(.STALL 实锤：reprime→stop 卡在 cuptiPCSamplingStop,
     #   主线程在 flash_attn)。且 reprime 本是为"cudagraph capture 打断采样"设计的自愈,但 period_log2=2^16
     #   修复后采样已能持续(见上方注释),reprime 已无必要、纯粹是死锁源。空闲期的 dry 窗是正常的(没流量),
     #   不该被当成"采样被打断"去 reprime。需要时可 env 显式开。
@@ -179,11 +179,11 @@ def _driver_loop() -> None:
                 dry_windows += 1
                 now = time.monotonic()
                 # 曾经有样本、现在连续空窗 → 疑似被 capture 打断,重启采样自愈。
-                # ★ 最多 max_reprimes 次:带载中 stop 会与图回放在驱动层互等挂死引擎(见上)。
+                # ★ 最多 max_reprimes 次：带载中 stop 会与图回放在驱动层互等挂死引擎(见上)。
                 if (seen_samples and dry_windows >= dry_threshold
                         and reprime_count < max_reprimes
                         and now - last_reprime >= reprime_cooldown_s):
-                    logger.info("[pping-lang] PCS 驱动:采样枯竭(连续 %d 空窗),重启采样自愈"
+                    logger.info("[pping-lang] PCS 驱动：采样枯竭(连续 %d 空窗),重启采样自愈"
                                 "(%d/%d 次,疑似 cudagraph capture 打断)",
                                 dry_windows, reprime_count + 1, max_reprimes)
                     rp = ctl.reprime(period_log2)
@@ -192,7 +192,7 @@ def _driver_loop() -> None:
                     reprime_count += 1
                     did_reprime = True
                     res.setdefault("_reprime", {})["result"] = rp
-            # 心跳:每窗写状态(诊断 cudagraph 自愈),与主结果文件分开
+            # 心跳：每窗写状态(诊断 cudagraph 自愈),与主结果文件分开
             extra: dict[str, Any] = {}
             try:  # 诊断计数(老 .so 无符号则跳过)
                 raw = getattr(ctl, "_lib", None)
@@ -209,9 +209,9 @@ def _driver_loop() -> None:
                 "hwfull": ov.get("hwfull"), **extra,
                 "available": res.get("available"), "err": res.get("error"),
             })
-        except BaseException as e:  # noqa: BLE001  自愈:一次窗口异常(含乱抛的 SystemExit)绝不能永久杀死采样 daemon
+        except BaseException as e:  # noqa: BLE001  自愈：一次窗口异常(含乱抛的 SystemExit)绝不能永久杀死采样 daemon
             # ★ 先记录死因(在任何 re-raise 之前!)—— 含 KeyboardInterrupt/SystemExit。
-            #   之前线程就是被一个 KI/SE 带走、且没留痕:re-raise 在记录前发生了。
+            #   之前线程就是被一个 KI/SE 带走、且没留痕：re-raise 在记录前发生了。
             import traceback  # noqa: PLC0415
             cause = "".join(traceback.format_exception(type(e), e, e.__traceback__))[-3000:]
             try:  # 落进独立 CRASH 文件(durable,append)——从线上读真实 traceback 的钥匙
@@ -232,7 +232,7 @@ def _driver_loop() -> None:
                                type(e).__name__, e)
             except Exception:  # noqa: BLE001
                 pass
-            # ★ 不 re-raise(连 KI/SE 也不):后台采样 daemon 的一次窗口异常不该永久杀死它;
+            # ★ 不 re-raise(连 KI/SE 也不)：后台采样 daemon 的一次窗口异常不该永久杀死它;
             #   进程真退出会自然带走 daemon 线程。
             time.sleep(2.0)
 
@@ -245,7 +245,7 @@ def _atomic_write_json(path: str, obj: Any) -> None:
 
 
 class FilePcSampling:
-    """前端用:不采样,只读 EngineCore 写的共享结果文件(跨进程回流)。
+    """前端用：不采样,只读 EngineCore 写的共享结果文件(跨进程回流)。
 
     实现 PcSamplingController 的鸭子接口(started / available / run_window /
     last_result / close),让 CuptiKernelCollector / dashboard 无感复用。

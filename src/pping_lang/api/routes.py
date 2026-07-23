@@ -6,7 +6,7 @@ Day 6: GET 端点（health, metrics, diagnoses, rules, instances）+ /  dashboar
 Day 8: POST/PUT/DELETE/test 端点 — 规则 CRUD via RuleStore
 Day 9: 规则热加载（store 改动让 DiagnosisEngine 下一轮即看到）
 
-读路径:实时短窗走 Sink 内存环;长窗/历史走 JsonlStore(扫 metrics.jsonl);
+读路径：实时短窗走 Sink 内存环;长窗/历史走 JsonlStore(扫 metrics.jsonl);
 bench_runs(可变行)仍用 DuckDB。
 """
 from __future__ import annotations
@@ -164,7 +164,7 @@ def _kernel_findings(
     window_s: float | None,
     lang: str = "zh",
 ) -> list[dict[str, Any]]:
-    """把 kernel 指标翻译成人话结论 —— pping-lang 的命根子:给结论不给数字。
+    """把 kernel 指标翻译成人话结论 —— pping-lang 的命根子：给结论不给数字。
 
     全部从阶段 1a 已采集的量派生(无需 PC Sampling)。每条 {level, claim, title, detail}。
     lang 选 "zh"/"en";默认 zh 保持既有行为不变。
@@ -191,7 +191,7 @@ def _kernel_findings(
                 f"check tiling, or quantize."
                 if en else
                 f"GPU 计算时间 {c['pct']:.0f}% 集中在 {lbl}，"
-                f"典型 compute-bound 形态。提速方向:增大 batch 摊薄、检查 tiling、或量化。"
+                f"典型 compute-bound 形态。提速方向：增大 batch 摊薄、检查 tiling、或量化。"
             ),
         })
     # 2. 单个 kernel 主导 → 优化它收益最大
@@ -259,7 +259,7 @@ def _kernel_findings(
                 f"launch 开销可能偏高。"
             ),
         })
-    # 7. 吃自己狗粮:采集器自身开销
+    # 7. 吃自己狗粮：采集器自身开销
     if overhead_cb_ms is not None and window_s and window_s > 0:
         ov_pct = 100.0 * (overhead_cb_ms / 1000.0) / window_s
         if ov_pct >= 3:
@@ -314,7 +314,7 @@ _STALL_ADVICE_EN: dict[str, str] = {
 def _stall_findings(result: dict[str, Any] | None, lang: str = "zh") -> list[dict[str, Any]]:
     """把 PC Sampling stall 分解翻成人话结论(Deep Evidence 的"给结论"层)。
 
-    口径遵循设计文档 §11(Codex 评审):不过度归因(访存依赖不单独断言带宽 vs 延迟);
+    口径遵循设计文档 §11(Codex 评审)：不过度归因(访存依赖不单独断言带宽 vs 延迟);
     scheduler_slack 高是好事(非 latency-starved);真瓶颈排除 slack/other。
     lang 选 "zh"/"en";默认 zh 保持既有行为不变。
     """
@@ -364,7 +364,7 @@ def _stall_findings(result: dict[str, Any] | None, lang: str = "zh") -> list[dic
                       (f"采样最多的 kernel（{k['kernel'][:46]}）主要卡在 {dom}"
                        f"（{k['dominant_pct']:.0f}%）。"),
         })
-    # 4. 诚实:取证采样有丢样就标注
+    # 4. 诚实：取证采样有丢样就标注
     ov: dict[str, Any] = result.get("overhead") or {}
     if (ov.get("hwfull") or 0) > 0 or (ov.get("dropped") or 0) > 0:
         findings.append({
@@ -429,22 +429,22 @@ def build_app(
         allow_headers=["*"],
     )
 
-    # 拆出 vendor 资源:CSS/JS 单独文件,index.html 只剩 markup(读进闭包,启动时一次)
+    # 拆出 vendor 资源：CSS/JS 单独文件,index.html 只剩 markup(读进闭包,启动时一次)
     ui_html = _read_ui("index.html", "<h1>pping-lang UI missing</h1>")
     ui_css = _read_ui("dashboard.css")
     ui_js = _read_ui("dashboard.js")
-    # vendor 资源本地化:Alpine/Chart 不再走 CDN,离线/air-gapped GPU 机也能渲染
+    # vendor 资源本地化：Alpine/Chart 不再走 CDN,离线/air-gapped GPU 机也能渲染
     ui_vendor_alpine = _read_ui("vendor/alpine.min.js")
     ui_vendor_chart = _read_ui("vendor/chart.umd.min.js")
 
-    # 冷/长窗读端:扫 LocalSink 落的 JSONL(与 sink 共享同目录文件)。实时短窗走内存环。
+    # 冷/长窗读端：扫 LocalSink 落的 JSONL(与 sink 共享同目录文件)。实时短窗走内存环。
     metric_store = JsonlStore(Path(db_path).parent, instance_id)
 
     # === GET / — dashboard ===
     @app.get("/", response_class=HTMLResponse)
     def index() -> HTMLResponse:
-        # index.html 同样 no-cache:无缓存头时浏览器走启发式缓存,普通 F5 可能拿旧版
-        # (实测踩过:布局改了用户刷新看不到)。js/css 的同款处理见下。
+        # index.html 同样 no-cache：无缓存头时浏览器走启发式缓存,普通 F5 可能拿旧版
+        # (实测踩过：布局改了用户刷新看不到)。js/css 的同款处理见下。
         return HTMLResponse(ui_html, headers={"Cache-Control": "no-cache, must-revalidate"})
 
     # 自研 JS/CSS 每次部署都会变 —— no-cache 让浏览器每次校验(没变 304,很便宜),
@@ -758,7 +758,7 @@ def build_app(
         launch_rate = fresh_val(M.KERNEL_LAUNCH_COUNT_PER_S)
         # per-kernel 原始明细(未聚合 mangled 名)直接读 collector,不走 metric 管道
         top_kernels = cupti.top_kernels() if cupti is not None else []
-        # 数据时刻:这批 kernel 数据是哪一窗的、采集于多久前。让前端能说清
+        # 数据时刻：这批 kernel 数据是哪一窗的、采集于多久前。让前端能说清
         # "实时 / X 秒前 / 无流量已过期",而不是把陈旧数据当现状。
         snapshot_age_s: float | None = None
         rollup_window_s: float | None = None
@@ -776,7 +776,7 @@ def build_app(
         sync_share = fresh_val(M.KERNEL_SYNC_SHARE_PCT)
         in_graph = fresh_val(M.KERNEL_IN_GRAPH_PCT)
         overhead_cb_ms = fresh_val(M.PPING_LANG_CUPTI_CB_MS)
-        # 结论层:把数字翻译成人话(诊断不止观测)
+        # 结论层：把数字翻译成人话(诊断不止观测)
         findings = _kernel_findings(
             class_shares=class_shares, top_kernels=top_kernels,
             sync_share=sync_share, memcpy_share=memcpy_share, in_graph=in_graph,
@@ -1056,7 +1056,7 @@ def build_app(
             "data_source": data_source,        # "measured" | "analytical"
             "formula": formula,                # analytical only — explanation string
             "params_billion": (_params / 1e9) if _params else None,
-            # P0-C:最近一次实测 scaling sweep(没跑过为 None)→ 图上叠实测扩展曲线
+            # P0-C：最近一次实测 scaling sweep(没跑过为 None)→ 图上叠实测扩展曲线
             "scaling": _scaling["result"],
         }
 
@@ -1080,7 +1080,7 @@ def build_app(
         seconds: int = Query(300, ge=1, le=86400),
         limit: int = Query(200, ge=1, le=2000),
     ) -> dict[str, Any]:
-        # 内存诊断环:命中即可见,无 DuckDB 读、无刷盘滞后
+        # 内存诊断环：命中即可见,无 DuckDB 读、无刷盘滞后
         since_ns = wall_ns() - int(seconds * 1e9)
         try:
             diags = sink.recent_diagnoses(since_ns, limit)
@@ -1315,7 +1315,7 @@ def build_app(
     _scaling: dict[str, Any] = {"running": False, "progress": None, "result": None, "error": None}
 
     def _vllm_base_url() -> str:
-        """vLLM OpenAI 端点:插件与 vllm 同机,从启动 cmdline 解析 --host/--port。"""
+        """vLLM OpenAI 端点：插件与 vllm 同机,从启动 cmdline 解析 --host/--port。"""
         host, port = "127.0.0.1", "8000"
         args = cmdline or []
         for i, a in enumerate(args):
@@ -1363,7 +1363,7 @@ def build_app(
         if not rows:
             return None
         # 扩展效率(关键口径):B=1 的缺口是**每步固定开销**(调度/采样/launch,不随并发变),
-        # 不能当扩展问题报。真正要看的是相对基线的加速比 ÷ 理想加速比:
+        # 不能当扩展问题报。真正要看的是相对基线的加速比 ÷ 理想加速比：
         #   eff(B) = (tps_B / tps_b0) / (B / b0)
         # eff ≈100% = 线性扩展(固定开销被摊薄,贴 envelope 斜率);掉头点 = 收益递减点。
         base = rows[0]
@@ -1599,7 +1599,7 @@ def build_app(
             "scenario_name": scenario.name,
         }
 
-    # === Autopilot(M0:默认 SimSandbox + StubAgent 跑通闭环;真 GPU 沙盒为下一增量)===
+    # === Autopilot(M0：默认 SimSandbox + StubAgent 跑通闭环;真 GPU 沙盒为下一增量)===
     try:
         from pathlib import Path as _Path  # noqa: PLC0415
 

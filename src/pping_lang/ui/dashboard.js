@@ -13,7 +13,7 @@ const I18N = {
     'cfg.hintInactive': '引擎未运行,保存仅校验,重启后生效',
     'cfg.mbu_high': 'HBM 占用上限阈值(NVML%)', 'cfg.mbu_low': 'HBM 占用偏低阈值(NVML%)',
     'cfg.mfu_low': 'MFU 偏低阈值', 'cfg.mfu_high': 'MFU 饱和阈值',
-    'cfg.kv': 'KV 压力阈值', 'cfg.min_running': '空载守卫:在跑请求下限',
+    'cfg.kv': 'KV 压力阈值', 'cfg.min_running': '空载守卫：在跑请求下限',
     'cfg.stall_mem': '内核访存 throttle 阈值', 'cfg.stall_memdep': '内核访存延迟阈值', 'cfg.stall_math': '内核算力管线饱和阈值',
     'slo.form': '业务形态', 'slo.thresholds': '瓶颈阈值', 'slo.pass': '达标', 'slo.fail': '超标',
     'slo.benchHint': '如需验证调参收益,可在压测台对比 A/B。', 'slo.benchBtn': '前往压测 →',
@@ -40,16 +40,16 @@ const I18N = {
     'kpi.gpuutil': 'GPU 利用率', 'kpi.gpuutil.sub': 'SM 忙碌',
     'kpi.vram': '显存占用', 'kpi.vram.sub': 'VRAM 容量', 'kpi.prefix': 'Prefix cache 命中',
     'kpi.preempt': '抢占 / 分钟',
-    'tip.ttft': 'TTFT = Time To First Token\n从用户发送请求到收到第一个生成 token 之间的延迟。\n大数字 = 窗口内平均(典型水平);下方分布条 = p50→p95→p99(看尾部恶化,告警颜色按 p99)。\n解读:\n  · 主要由 prefill 阶段决定(要处理整个 prompt)\n  · 长 prompt / 高并发 / 排队都会拉高 TTFT\n  · 用户感觉的「卡了多久才有反应」就是这个\nSLA 常见档:<200ms 即时;<500ms 流畅;<1s 可接受;>2s 用户开始流失。',
-    'tip.dist': '分位分布:每行一条,p99 = 满刻度。p95/p99 行越接近 p50 行 = 尾部越稳;p99 远长于 p50 = 尾延迟恶化。',
-    'tip.tpot': 'TPOT = Time Per Output Token\n生成每个 token 的平均时间(每次 forward pass 的时长)。\n大数字 = 窗口内平均;下方分布条 = p50→p95→p99(尾延迟,告警颜色按 p99)。\n解读:\n  · 主要由 decode 阶段的带宽决定(要读完一遍权重)\n  · 用户感觉的「文字一个个吐出来的快慢」就是这个\n  · 1/TPOT = 单请求 token 速度(50ms TPOT = 20 tok/s)\nSLA 常见档:<30ms 流畅;<50ms 可接受;>100ms 明显卡顿。\nITL fallback:vllm <0.20 不发 TPOT 时,用 iter 间隔近似(语义略不同)。',
-    'tip.tpotItl': '注意:当前 vllm 未发 TPOT,回退到 ITL 近似。',
-    'tip.tput': 'Output 吞吐 = 系统每秒产出的 token 总数\n公式:窗口内 sum(gen_tokens) / 窗口秒数\n解读两个值各看不同的事:\n  · 系统聚合(大字):所有并发请求合起来每秒吐多少 token —— 衡量容量、$/token\n  · 单请求(小字 = 1000/TPOT_p50):单个用户感觉每秒吐多少 token —— 衡量打字速度\n两者关系:系统聚合 ≈ 单请求速度 × 并发数(理想情况下)。\n扩 batch 时系统聚合涨、单请求速度可能微跌 — 用户略卡但总产能高。',
-    'tip.kv': 'KV cache 使用率 = 已分配 KV 块 / 总 KV 块\nvllm 把每个请求的注意力 K/V 缓存切成固定大小的 block 管理。\n解读:\n  · 这是显存里『装请求』的容量水位,跟前面『显存占用』不是一回事\n  · <50%:还能塞更多并发,扩 max_num_seqs 没风险\n  · >80%:接近极限,新请求要么排队要么抢占老请求 (preemption)\n  · >90%:preemption 频率会陡升,吞吐反而下降\n和 --gpu-memory-utilization 互动:那个参数决定 KV cache 总池子多大。',
-    'tip.running': '运行中请求数 = 当前正在 forward pass 的请求数 (batch size)\nvllm 的『continuous batching』每个 iter 都可能改变这个数。\n解读:\n  · 衡量当前并发度,跟 TPS 一起看\n  · 远低于 max_num_seqs:吃不满,扩客户端并发\n  · 等于 max_num_seqs:满载,看是被吞吐限制还是被显存限制\n  · 跟 waiting_reqs 比较:running 上不去 + waiting 排队 = 显存瓶颈',
-    'tip.waiting': '等待队列长度 = 已收到但没排上 running 的请求数\n显存不够或者 max_num_seqs 满了,新请求就堆在这里。\n解读:\n  · 长期 >0:消化速度跟不上进来速度 —— 加 GPU 或限流\n  · 突发 >0 后快速归零:偶发流量尖峰,正常\n  · 持续 >20:用户感觉 TTFT 飙升,是规则告警阈值',
-    'tip.mfu': 'MFU = Model FLOPs Utilization\n实际算力 / GPU 峰值算力,衡量「跑模型时 GPU 算力真正被用了多少」。\n公式:MFU = (6 · params · tokens/sec) / peak_TFLOPS\n解读:\n  · 训练通常 30-55% 算良好(A100/H100 上)\n  · 推理 decode 阶段天然低(~1-5%)—— 受带宽限制,不是 MFU 越高越好\n  · prefill 阶段高(>30%)才是 MFU 真正有意义的时候\n依赖 vllm ≥0.20 的 perf_stats,当前 0.13 不发,这里会显示 —',
-    'tip.gpuutil': 'GPU 利用率 = SM (Streaming Multiprocessor) 忙碌时间占比\nNVML 报的值,反映「过去采样间隔内,至少一个 kernel 在跑」的时间比例。\n注意:不代表算力用满了 —— decode 阶段常见 70-90% 但 MFU 只有 1-5%,\n因为 SM 在「跑 kernel 等数据」也算忙。\n真正衡量算力效率要看 MFU。',
+    'tip.ttft': 'TTFT = Time To First Token\n从用户发送请求到收到第一个生成 token 之间的延迟。\n大数字 = 窗口内平均(典型水平);下方分布条 = p50→p95→p99(看尾部恶化,告警颜色按 p99)。\n解读：\n  · 主要由 prefill 阶段决定(要处理整个 prompt)\n  · 长 prompt / 高并发 / 排队都会拉高 TTFT\n  · 用户感觉的「卡了多久才有反应」就是这个\nSLA 常见档：<200ms 即时;<500ms 流畅;<1s 可接受;>2s 用户开始流失。',
+    'tip.dist': '分位分布：每行一条,p99 = 满刻度。p95/p99 行越接近 p50 行 = 尾部越稳;p99 远长于 p50 = 尾延迟恶化。',
+    'tip.tpot': 'TPOT = Time Per Output Token\n生成每个 token 的平均时间(每次 forward pass 的时长)。\n大数字 = 窗口内平均;下方分布条 = p50→p95→p99(尾延迟,告警颜色按 p99)。\n解读：\n  · 主要由 decode 阶段的带宽决定(要读完一遍权重)\n  · 用户感觉的「文字一个个吐出来的快慢」就是这个\n  · 1/TPOT = 单请求 token 速度(50ms TPOT = 20 tok/s)\nSLA 常见档：<30ms 流畅;<50ms 可接受;>100ms 明显卡顿。\nITL fallback:vllm <0.20 不发 TPOT 时,用 iter 间隔近似(语义略不同)。',
+    'tip.tpotItl': '注意：当前 vllm 未发 TPOT,回退到 ITL 近似。',
+    'tip.tput': 'Output 吞吐 = 系统每秒产出的 token 总数\n公式：窗口内 sum(gen_tokens) / 窗口秒数\n解读两个值各看不同的事：\n  · 系统聚合(大字)：所有并发请求合起来每秒吐多少 token —— 衡量容量、$/token\n  · 单请求(小字 = 1000/TPOT_p50)：单个用户感觉每秒吐多少 token —— 衡量打字速度\n两者关系：系统聚合 ≈ 单请求速度 × 并发数(理想情况下)。\n扩 batch 时系统聚合涨、单请求速度可能微跌 — 用户略卡但总产能高。',
+    'tip.kv': 'KV cache 使用率 = 已分配 KV 块 / 总 KV 块\nvllm 把每个请求的注意力 K/V 缓存切成固定大小的 block 管理。\n解读：\n  · 这是显存里『装请求』的容量水位,跟前面『显存占用』不是一回事\n  · <50%：还能塞更多并发,扩 max_num_seqs 没风险\n  · >80%：接近极限,新请求要么排队要么抢占老请求 (preemption)\n  · >90%:preemption 频率会陡升,吞吐反而下降\n和 --gpu-memory-utilization 互动：那个参数决定 KV cache 总池子多大。',
+    'tip.running': '运行中请求数 = 当前正在 forward pass 的请求数 (batch size)\nvllm 的『continuous batching』每个 iter 都可能改变这个数。\n解读：\n  · 衡量当前并发度,跟 TPS 一起看\n  · 远低于 max_num_seqs：吃不满,扩客户端并发\n  · 等于 max_num_seqs：满载,看是被吞吐限制还是被显存限制\n  · 跟 waiting_reqs 比较：running 上不去 + waiting 排队 = 显存瓶颈',
+    'tip.waiting': '等待队列长度 = 已收到但没排上 running 的请求数\n显存不够或者 max_num_seqs 满了,新请求就堆在这里。\n解读：\n  · 长期 >0：消化速度跟不上进来速度 —— 加 GPU 或限流\n  · 突发 >0 后快速归零：偶发流量尖峰,正常\n  · 持续 >20：用户感觉 TTFT 飙升,是规则告警阈值',
+    'tip.mfu': 'MFU = Model FLOPs Utilization\n实际算力 / GPU 峰值算力,衡量「跑模型时 GPU 算力真正被用了多少」。\n公式：MFU = (6 · params · tokens/sec) / peak_TFLOPS\n解读：\n  · 训练通常 30-55% 算良好(A100/H100 上)\n  · 推理 decode 阶段天然低(~1-5%)—— 受带宽限制,不是 MFU 越高越好\n  · prefill 阶段高(>30%)才是 MFU 真正有意义的时候\n依赖 vllm ≥0.20 的 perf_stats,当前 0.13 不发,这里会显示 —',
+    'tip.gpuutil': 'GPU 利用率 = SM (Streaming Multiprocessor) 忙碌时间占比\nNVML 报的值,反映「过去采样间隔内,至少一个 kernel 在跑」的时间比例。\n注意：不代表算力用满了 —— decode 阶段常见 70-90% 但 MFU 只有 1-5%,\n因为 SM 在「跑 kernel 等数据」也算忙。\n真正衡量算力效率要看 MFU。',
     'tip.vram': '显存占用率 = 已用 VRAM / 总 VRAM\n权重 + KV cache + 激活值 + CUDA workspace 之和。\nvllm 启动时 --gpu-memory-utilization 决定权重+KV的目标占比(默认 0.9)。\n持续 >95% 容易触发 preemption / OOM。',
     'tip.prefix': 'Prefix cache 命中率 = 复用前缀的 KV 块 / 总查询块\nvllm 会缓存已经算过的 prompt 前缀的 KV,下次请求命中前缀可以跳过 prefill。\n多轮对话 / system prompt 固定的场景应该 >50%;一次性请求自然为 0。',
     'tip.padding': 'CUDA padding = (cudagraph 实际批量 - 真实 token) / cudagraph 批量\nvllm 用 CUDA graph 加速时按固定 batch size 跑,少的 token 用 padding 填。\npadding 越高浪费越大。>30% 说明 batch 大小档位选得不合适。',
@@ -59,7 +59,7 @@ const I18N = {
     'lat.ttft': 'TTFT · 首 token 延迟', 'lat.tpot': 'TPOT · 单 token 生成时间', 'lat.e2e': 'E2E · 端到端延迟',
     'lat.noTtft': '暂无 TTFT 数据', 'lat.noTpot': '暂无 TPOT / ITL 数据',
     'lat.noE2e': '暂无 E2E 数据', 'lat.noE2eHint': '(跑一次 bench 触发请求完成事件)',
-    'lat.itlSource': '数据源:ITL fallback(当前 vllm 没发 TPOT 字段,用 iter 间隔近似)',
+    'lat.itlSource': '数据源：ITL fallback(当前 vllm 没发 TPOT 字段,用 iter 间隔近似)',
     'roof.title': 'Roofline 实时诊断',
     'roof.desc': '点 = 相近 step 聚合(越大 = 步数越多)· 看离上界还有多远,判断 compute-bound 还是 memory-bound',
     'roof.estimate': '⚠ 估算数据 · 当前 vllm 不发 perf_stats,按 token 计数 + 模型参数推算({b}B 参数)。',
@@ -88,7 +88,7 @@ const I18N = {
     'kern.scalingSweepBtn': '▶ 实测 scaling 曲线(压测扫并发 1/4/16/64,约 2 分钟)',
     'kern.scalingSweepInProgress': '压测中…',
     'kern.scalingSweepNote': '压测流量打到本机 vLLM,期间面板数据会受压测影响',
-    'kern.scalingSweepError': '压测失败:{err}',
+    'kern.scalingSweepError': '压测失败：{err}',
     'kern.scalingVerdict': '📏 实测 scaling 结论',
     'kern.verdictChart': '图中实心绿线 = 实测;虚线 = 理论 envelope',
     'kern.kernelTimePct': '每个 Kernel 的 GPU 时间占比',
@@ -110,8 +110,8 @@ const I18N = {
     'kern.kernelStallTitle': '这个 kernel 的 stall 构成（占它自己的样本）',
     'kern.kernelDeepHotspot': '最深热点',
     'kern.kernelHotspotDesc': 'PC sampling 落到指令地址(stall 样本集中在哪)',
-    'kern.sourceFile': '源文件:{path}',
-    'kern.closedLibKernel': '闭源库 kernel(无 lineinfo)→ 给到 SASS 指令偏移级热点:',
+    'kern.sourceFile': '源文件：{path}',
+    'kern.closedLibKernel': '闭源库 kernel(无 lineinfo)→ 给到 SASS 指令偏移级热点：',
     'kern.launchOrigin': '↗ 启动来源',
     'kern.launchStack': 'launch 栈,向外归因到调用它的 host 代码',
     'kern.preciseMicros': '如需逐 kernel 的精确 μs 耗时,需 CUPTI Activity 模式 —— 与 PC Sampling 共用同一套性能计数硬件、二者互斥,需单独部署。下方 Deep Evidence 是同一次采样的全局 stall 分解。',
@@ -167,7 +167,7 @@ const I18N = {
     'kern.dropped': '丢弃 {n} 条（已自动降级）',
     'kern.deepEvidence': '🔬 Deep Evidence — 为什么慢',
     'kern.deepEvidenceSub': 'PC Sampling 取证 · 按需短窗',
-    'kern.deepHint': '上方定位"哪个 kernel";这里看整体:warp 周期的去向、全局主要 stall 原因、以及这些数据的测量方式',
+    'kern.deepHint': '上方定位"哪个 kernel";这里看整体：warp 周期的去向、全局主要 stall 原因、以及这些数据的测量方式',
     'kern.collectEvidence': '采集 stall 证据(5s)',
     'kern.unavailable': 'PC Sampling 取证不可用 — {err}\n需 Linux + libppingcupti.so + 放开 GPU 性能计数器权限;与 torch 同进程需 1b 注入式(见设计文档 §12)。',
     'kern.warpCycleDirection': 'Warp 周期去向',
@@ -175,9 +175,9 @@ const I18N = {
     'kern.issued': '发射指令(有效执行)',
     'kern.slack': '就绪未选中(占用率有余量)',
     'kern.stallWait': '真 stall(在等)',
-    'kern.stallAnalysis': '→ 大量周期处于真 stall:延迟瓶颈,详见下方 stall 构成',
-    'kern.slackAnalysis': '→ 有就绪 warp 没被选中:占用率充足,瓶颈不在并行度',
-    'kern.issuedAnalysis': '→ 发射占比较高:GPU 比较忙碌',
+    'kern.stallAnalysis': '→ 大量周期处于真 stall：延迟瓶颈,详见下方 stall 构成',
+    'kern.slackAnalysis': '→ 有就绪 warp 没被选中：占用率充足,瓶颈不在并行度',
+    'kern.issuedAnalysis': '→ 发射占比较高：GPU 比较忙碌',
     'kern.stallBreakdown': 'stall 分解',
     'kern.stallBreakdownSub': '占 stall 样本(= 全部 − issued)· 点行看原始硬件指标名',
     'kern.howMeasured': '测量方式',
@@ -231,7 +231,7 @@ const I18N = {
     'chart.samplesAgg': '合并 {n} 个 step',
     'chart.measuredConcurrency': '实测 并发{b}: {y} TFLOPs/s',
     'chart.theoreticalEnvelope': '理论 envelope: {e} TFLOPs/s',
-    'chart.gap': '缺口: {g}%',
+    'chart.gap': '缺口： {g}%',
     'chart.kclassComm': '通信',
     'chart.kclassOther': '其它',
     'chart.syncWait': '同步等待 (launch-bound)',
@@ -244,13 +244,13 @@ const I18N = {
     'bench.e2eAvg': 'E2E 平均',
     'bench.outputThroughput': 'Output 吞吐',
     'bench.completionErrors': '完成 / 错误',
-    'bench.submitError': '提交失败: {e}',
-    'bench.submitException': '错误: {e}',
+    'bench.submitError': '提交失败： {e}',
+    'bench.submitException': '错误： {e}',
     'bench.concurrencyLabel': '并发 {c} · {p}/{o} tok · {l}',
     'bench.promptSourceSynthetic': '合成填充 (synthetic)',
     'bench.promptSourceDesc': '按 prompt_tokens 长度循环 the quick brown fox 句模板',
-    'toast.saveFailed': '保存失败: {e}',
-    'toast.error': '错误: {e}',
+    'toast.saveFailed': '保存失败： {e}',
+    'toast.error': '错误： {e}',
     'toast.saveApplied': '已保存,热生效',
     'toast.savePending': '已保存(引擎未运行,重启后生效)',
     'kernel.fresh': '刚刚',
@@ -259,7 +259,7 @@ const I18N = {
     'kernel.scaling.progress': '启动中…',
     'kernel.scaling.testing': '压测中…',
     'kernel.pcSamplingUnavailable': 'PC Sampling 不可用',
-    'kernel.requestFailed': '请求失败: {e}',
+    'kernel.requestFailed': '请求失败： {e}',
     'kernel.traceUnavailable': '暂无 trace 数据(需 CUPTI 采集器在采集)',
     'roofline.memoryBound': 'Memory-bound（LLM decode 阶段的常态）',
     'roofline.memSugg1': '增大 batch 直到 KV cache 接近 80% — 摊薄权重 re-read',
@@ -306,12 +306,12 @@ const I18N = {
     'kernel.label.dispatch': '调度分发',
     'kernel.label.schedulerSlack': '调度余量(非瓶颈)',
     'kernel.label.other': '其它',
-    'kernel.suggestion.gemmMem': '访存瓶颈的矩阵乘:fp8/int8 量化、增大 batch 提升计算密度、检查权重是否反复从显存读取。',
+    'kernel.suggestion.gemmMem': '访存瓶颈的矩阵乘：fp8/int8 量化、增大 batch 提升计算密度、检查权重是否反复从显存读取。',
     'kernel.suggestion.gemmMath': '矩阵乘已算力饱和(接近峰值),难再压;考虑更低精度。',
-    'kernel.suggestion.attnMem': '注意力访存瓶颈:确认 FlashAttention / PagedAttention 生效、KV cache 命中率。',
-    'kernel.suggestion.elementwise': '逐元素 / 拷贝:看能否算子融合,减少 kernel 数与显存往返。',
-    'kernel.suggestion.sampling': '采样 / 解码开销:批量解码、减少不必要的 host-device 往返。',
-    'kernel.suggestion.index': '索引 / 查表:确认访问模式连续,避免随机 gather 打散访存。',
+    'kernel.suggestion.attnMem': '注意力访存瓶颈：确认 FlashAttention / PagedAttention 生效、KV cache 命中率。',
+    'kernel.suggestion.elementwise': '逐元素 / 拷贝：看能否算子融合,减少 kernel 数与显存往返。',
+    'kernel.suggestion.sampling': '采样 / 解码开销：批量解码、减少不必要的 host-device 往返。',
+    'kernel.suggestion.index': '索引 / 查表：确认访问模式连续,避免随机 gather 打散访存。',
     'kernel.suggestion.execDep': '指令延迟为主,通常由 kernel 内部结构决定,优化空间有限。',
     'ui.copy': '复制',
     'ui.copied': '已复制 ✓',
@@ -324,7 +324,7 @@ const I18N = {
     'cleanup.stallTitle': 'stall {pct}%',
     'cleanup.mainCause': '主因',
     'cleanup.ofStall': '（占 stall 的 {pct}%）',
-    'cleanup.topRecoverablePre': '🎯 最大可回收点:',
+    'cleanup.topRecoverablePre': '🎯 最大可回收点：',
     'cleanup.topRecoverableMid': '—— 全局约',
     'cleanup.topRecoverablePost': '的 GPU 时间是它在等待,优先优化它。',
     'cleanup.dominantStall': '主导 stall',
@@ -359,10 +359,10 @@ const I18N = {
     'cleanup.measured': '实测',
     'cleanup.dominatedBy': '{label} 为主',
     'rule.regime-classify.name': '算术强度 vs 脊点(Roofline 定位)',
-    'rule.regime-classify.hypothesis': 'AI < 脊点 → 访存受限;否则计算受限(定义性派生)。memory-bound 且 SM util 高时:util 虚高是物理极限,非优化空间。',
-    'rule.A.name': '双低(算力、带宽均有余量)', 'rule.A.hypothesis': '存在在途请求,但算力与带宽两个上限均未逼近 —— 二者皆有余量,瓶颈不在硬件(可能为批处理规模不足 / kernel launch 开销 / 小算子未融合)。空载守卫:无在途请求时不触发,以区分"双低"与"纯空载"。', 'rule.A.suggestion': '提高 max-num-seqs(并发未填满)/ 调整 chunked-prefill 的 partial-prefills。注:Continuous Batching、CUDA Graph、chunked-prefill 在 0.21 默认启用,请先确认未被 enforce-eager 等关闭,避免重复启用(无效操作)。',
-    'rule.B.name': '带宽瓶颈(逼近显存带宽上限)', 'rule.B.hypothesis': '访存受限:decode 每步重新读取权重与 KV,带宽为上限。NVML HBM 控制器占用 / 内核 memory_throttle(访存管线饱和)/ memory_dependency(等待访存)交叉印证。(注:perf 实测 MBU 在小模型上因 L2 复用 >1,故不作为阈值。)', 'rule.B.suggestion': '投机解码(关注接受率,避免转为计算受限)/ KV 量化(FP8)/ 升级至更高带宽 GPU。',
-    'rule.C.name': '算力瓶颈(算力饱和)', 'rule.C.hypothesis': '计算受限:FLOPs 饱和,算力为上限(长 prompt prefill 的固有特征)。实测 MFU 逼近上限 / 内核 math_pipe(FMA/ALU/Tensor 计算管线饱和)交叉印证。', 'rule.C.suggestion': '更换更快的 attention backend(0.21 按硬件自动选择,可用 --attention-backend 覆盖)/ 权重量化(FP8/FP4)/ 升级算力更强的 GPU。',
+    'rule.regime-classify.hypothesis': 'AI < 脊点 → 访存受限;否则计算受限(定义性派生)。memory-bound 且 SM util 高时：util 虚高是物理极限,非优化空间。',
+    'rule.A.name': '双低(算力、带宽均有余量)', 'rule.A.hypothesis': '存在在途请求,但算力与带宽两个上限均未逼近 —— 二者皆有余量,瓶颈不在硬件(可能为批处理规模不足 / kernel launch 开销 / 小算子未融合)。空载守卫：无在途请求时不触发,以区分"双低"与"纯空载"。', 'rule.A.suggestion': '提高 max-num-seqs(并发未填满)/ 调整 chunked-prefill 的 partial-prefills。注：Continuous Batching、CUDA Graph、chunked-prefill 在 0.21 默认启用,请先确认未被 enforce-eager 等关闭,避免重复启用(无效操作)。',
+    'rule.B.name': '带宽瓶颈(逼近显存带宽上限)', 'rule.B.hypothesis': '访存受限：decode 每步重新读取权重与 KV,带宽为上限。NVML HBM 控制器占用 / 内核 memory_throttle(访存管线饱和)/ memory_dependency(等待访存)交叉印证。(注：perf 实测 MBU 在小模型上因 L2 复用 >1,故不作为阈值。)', 'rule.B.suggestion': '投机解码(关注接受率,避免转为计算受限)/ KV 量化(FP8)/ 升级至更高带宽 GPU。',
+    'rule.C.name': '算力瓶颈(算力饱和)', 'rule.C.hypothesis': '计算受限：FLOPs 饱和,算力为上限(长 prompt prefill 的固有特征)。实测 MFU 逼近上限 / 内核 math_pipe(FMA/ALU/Tensor 计算管线饱和)交叉印证。', 'rule.C.suggestion': '更换更快的 attention backend(0.21 按硬件自动选择,可用 --attention-backend 覆盖)/ 权重量化(FP8/FP4)/ 升级算力更强的 GPU。',
     'rule.D.name': '容量瓶颈(KV 耗尽并触发抢占)', 'rule.D.hypothesis': '显存无法容纳 KV → 并发受限 → 触发抢占。V1 抢占为纯重算(丢弃 KV、从头 re-prefill),一旦发生,decode 吞吐急剧下降。', 'rule.D.suggestion': 'KV 量化(FP8)/ 降低 max-model-len / KV offload / 降低 max-num-seqs。',
     'decode.vllmFusedRms': 'vLLM 自定义 · fused add + RMSNorm', 'decode.vllmRms': 'vLLM 自定义 · RMSNorm',
     'decode.vllmRope': 'vLLM 自定义 · RoPE', 'decode.vllmSilu': 'vLLM 自定义 · SiLU/激活',
@@ -751,7 +751,7 @@ function _uiLang() {
 window.t = function (key, params) {
   const lang = _uiLang();
   let s = (I18N[lang] && I18N[lang][key]) || I18N.en[key] || key;
-  // 占位符插值:t('k', {ai: 3.0}) 把 '… {ai} …' 里的 {ai} 换成 3.0(中英语序不同时用)
+  // 占位符插值：t('k', {ai: 3.0}) 把 '… {ai} …' 里的 {ai} 换成 3.0(中英语序不同时用)
   if (params) for (const k in params) s = s.split('{' + k + '}').join(params[k]);
   return s;
 };
@@ -815,13 +815,13 @@ function _makeRooflineChart(ctx) {
           pointRadius: 0, fill: 'origin', backgroundColor: 'rgba(81, 71, 200, 0.06)', tension: 0, order: 2,
         },
         {
-          // 调优地图:decode 的算术强度≈batch → 扩 batch 沿带宽上界向右爬,ridge point 后 compute-bound
+          // 调优地图：decode 的算术强度≈batch → 扩 batch 沿带宽上界向右爬,ridge point 后 compute-bound
           label: 'batch scaling envelope', data: [], showLine: true, borderColor: '#9a9aa4',
           borderDash: [5, 4], borderWidth: 1.5, pointRadius: 3.5, pointStyle: 'rectRot',
           backgroundColor: '#9a9aa4', fill: false, order: 4,
         },
         {
-          // P0-C:实测 scaling 曲线(压测扫并发档)—— 缺口从哪个 B 张开 = 真实瓶颈位置
+          // P0-C：实测 scaling 曲线(压测扫并发档)—— 缺口从哪个 B 张开 = 真实瓶颈位置
           label: t('chart.measuredScaling'), data: [], showLine: true, borderColor: '#0d8b80',
           borderWidth: 2, pointRadius: 5, pointHoverRadius: 8, pointStyle: 'circle',
           backgroundColor: '#0d8b80', fill: false, order: 5,
@@ -877,7 +877,7 @@ function _makeRooflineChart(ctx) {
   });
 }
 
-// 相近 step 合并成簇心:log 网格分桶(x 每十倍程 6 桶、y 4 桶),桶内取几何均值,
+// 相近 step 合并成簇心：log 网格分桶(x 每十倍程 6 桶、y 4 桶),桶内取几何均值,
 // n = 合并步数 → 点大小。免得 60s 内每 step 一个点密密麻麻(信息在簇,不在单点)。
 function _aggRooflinePoints(raw) {
   const bins = new Map();
@@ -899,7 +899,7 @@ function _aggRooflinePoints(raw) {
 function _applyRooflineData(chart, data) {
   if (!chart) return;
   const agg = _aggRooflinePoints((data.points || []).map(p => ({ x: p.ai, y: p.throughput_tflops })));
-  // A:簇语义标签 —— 步数最多的簇 = decode 主体(decode 步数远多于 prefill);
+  // A：簇语义标签 —— 步数最多的簇 = decode 主体(decode 步数远多于 prefill);
   // 其余里 x 明显更大的标 prefill
   if (agg.length) {
     const dec = agg.reduce((a, p) => (p.n > a.n ? p : a));
@@ -913,7 +913,7 @@ function _applyRooflineData(chart, data) {
     }
   }
   chart.data.datasets[0].data = agg;
-  // 点半径 ∝ log(合并步数):单步 4px,几十步 ~10px,封顶 13px
+  // 点半径 ∝ log(合并步数)：单步 4px,几十步 ~10px,封顶 13px
   chart.data.datasets[0].pointRadius = agg.map(p => Math.min(13, 3 + 2.2 * Math.log2(1 + p.n)));
   chart.data.datasets[0].pointHoverRadius = agg.map(p => Math.min(15, 5 + 2.2 * Math.log2(1 + p.n)));
   if (data.peak && data.peak.compute_tflops && data.peak.mem_bw_tbs) {
@@ -937,7 +937,7 @@ function _applyRooflineData(chart, data) {
     chart.data.datasets[2].data = [];
     chart.data.datasets[3].data = [];
   }
-  // P0-C:实测 scaling 曲线(压测扫出来的真实扩展点,叠在理论 envelope 上)
+  // P0-C：实测 scaling 曲线(压测扫出来的真实扩展点,叠在理论 envelope 上)
   const rows = (data.scaling && data.scaling.verdict && data.scaling.verdict.rows) || [];
   chart.data.datasets[4].data = rows.map((r, i) => ({
     x: r.b, y: r.tflops, b: r.b, env: r.envelope_tflops, gap: r.gap_pct,
@@ -1077,7 +1077,7 @@ function _createKUtilChart() {
 }
 function _updateKernelTrends(data) {
   if (!data || !data.series) return;
-  // 懒创建:canvas 在 x-if="kernels.enabled" 里,init() 时还不存在,数据到了才建
+  // 懒创建：canvas 在 x-if="kernels.enabled" 里,init() 时还不存在,数据到了才建
   if (!_kClassChart) _kClassChart = _createKClassChart();
   if (!_kUtilChart) _kUtilChart = _createKUtilChart();
   const s = data.series, now = data.now_ns;
@@ -1119,7 +1119,7 @@ function benchTab() {
       timeout_s: 30,
       api: 'chat',
       sloShape: 'chat',
-      sloTtft: 1000, sloTpot: 50, sloE2e: 3000,   // 可选:清空即不设该项约束
+      sloTtft: 1000, sloTpot: 50, sloE2e: 3000,   // 可选：清空即不设该项约束
       prompt_source: 'synthetic',
     },
     promptSources: [
@@ -1145,7 +1145,7 @@ function benchTab() {
         if (!this.form.model && (sys.served_model_name || sys.model)) {
           this.form.model = sys.served_model_name || sys.model;
         }
-        // Endpoint:优先用后端解析出的真实 vLLM 端点(从启动 cmdline 的 --host/--port,
+        // Endpoint：优先用后端解析出的真实 vLLM 端点(从启动 cmdline 的 --host/--port,
         // 已把 0.0.0.0 归一成 127.0.0.1)。压测在服务端跑,这个端点服务端本机可达、且端口正确
         // (vLLM 不在默认 :8000 时也不会猜错)。后端没给(老版本)才退回 :8000 的浏览器 host 猜测。
         if (this.form.endpoint === 'http://localhost:8000') {
@@ -1231,7 +1231,7 @@ function benchTab() {
       this.selectedId = (this.selectedId === id) ? null : id;
     },
 
-    // ===== 压测结果对比:任选两个 run,A=先选(基准),B=后选,Δ=B 相对 A =====
+    // ===== 压测结果对比：任选两个 run,A=先选(基准),B=后选,Δ=B 相对 A =====
     cmpSel: [],
     toggleCmp(id) {
       const i = this.cmpSel.indexOf(id);
@@ -1249,7 +1249,7 @@ function benchTab() {
       const len = s.duration_s ? `${s.duration_s}s` : `${s.num_requests} req`;
       return t('bench.concurrencyLabel', {c: s.concurrency, p: s.prompt_tokens, o: s.output_tokens, l: len});
     },
-    // 对比卡数据:逐指标 A/B 双横条(按本指标 max 归一,免得 ms 与 tok/s 挤同轴)+ Δ%。
+    // 对比卡数据：逐指标 A/B 双横条(按本指标 max 归一,免得 ms 与 tok/s 挤同轴)+ Δ%。
     // 延迟类越低越好,吞吐越高越好;|Δ|<2% 视为持平(压测运行间噪声)
     cmpTable() {
       const pair = this.cmpRuns();
@@ -1277,18 +1277,18 @@ function benchTab() {
         const bar = (v) => (v == null || mx <= 0) ? 0 : Math.max(2, 100 * Number(v) / mx);
         const f = (v) => v == null ? '—'
           : (d.unit === 'ms' ? Number(v).toFixed(1) : Number(v).toFixed(0)) + (d.unit ? ' ' + d.unit : '');
-        // "完成 / 错误"特例:数值文案带上错误数
+        // "完成 / 错误"特例：数值文案带上错误数
         const fa = d.path2 ? `${f(a)} / ${g(A, d.path2) ?? '—'}` : f(a);
         const fb = d.path2 ? `${f(b)} / ${g(B, d.path2) ?? '—'}` : f(b);
         return { label: d.label, aText: fa, bText: fb, barA: bar(a), barB: bar(b), pct, good };
       });
     },
 
-    // ===== SLO 约束:业务形态套三个默认值,仍可单独清空/改小 =====
+    // ===== SLO 约束：业务形态套三个默认值,仍可单独清空/改小 =====
     onSloShapeChange() {
       const s = BENCH_SLO_SHAPES[this.form.sloShape];
       if (s) { this.form.sloTtft = s[0]; this.form.sloTpot = s[1]; this.form.sloE2e = s[2]; }
-      // custom:不动,全手动(留着用户已填的值)
+      // custom：不动,全手动(留着用户已填的值)
     },
     buildSloSpec() {
       const parts = [];
@@ -1357,10 +1357,10 @@ function rulesTab() {
     async load() {
       const d = await fetch('/api/diagnosis_rules').then(r => r.json()).catch(() => ({}));
       this.rules = d.rules || [];
-      this.cfg = d.config || {};      // 阈值:操作点 gauge 标低/高刻度用
+      this.cfg = d.config || {};      // 阈值：操作点 gauge 标低/高刻度用
     },
     _rule(id) { return this.rules.find(x => x.id === id); },
-    // 操作点 gauge:当前值落在哪个区 → far(离上限,双低侧)/ mid(上升中)/ wall(逼近上限)
+    // 操作点 gauge：当前值落在哪个区 → far(离上限,双低侧)/ mid(上升中)/ wall(逼近上限)
     roofZone(v, low, high) {
       if (v == null) return 'na';
       if (high != null && v >= high) return 'wall';
@@ -1376,11 +1376,11 @@ function rulesTab() {
       return v === k ? (fallback || '') : v;
     },
     ruleName(rule_id) { const r = this._rule(rule_id); return this.ruleI18n(rule_id, 'name', r ? r.name : rule_id); },
-    ruleHyp(r) { return this.ruleI18n(r.id, 'hypothesis', r.hypothesis || ''); },   // 内置目录:规则的根因推断
-    ruleSug(r) { return this.ruleI18n(r.id, 'suggestion', r.suggestion || ''); },   // 内置目录:规则的处方
+    ruleHyp(r) { return this.ruleI18n(r.id, 'hypothesis', r.hypothesis || ''); },   // 内置目录：规则的根因推断
+    ruleSug(r) { return this.ruleI18n(r.id, 'suggestion', r.suggestion || ''); },   // 内置目录：规则的处方
     // 该瓶颈当前是否命中(diagnoses 来自父 dashboard 作用域,模板里传进来)→ 命中的诊断对象 或 null
     firedFor(id, diags) { return (diags || []).find(d => d.rule_id === id) || null; },
-    // ── 诊断密集表:展开 + 检测手段(detector)──
+    // ── 诊断密集表：展开 + 检测手段(detector)──
     toggleDiag(id) { const i = this.expandedDiag.indexOf(id); if (i >= 0) this.expandedDiag.splice(i, 1); else this.expandedDiag.push(id); },
     diagRegime(rule_id) { const k = BOTTLENECK.includes(rule_id) ? rule_id : 'N'; return { k, label: t('regime.' + k) }; },
     fmtVal(v) { if (typeof v !== 'number') return String(v); return Number.isInteger(v) ? String(v) : (Math.abs(v) < 1 ? v.toFixed(3) : v.toFixed(1)); },
@@ -1391,7 +1391,7 @@ function rulesTab() {
         `${c.aggregation}(${c.metric.replace(/^vllm\./, '').replace(/^kernel\.stall\./, 'stall.')}) ${c.op} ${c.threshold}`
       ).join('  且  ');
     },
-    // 该手段当前是否命中:从命中诊断的 context 复算(每个 check 都有数据且过阈值)。diag = firedFor() 的返回
+    // 该手段当前是否命中：从命中诊断的 context 复算(每个 check 都有数据且过阈值)。diag = firedFor() 的返回
     detFired(det, diag) {
       if (!diag || !diag.context || !det.checks) return false;
       return det.checks.every(c => {
@@ -1416,7 +1416,7 @@ function rulesTab() {
   };
 }
 
-// 首页 SLO 面板:选业务形态 → 带出 TTFT/TPOT SLA 默认 → 监控当前 p99 是否达标(读父 dashboard 的 kpis)。
+// 首页 SLO 面板：选业务形态 → 带出 TTFT/TPOT SLA 默认 → 监控当前 p99 是否达标(读父 dashboard 的 kpis)。
 // 高级阈值只放 4 瓶颈检测阈值(MFU/MBU/KV);改完热生效(/api/diagnosis_config)。
 function sloPanel() {
   // (TTFT_p99_ms, TPOT_p99_ms, E2E_p99_ms) —— 同 autopilot 的 WORKLOAD_SHAPES /
@@ -1461,7 +1461,7 @@ function sloPanel() {
     },
     dirty() { return JSON.stringify(this.cfgDraft) !== JSON.stringify(this.config); },
     resetConfig() { this.cfgDraft = JSON.parse(JSON.stringify(this.config)); },
-    // 达标判定:当前 p99(父 kpis)<= SLA → true;缺值 → null(未知,不上色)
+    // 达标判定：当前 p99(父 kpis)<= SLA → true;缺值 → null(未知,不上色)
     slaPass(cur, sla) { return (cur == null || sla == null) ? null : cur <= sla; },
     async saveConfig() {
       this.saving = true;
@@ -1485,17 +1485,17 @@ function sloPanel() {
   };
 }
 
-// Autopilot tab:轮询 /api/autopilot/status 展示诊断驱动的真实/模拟调优会话。
+// Autopilot tab：轮询 /api/autopilot/status 展示诊断驱动的真实/模拟调优会话。
 function autopilotTab() {
   const VERDICT = {
     baseline: { t: '基线', c: 'base' }, kept: { t: '✓ 保留', c: 'kept' },
     reverted: { t: '↩ 回滚', c: 'rev' }, tie: { t: '≈ 持平', c: 'tie' }, done: { t: '■ 完成', c: 'stop' },
   };
-  // 停机归因 → 人话(用户反馈:session 跑完没说明白"为什么",光看轮次/判定看不出
+  // 停机归因 → 人话(用户反馈：session 跑完没说明白"为什么",光看轮次/判定看不出
   // 全局原因——同 stop_cause 枚举,见 runner.py append_stop 的 cause 取值)。
   const STOP_LABELS = {
     agent_done: 'Agent 判断已接近最优,主动收尾',
-    no_candidates: '已无对症旋钮可试(诊断到的瓶颈没有安全旋钮能缓解,或负载/参数已到边界)',
+    no_candidates: '已无对症参数可试(诊断到的瓶颈没有安全参数能缓解,或负载/配置已到边界)',
     budget_rounds: '达到最大轮数上限',
     budget_time: '达到时间预算上限(还没跑完计划轮数)',
     no_improve_k: '连续多轮没有实质提升,判断已收敛',
@@ -1507,7 +1507,7 @@ function autopilotTab() {
   // 用 t('regime.'+bn) 会在英文界面下拼出"本次持续诊断到Bandwidth bottleneck"这种
   // 中英混杂的病句,不如跟本 tab 其余文案保持一致,统一硬编码中文。
   const BOTTLENECK_LABEL = { A: '双低', B: '带宽瓶颈', C: '算力瓶颈', D: '容量瓶颈' };
-  // 业务形态 WorkloadSpec(M1):形态是唯一主维度——自带 bench 负载与默认 SLA(数值同后端
+  // 业务形态 WorkloadSpec(M1)：形态是唯一主维度——自带 bench 负载与默认 SLA(数值同后端
   // autopilot/workload.py)。"目标"(吞吐优先/延迟优先/性价比)UI 已去掉,调优统一"不破
   // SLA 前提下最大化吞吐"(业界惯例;objective.py 后端仍支持 target,只是 UI 不再暴露选择,
   // 免得用户在"形态"和"目标"两个维度间双重决策——ap-20260719-004104 那次泛形态+泛目标
@@ -1532,14 +1532,14 @@ function autopilotTab() {
     agentTesting: false,
     advOpen: false,
     showPrompt: false,
-    adv: { guidance: '', temperature: 0.4, timeout_s: 90, retries: 2 },
+    adv: { guidance: '', temperature: 0.4, timeout_s: 240, retries: 2 },
     LOCKED_PROMPT:
 `你是一个 LLM-serving 性能工程师(核心合约,不可改):
-① 每轮只改 1 个旋钮,且只能从「动作范围」里选;
+① 每轮只改 1 个参数,且只能从「动作范围」里选;
 ② 必须接受压测判决——不得声称压测没证实的收益;
 ③ 必须把改动挂在本轮诊断证据上(evidence_refs);
 ④ 必须按 StructuredOutput schema 输出 {action|done, rationale, evidence_refs};
-⑤ 目标:不破 SLA 前提下最大化主指标;已近最优则 done:true。
+⑤ 目标：不破 SLA 前提下最大化主指标;已近最优则 done:true。
 ———
 每轮的 user message 由 runner 自动拼(用户不填):
 目标 / 预算 / 当前配置 / 蒸馏诊断 / 历史 / 动作范围。
@@ -1583,9 +1583,9 @@ function autopilotTab() {
           body: JSON.stringify(body),
         });
         const out = await r.json();
-        this.agentTest = out.ok ? '✓ 连接可用' : ('连接失败: ' + (out.error || `HTTP ${r.status}`)).slice(0, 80);
+        this.agentTest = out.ok ? '✓ 连接可用' : ('连接失败： ' + (out.error || `HTTP ${r.status}`)).slice(0, 80);
       } catch (e) {
-        this.agentTest = '连接失败: ' + String(e).slice(0, 70);
+        this.agentTest = '连接失败： ' + String(e).slice(0, 70);
       } finally {
         this.agentTesting = false;
         setTimeout(() => this.agentTest = '', 4500);
@@ -1605,27 +1605,29 @@ function autopilotTab() {
     _syncSeq: 0,
     activeSessionId: '',
 
-    init() { this._sync(); },          // 进页时拉一次:断线重连/已有 session 直接接管直播
+    init() { this._sync(); },          // 进页时拉一次：断线重连/已有 session 直接接管直播
     fmt(n) { return (n == null || !isFinite(n)) ? '—' : Number(n).toLocaleString('en-US'); },
     get baselineTps() { return (this.session && this.session.baseline_score) || (this.shownRounds[0] || {}).tps || 0; },
     _bestTps() { let b = 0; this.shownRounds.forEach(r => { if (r.decision === 'kept' && r.tps > b) b = r.tps; }); return b || this.baselineTps; },
     get best() { return { tps: this._bestTps(), cmd: (this.session && this.session.recommended_command) || (this.shownRounds.find(r => r.decision === 'kept') || {}).cmd || '' }; },
     get fallbackCount() { return this.shownRounds.filter(r => r.fallback).length; },
-    // 结果总结:session 跑完只甩一个吞吐比值(×1.00 也说不清是"没提升"还是"基线就没达标"),
+    // 结果总结：session 跑完只甩一个吞吐比值(×1.00 也说不清是"没提升"还是"基线就没达标"),
     // 用户反馈"很懵逼"——把 SLA 违规/回滚原因/停机原因拼成人话,别让用户自己倒推轮次表。
+    // 只查 TTFT/TPOT(同 objective.py sla_ok):E2E 不进闸门,只在 Live 面板监控展示,不会
+    // 导致这里的 reverted——如果还把 E2E 算进"违反 SLA",会跟后端实际判定对不上(真机
+    // 2026-07-23:7B-AWQ 上 chat/code 形态基线 E2E 常年超标,但硬卡会把 TTFT/TPOT 真实
+    // 变好的候选也一并判负,掩盖收益)。
     _violatesSla(sc) {
       const sla = (this.session && this.session.objective && this.session.objective.sla) || {};
       if (!sc) return [];
       const bad = [];
       if (sla.ttft_p99_ms != null && sc.ttft_p99_ms > sla.ttft_p99_ms) bad.push('TTFT');
       if (sla.tpot_p99_ms != null && sc.tpot_p99_ms > sla.tpot_p99_ms) bad.push('TPOT');
-      if (sla.e2e_p99_ms != null && sc.e2e_p99_ms > sla.e2e_p99_ms) bad.push('E2E');
       return bad;
     },
     get resultSummary() {
       const rounds = (this.session && this.session.rounds) || [];
       const baseline = rounds.find(r => r.kind === 'baseline');
-      const stopRound = [...rounds].reverse().find(r => r.kind === 'stop');
       const cands = rounds.filter(r => r.kind === 'candidate');
       const kept = cands.filter(r => r.decision === 'kept');
       const tie = cands.filter(r => r.decision === 'tie');
@@ -1637,7 +1639,6 @@ function autopilotTab() {
         keptCount: kept.length, tieCount: tie.length,
         revertedSlaCount: revertedSla.length, revertedWorseCount: revertedWorse.length,
         baselineViolatesSla: baselineBad.length > 0, baselineViolatedMetrics: baselineBad,
-        stopReason: STOP_LABELS[(stopRound || {}).stop_cause] || '',
       };
     },
     get resultSummaryText() {
@@ -1649,26 +1650,84 @@ function autopilotTab() {
         parts.push('本次没跑出任何候选(基线之后即停止)。');
       } else if (s.baselineViolatesSla) {
         parts.push(`基线本身就没达标(超出 ${s.baselineViolatedMetrics.join('/')} SLA),后续 ${s.triedCount} `
-          + `个候选也都没能拉回 SLA 内,因此全部回滚——更像是 SLA 阈值对当前硬件/模型偏紧,而不是旋钮没用。`);
+          + `个候选也都没能拉回 SLA 内,因此全部回滚——更像是 SLA 阈值对当前硬件/模型偏紧,而不是参数没用。`);
       } else if (s.revertedSlaCount > 0 && s.revertedWorseCount === 0 && s.tieCount === 0) {
         parts.push(`试了 ${s.triedCount} 个候选,全部因破坏 SLA 被回滚,吞吐没能在达标前提下比较。`);
       } else if (s.tieCount === s.triedCount && s.triedCount > 0) {
         parts.push(`试了 ${s.triedCount} 个候选,吞吐变化都在噪声范围内(判定持平)——已接近当前配置能做到的上限。`);
       } else {
-        parts.push(`试了 ${s.triedCount} 个候选:${s.revertedWorseCount} 个实测更差被回滚,`
+        parts.push(`试了 ${s.triedCount} 个候选：${s.revertedWorseCount} 个实测更差被回滚,`
           + `${s.tieCount} 个持平,${s.revertedSlaCount} 个破 SLA。`);
       }
-      if (s.stopReason) parts.push(`停止原因:${s.stopReason}。`);
       return parts.join(' ');
     },
-    // 用户反馈(2026-07-22):每次 session 只调 2-3 个参数,不知道剩下的参数是"不该调"
+    // 主线逻辑(用户反馈,2026-07-22)：只看"结果"和"候选池"两段,拼不出"为什么会
+    // 这么走"的因果链——本次诊断到什么瓶颈、中途有没有变、正因为这样才只从对应的
+    // 参数池里选、又是为什么恰好在这一轮停。这里只讲因果转折,2-4 句话,不逐轮复述
+    // (逐轮细节由 knobLedger 承担)。
+    get sessionNarrativeText() {
+      const rounds = (this.session && this.session.rounds) || [];
+      const timeline = [];
+      let lastBn = null;
+      rounds.forEach(r => {
+        const bn = r.diagnosis && r.diagnosis.bottleneck;
+        if (bn && bn !== lastBn) { timeline.push({ round: r.round, bn }); lastBn = bn; }
+      });
+      if (!timeline.length) return '';
+      const label = bn => BOTTLENECK_LABEL[bn] || '症状/其它';
+      const parts = [];
+      if (timeline.length === 1) {
+        parts.push(`本次从头到尾都诊断为${label(timeline[0].bn)},所以每轮候选都从这个瓶颈对症的参数池里选。`);
+      } else {
+        const switches = timeline.slice(1).map(t => `第 ${t.round} 轮起转为${label(t.bn)}`).join('、');
+        parts.push(`本次先诊断为${label(timeline[0].bn)},${switches},参数池跟着瓶颈变化切换过对症目标。`);
+      }
+      const stopRound = [...rounds].reverse().find(r => r.kind === 'stop');
+      const cause = stopRound && stopRound.stop_cause;
+      if (cause) {
+        const aas = (this.session && this.session.action_space_summary) || {};
+        const untried = (aas.relevant_knobs || []).filter(k => !(aas.tried_knobs || []).includes(k));
+        const budgetExhausted = cause === 'budget_rounds' || cause === 'budget_time';
+        if (budgetExhausted && untried.length) {
+          parts.push(`最终第 ${stopRound.round} 轮${STOP_LABELS[cause] || cause},还有 ${untried.length} `
+            + `个对症参数没轮到试(具体见下方候选池)。`);
+        } else if (cause === 'no_candidates') {
+          parts.push(`第 ${stopRound.round} 轮已经没有对${label(lastBn)}安全对症的参数可试,`
+            + `判定到了当前配置能做的上限。`);
+        } else {
+          parts.push(`最终第 ${stopRound.round} 轮${STOP_LABELS[cause] || cause}。`);
+        }
+      }
+      return parts.join(' ');
+    },
+    // 逐轮账本(用户反馈,2026-07-22/23)：先是只甩"参数名(结果)",后来嫌不具体——现在
+    // 每行说清楚"调了哪个参数、从什么值改到什么值、为什么这么改"。"为什么"不解析 agent
+    // 自由文本 rationale(不同 agent/模型措辞差异大,截断容易语义碎片化),改用本轮诊断到
+    // 的瓶颈标签——每轮必有、够简短,也跟上面"为什么"小节的因果链呼应,不是另起一套解释。
+    get knobLedger() {
+      const rounds = (this.session && this.session.rounds) || [];
+      const fmtVal = v => (v == null) ? '—' : (typeof v === 'boolean' ? (v ? '开' : '关') : String(v));
+      return rounds.filter(r => r.kind === 'candidate' && r.action && r.action.knob).map(r => {
+        const v = VERDICT[r.decision] || { t: r.decision || '', c: '' };
+        const d = r.delta_pct;
+        const bn = r.diagnosis && r.diagnosis.bottleneck;
+        return {
+          round: r.round, param: r.action.knob,
+          fromText: fmtVal(r.action.from), toText: fmtVal(r.action.to),
+          whyText: bn ? `为了缓解${BOTTLENECK_LABEL[bn] || '症状/其它'}` : '',
+          verdictText: v.t, verdictClass: v.c,
+          deltaText: (d == null || !isFinite(d)) ? '' : `${d > 0 ? '+' : ''}${d.toFixed(1)}%`,
+        };
+      });
+    },
+    // 用户反馈(2026-07-22)：每次 session 只调 2-3 个参数,不知道剩下的参数是"不该调"
     // 还是"没顾上调"。这里把后端 action_space_summary(见 runner.py _build_action_space_summary)
-    // 拼成人话:全量旋钮按跳过原因分类计数,再对照本次实际诊断到的瓶颈,列出对症但没试到的旋钮。
+    // 拼成人话：全量参数按跳过原因分类计数,再对照本次实际诊断到的瓶颈,列出对症但没试到的参数。
     get actionSpaceSummaryText() {
       const s = (this.session && this.session.action_space_summary) || {};
       if (!s.total) return '';
       const parts = [];
-      parts.push(`可调范围:全部 ${s.total} 个 vLLM 参数里,${s.default_on_count} 个已是引擎启动时自调的`
+      parts.push(`可调范围：全部 ${s.total} 个 vLLM 参数里,${s.default_on_count} 个已是引擎启动时自调的`
         + `最优默认值、${s.unsupported_count} 个当前 vLLM 版本不支持、${s.precision_excluded_count} `
         + `个会降精度按策略不提供,剩下 ${s.considerable_count} 个才是真正的候选池。`);
       const seen = (s.bottlenecks_seen || []).map(bn => BOTTLENECK_LABEL[bn] || '症状/其它').join('/');
@@ -1676,8 +1735,8 @@ function autopilotTab() {
         const rel = s.relevant_knobs || [], tried = s.tried_knobs || [];
         const untried = rel.filter(k => !tried.includes(k));
         parts.push(`本次持续诊断到${seen},候选池里对症的有 ${rel.length} 个`
-          + (rel.length ? `(${rel.join(' / ')})` : '') + `,实际试了 ${tried.length} 个`
-          + (tried.length ? `(${tried.join(' / ')})` : '') + (untried.length
+          + (rel.length ? `(${rel.join(' / ')})` : '') + `,实际试了 ${tried.length} 个(结果见上方逐轮账本)`
+          + (untried.length
             ? `,还剩 ${untried.length} 个对症但没轮到(${untried.join(' / ')},多因轮数/时间预算先耗尽)。`
             : '——对症的都试过了。')
           + `候选池里其余参数因为跟这次的瓶颈不对症,没有被提议。`);
@@ -1712,7 +1771,7 @@ function autopilotTab() {
       return '执行调优';
     },
     applyWorkload() {
-      // 形态是唯一主维度:直接套用形态 SLA(之后仍可手改);custom 不动任何字段(全手动透传)。
+      // 形态是唯一主维度：直接套用形态 SLA(之后仍可手改);custom 不动任何字段(全手动透传)。
       const s = WORKLOAD_SHAPES[this.obj.workload];
       if (s && s.sla) {
         this.obj.ttft = s.sla[0];
@@ -1749,8 +1808,8 @@ function autopilotTab() {
       if (ev.phase === 'propose') {
         if (msg.startsWith('P0 预测剪枝')) return 'P0 剪枝';
         if (msg.startsWith('诊断命中')) return '候选检索';
-        if (msg.startsWith('agent 思考:')) return 'Agent 思考';
-        if (msg.startsWith('agent 决策:')) return 'Agent 决策';
+        if (msg.startsWith('agent 思考：')) return 'Agent 思考';
+        if (msg.startsWith('agent 决策：')) return 'Agent 决策';
         if (msg.startsWith('agent 调用失败')) return '网络重试';
         if (msg.includes('LLM 调用失败')) return 'LLM 兜底';
         if (msg.includes('没有对症候选') || msg.includes('近最优')) return '收敛判断';
@@ -1776,23 +1835,23 @@ function autopilotTab() {
     _latestReasoning(allEvents, round) {
       // 本轮最新的 agent 思考/决策(全量事件里找,不受 5 条滚动窗口影响)——
       // 心跳(15s 一条)量远大于 propose 事件(每轮 1-2 条),纯"取最新事件"会把
-      // 思考/决策挤出窗口(真机实测:2.5 分钟后被 18+ 条心跳冲掉)。
+      // 思考/决策挤出窗口(真机实测：2.5 分钟后被 18+ 条心跳冲掉)。
       let thinking = null, decision = null;
       for (let i = allEvents.length - 1; i >= 0; i--) {
         const e = allEvents[i];
         if (Number(e.round) !== round) continue;
         const msg = e.message || '';
-        if (!decision && msg.startsWith('agent 决策:')) decision = e;
-        if (!thinking && msg.startsWith('agent 思考:')) thinking = e;
+        if (!decision && msg.startsWith('agent 决策：')) decision = e;
+        if (!thinking && msg.startsWith('agent 思考：')) thinking = e;
         if (decision && thinking) break;
       }
       if (!decision && !thinking) return null;
       const d = (decision && decision.detail) || {};
       return {
         // message = "knob from→to —— rationale前110字"(服务端为滚动事件流截断拼的);
-        // 只取 " —— " 前半段(旋钮变更),完整 rationale 用下面的 detail.rationale——
+        // 只取 " —— " 前半段(参数变更),完整 rationale 用下面的 detail.rationale——
         // 否则会先显示截断预览、紧接着又完整重复一遍。
-        knobLine: decision ? decision.message.replace(/^agent 决策:/, '').split(' —— ')[0].trim() : '',
+        knobLine: decision ? decision.message.replace(/^agent 决策：/, '').split(' —— ')[0].trim() : '',
         rationale: d.rationale || '',
         expectedEffect: d.expected_effect || '',
         guardrailNotes: d.guardrail_notes || '',
@@ -1845,7 +1904,7 @@ function autopilotTab() {
         return;
       }
       const body = {
-        workload: this.obj.workload,      // 业务形态:bridge/run.py 侧展开 bench 负载参数
+        workload: this.obj.workload,      // 业务形态：bridge/run.py 侧展开 bench 负载参数
         objective: {
           // 固定 throughput——不破 SLA 前提下最大化吞吐,UI 不再暴露"目标"选择(见上方注释)。
           target: 'throughput',
@@ -1888,7 +1947,7 @@ function autopilotTab() {
         this.agentTest = out.stopped ? '已停止，正在恢复状态…' : '没有正在运行的调优';
         await this._sync();
       } catch (e) {
-        this.agentTest = '停止失败: ' + String(e.message || e).slice(0, 70);
+        this.agentTest = '停止失败： ' + String(e.message || e).slice(0, 70);
       } finally {
         setTimeout(() => { this.agentTest = ''; }, 3500);
       }
@@ -1899,7 +1958,7 @@ function autopilotTab() {
       // setInterval 每 2s 发一次,不等上一发落地——候选轮里 vLLM 崩溃重启/恢复 best
       // 这类慢操作能让某次请求晚到,若后到的旧响应覆盖了先到的新响应(轮次更多、已
       // 终态),UI 会永久卡在那个旧快照上(term 时已 clearInterval,没有下一轮来纠正)。
-      // 真机复现:R2(候选崩溃重试)拖慢那次请求,R3(stop)的响应先到、poll 已停,
+      // 真机复现：R2(候选崩溃重试)拖慢那次请求,R3(stop)的响应先到、poll 已停,
       // R2 请求的响应姗姗来迟,把 shownRounds 覆盖回只有 2 轮——序号哨兵防这个。
       const seq = ++this._syncSeq;
       let s; try { s = await fetch(this.apiUrl('/api/autopilot/status')).then(x => x.json()); } catch (e) {
@@ -1957,6 +2016,10 @@ function autopilotTab() {
         round: r.round, kind: r.kind, decision: r.decision, verdict: v.t, vcls: v.c,
         ts: r.ts_wall || '',
         thinking: r.agent_thinking || '',
+        // 思考预览(用户反馈,2026-07-23):折叠态之前完全不露思考过程的任何内容,不点开
+        // 就跟没调用过 agent 一样,容易让人误判"卡死/没在工作"。截一小段直接露在折叠行里,
+        // 全文仍靠点击展开(思考原文可能几千到几万字,不能整段常驻)。
+        thinkingPreview: (r.agent_thinking || '').replace(/\s+/g, ' ').trim().slice(0, 100),
         fallback: (r.action && r.action.llm_fallback) || null,
         diag: (dg.evidence_refs || []).join(' · '),
         hyp: r.rationale || '', rationale: r.rationale || '',
@@ -1996,12 +2059,12 @@ function autopilotTab() {
       let md = '# Autopilot 推理轨迹\n\n';
       this.shownRounds.forEach(r => {
         md += `## R${r.round} — ${r.verdict}\n`;
-        if (r.snap) md += `- 诊断快照: ${r.snap}\n`;
-        if (r.rationale) md += `- Agent 推理: ${r.rationale}\n`;
-        if (r.evidence && r.evidence.length) md += `- 证据引用: ${r.evidence.join(', ')}\n`;
-        if (r.cmd) md += `- 本轮命令: \`${r.cmd}\`\n`;
-        if (r.scoreAfter) md += `- 压测: output_tps ${r.scoreBefore ? r.scoreBefore.tps + '→' : ''}${r.scoreAfter.tps}\n`;
-        if (r.decideLogic) md += `- 判定: ${r.decideLogic}\n`;
+        if (r.snap) md += `- 诊断快照： ${r.snap}\n`;
+        if (r.rationale) md += `- Agent 推理： ${r.rationale}\n`;
+        if (r.evidence && r.evidence.length) md += `- 证据引用： ${r.evidence.join(', ')}\n`;
+        if (r.cmd) md += `- 本轮命令： \`${r.cmd}\`\n`;
+        if (r.scoreAfter) md += `- 压测： output_tps ${r.scoreBefore ? r.scoreBefore.tps + '→' : ''}${r.scoreAfter.tps}\n`;
+        if (r.decideLogic) md += `- 判定： ${r.decideLogic}\n`;
         md += '\n';
       });
       return md;
@@ -2042,15 +2105,15 @@ function dashboard() {
       overhead_cb_ms: null, dropped_total: null,
       snapshot_age_s: null, rollup_window_s: null,
     },
-    // Deep Evidence(阶段 2 PC Sampling 按需取证):为什么这些 kernel 慢
+    // Deep Evidence(阶段 2 PC Sampling 按需取证)：为什么这些 kernel 慢
     deep: { running: false, available_now: false, result: null, findings: [], error: null },
-    kernelShowAll: false,        // Kernel 明细表:false=只显示前 N 行
+    kernelShowAll: false,        // Kernel 明细表：false=只显示前 N 行
     kernelCollapsed: 10,         // 收起时显示的行数
     kernelExpanded: null,        // 展开看 stall 构成 + 建议的行索引(null=都收起)
-    stallExpanded: null,         // Deep Evidence:展开看某 stall 类的原始 PerfWorks reason 名
+    stallExpanded: null,         // Deep Evidence：展开看某 stall 类的原始 PerfWorks reason 名
     timeline: null,              // 执行时间线(最近 N 条 kernel 的 start/end/stream)
-    tlFrozen: false,             // 冻结:停 2s 刷新,便于缩放/读
-    tlPxPerMs: null,             // 时间线缩放:每毫秒像素;null=适应容器宽度
+    tlFrozen: false,             // 冻结：停 2s 刷新,便于缩放/读
+    tlPxPerMs: null,             // 时间线缩放：每毫秒像素;null=适应容器宽度
     tlSelIdx: null,              // 选中块索引(高亮)
     tlSelMs: null,               // 选中块中心时间(ms),缩放锚点
     tlSelName: '',               // 选中块名(显示)
@@ -2060,7 +2123,7 @@ function dashboard() {
     rooflineParamsB: '0',
     // Verdict card — populated each refresh from the recent points
     rooflineVerdict: null,    // {bound, computeUtil, bwUtil, knee, suggestions[]}
-    rooflineScale: null,      // 调优指引:{ai, cur, t32, gain, knee}(decode 强度≈并发 → 扩并发能到哪)
+    rooflineScale: null,      // 调优指引：{ai, cur, t32, gain, knee}(decode 强度≈并发 → 扩并发能到哪)
     scalingSweep: { running: false, progress: null, error: null, verdict: null },  // P0-C 实测 scaling
     ttftHasData: false,
     tpotHasData: false,
@@ -2197,7 +2260,7 @@ function dashboard() {
       const m = map[top.cls] || { t: t('cleanup.dominatedBy', {label: this.stallLabel(top.cls)}), a: '' };
       return { cls: top.cls, pct: top.pct, type: m.t, action: m.a };
     },
-    // #3 全局最大可回收点:stall 时间占比最高的 kernel
+    // #3 全局最大可回收点：stall 时间占比最高的 kernel
     topRecoverable() {
       const kt = (this.deep.result && this.deep.result.kernel_table) || [];
       let best = null, bestv = 0;
@@ -2227,13 +2290,13 @@ function dashboard() {
         return t('kernel.suggestion.execDep');
       return '';
     },
-    // P3 行级归因:取该 kernel 的"最深热点"(源码行 / SASS 偏移)。按 .so 原始 functionName 精确匹配
+    // P3 行级归因：取该 kernel 的"最深热点"(源码行 / SASS 偏移)。按 .so 原始 functionName 精确匹配
     kernelHotspot(k) {
       if (!k) return null;
       const hs = (this.deep.result && this.deep.result.pc_hotspots) || [];
       return hs.find(h => h.kernel === k.kernel) || null;
     },
-    // P3 launch 栈:把 native 栈清洗成可读帧链(caller→callee:host 代码在前,启动原语在后)
+    // P3 launch 栈：把 native 栈清洗成可读帧链(caller→callee:host 代码在前,启动原语在后)
     launchFrames(h) {
       if (!h || !h.launch || !h.launch.stack) return [];
       let frames = h.launch.stack.split(' <- ').map(s => s.trim()).filter(Boolean);
@@ -2255,12 +2318,12 @@ function dashboard() {
       frames = frames.filter((f, i) => i === 0 || f !== frames[i - 1]);
       return frames.reverse();   // host 高层算子在前 → 启动原语在后
     },
-    // P3:所有"能定位到 Python 源码行"的 kernel(差异化能力,单独提到顶部,免得埋在长表里)
+    // P3：所有"能定位到 Python 源码行"的 kernel(差异化能力,单独提到顶部,免得埋在长表里)
     sourceHotspots() {
       const hs = (this.deep.result && this.deep.result.pc_hotspots) || [];
       return hs.filter(h => h.mappable && h.lines && h.lines.length);
     },
-    // 这些可映射 kernel 合计占多少 GPU 时间(诚实标注:小模型上往往很小,主导在闭源 GEMM)
+    // 这些可映射 kernel 合计占多少 GPU 时间(诚实标注：小模型上往往很小,主导在闭源 GEMM)
     sourceHotspotsTimePct() {
       const kt = (this.deep.result && this.deep.result.kernel_table) || [];
       const names = new Set(this.sourceHotspots().map(h => h.kernel));
@@ -2269,7 +2332,7 @@ function dashboard() {
       return sum;
     },
     // === Deep Evidence(全局 / warp 效率 / 方法论)辅助 ===
-    // Warp 周期三态(占全部样本):发指令 / 就绪未选中(余量) / 真 stall(在等)
+    // Warp 周期三态(占全部样本)：发指令 / 就绪未选中(余量) / 真 stall(在等)
     warpSplit() {
       const r = this.deep.result;
       if (!r || !r.available) return null;
@@ -2294,7 +2357,7 @@ function dashboard() {
         other: t('kernel.meaning.other'),
       }[cls] || '';
     },
-    // 原始 PerfWorks reason 名:去掉公共前缀,留语义后缀(给专家看真实指标名)
+    // 原始 PerfWorks reason 名：去掉公共前缀,留语义后缀(给专家看真实指标名)
     prettyReason(raw) {
       if (!raw) return '';
       return raw
@@ -2321,7 +2384,7 @@ function dashboard() {
         scheduler_slack: '#9bb04f', other: '#9a9aa4',
       }[cls] || '#9a9aa4';
     },
-    // 打开 Kernel tab 时调:先拉缓存结果;若可用且还没有结果,自动跑一次取证 ——
+    // 打开 Kernel tab 时调：先拉缓存结果;若可用且还没有结果,自动跑一次取证 ——
     // 免得用户找不到/不点"采集 stall 证据"按钮就以为 tab 空的(§A)。
     async onKernelTabOpen() {
       this._ensureKernelRoofline();
@@ -2340,7 +2403,7 @@ function dashboard() {
         if (_lastRoofline) _applyRooflineData(_kRoofChart, _lastRoofline);
       }, 60);
     },
-    // P0-C:启动实测 scaling 压测(串扫并发 1/4/16/64,约 2 分钟),轮询直到出结果
+    // P0-C：启动实测 scaling 压测(串扫并发 1/4/16/64,约 2 分钟),轮询直到出结果
     async startScalingSweep() {
       if (this.scalingSweep.running) return;
       this.scalingSweep.running = true;
@@ -2375,7 +2438,7 @@ function dashboard() {
         const r = await fetch('/api/kernels/deep_evidence?lang=' + _uiLang()).then(x => x.json());
         this.deep.available_now = !!r.available_now;
         if (r.last) { this.deep.result = r.last; this.deep.findings = r.findings || []; }
-      } catch (e) { /* fail-closed:静默 */ }
+      } catch (e) { /* fail-closed：静默 */ }
     },
     // 触发一个取证短窗(阻塞 ~window 秒)
     async runDeepEvidence(window) {
@@ -2396,7 +2459,7 @@ function dashboard() {
       }
     },
     // kernel 数据是否"实时"(采集时刻够近),用于新鲜度横幅
-    // 延迟分位条(三行式):某分位占 p99 的宽度%(p99=满刻度;三段挤一条看不清,实测反馈)
+    // 延迟分位条(三行式)：某分位占 p99 的宽度%(p99=满刻度;三段挤一条看不清,实测反馈)
     pctW(d, q) {
       if (!d || !d.p99 || d.p99 <= 0 || d[q] == null) return 0;
       return Math.max(2, Math.min(100, 100 * d[q] / d.p99));
@@ -2414,7 +2477,7 @@ function dashboard() {
       if (a < 90) return t('kernel.agoSeconds', {s: Math.round(a)});
       return t('kernel.agoMinutes', {m: Math.round(a / 60)});
     },
-    // 执行时间线:px-based,横向滚动 + 缩放按钮。放大=每毫秒像素翻倍(内层变宽),
+    // 执行时间线：px-based,横向滚动 + 缩放按钮。放大=每毫秒像素翻倍(内层变宽),
     // 平移=容器原生横向滚动。tlPxPerMs=每毫秒像素;null=适应容器宽度。
     _tlFitPx(spanMs) {
       const el = document.getElementById('tl-scroll');
@@ -2439,7 +2502,7 @@ function dashboard() {
         pxPerMs, innerPx: Math.round(spanMs * pxPerMs), zoomed: this.tlPxPerMs != null,
       };
     },
-    // 缩放:以"选中块中心"为锚点(没选则以当前视口中心),缩放后调滚动位置让锚点居中。
+    // 缩放：以"选中块中心"为锚点(没选则以当前视口中心),缩放后调滚动位置让锚点居中。
     tlZoom(factor) {
       const v = this.timelineView(); if (!v) return;
       const old = v.pxPerMs;
@@ -2543,10 +2606,10 @@ function dashboard() {
       this.fetchSystem();
       this.refresh();
       setInterval(() => this.refresh(), 2000);
-      // 切语言时立刻重取 kernel findings(后端按 ?lang= 出双语):实时 kernels 走 refresh,
+      // 切语言时立刻重取 kernel findings(后端按 ?lang= 出双语)：实时 kernels 走 refresh,
       // deep evidence 是按需的也一并重取。轮询本身已带 _uiLang(),这里只为即时生效。
       this.$watch('$store.i18n.lang', () => { this.refresh(); this.loadDeepEvidence(); });
-      // 打开 Kernel tab 自动取证(§A):进去就有真数据,不用手点按钮
+      // 打开 Kernel tab 自动取证(§A)：进去就有真数据,不用手点按钮
       this.$watch('tab', (v) => { if (v === 'kernel') this.onKernelTabOpen(); });
     },
 
@@ -2561,9 +2624,9 @@ function dashboard() {
       // verdict(roofline 本身不直观,用中位 AI/吞吐 判定,免单点 outlier 翻转结论)
       this.rooflineVerdict = this._computeRooflineVerdict(data);
       _lastRoofline = data;
-      // P0-C:实测 scaling verdict(随 roofline 响应带回)
+      // P0-C：实测 scaling verdict(随 roofline 响应带回)
       this.scalingSweep.verdict = (data.scaling && data.scaling.verdict) || null;
-      // 调优指引(decode 强度≈并发):当前簇 → 并发32 的带宽上界 → 拐点
+      // 调优指引(decode 强度≈并发)：当前簇 → 并发32 的带宽上界 → 拐点
       this.rooflineScale = null;
       if (data.peak && data.peak.compute_tflops && data.peak.mem_bw_tbs && (data.points || []).length) {
         const peakC = data.peak.compute_tflops, peakBW = data.peak.mem_bw_tbs, knee = peakC / peakBW;

@@ -6,7 +6,7 @@
         --rounds 12 --target throughput --ttft 1000 \
         [--agent-base-url ... --agent-key ... --agent-model ...]
 
-流程:停主 serve 腾卡 → 逐候选 `docker run` 起容器跑真 bench/打分 → teardown →
+流程：停主 serve 腾卡 → 逐候选 `docker run` 起容器跑真 bench/打分 → teardown →
 **finally 必重启主 serve**(dashboard 回来后读 session JSONL 展示这条真实轨迹)。
 runner 自身只连 LLM API + 摆 docker,不碰 GPU;占卡的只有被测候选。
 
@@ -46,10 +46,10 @@ def main(argv: list[str] | None = None) -> int:
                    help="主 serve 容器名;给了就 session 期间停它腾卡、结束必重启")
     p.add_argument("--restore-cmd", default=None,
                    help="收尾时在 host 执行的完整恢复命令(shell)。容器主进程是 sleep "
-                        "infinity、serve 靠 docker exec 起的部署形态必须给:单纯 docker "
+                        "infinity、serve 靠 docker exec 起的部署形态必须给：单纯 docker "
                         "start 只会拉起 sleep,serve/dashboard 不会回来")
     p.add_argument("--skip-serve-restart", action="store_true",
-                   help="收尾只停不启:恢复主 serve 交给外部编排(bridge watcher)。"
+                   help="收尾只停不启：恢复主 serve 交给外部编排(bridge watcher)。"
                         "bridge 接管主面板端口期间,这里的 docker start 会撞端口,"
                         "把容器打进'跑着但端口没发布'的病态——恢复权必须单一")
     p.add_argument("--session-dir", default=".", help="session JSONL 落盘目录")
@@ -61,7 +61,7 @@ def main(argv: list[str] | None = None) -> int:
                    help="发布候选 dashboard 端口 → 读真 /api/diagnoses(③ 真诊断);不给则 observe 走启发式")
     p.add_argument("--gpus", default="all")
     p.add_argument("--candidate-name", default="ap-cand")
-    p.add_argument("--serve-cmd", default="pping-vllm serve", help="简单形:容器内 serve 命令前缀")
+    p.add_argument("--serve-cmd", default="pping-vllm serve", help="简单形：容器内 serve 命令前缀")
     p.add_argument("--entrypoint", default=None, help="覆盖镜像 entrypoint(模板形配 /bin/bash)")
     p.add_argument("--cmd-template", default=None,
                    help="shell 模板,占位 {model}/{port}/{flags};镜像 entrypoint 非 serve 时用")
@@ -80,17 +80,17 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--bench-timeout", type=float, default=BENCH_SPEC["timeout_s"],
                    help="单请求超时秒数(长上下文/容量瓶颈工况需拉高)")
     p.add_argument("--bench-prompt-source", default=BENCH_SPEC["prompt_source"],
-                   help="prompt 来源:synthetic / builtin:<name> / file:<path>")
+                   help="prompt 来源：synthetic / builtin:<name> / file:<path>")
     p.add_argument("--bench-prompt-tokens", type=int, default=None,
                    help="synthetic prompt 的目标 token 数(造 D/KV 容量瓶颈时拉高);不给则按形态")
     p.add_argument("--bench-output-tokens", type=int, default=None,
                    help="解码长度(拉长填 KV 造容量瓶颈 D);不给则按形态,再无形态兜底 128")
     p.add_argument("--bench-repeats", type=int, default=1, help="每个 baseline/candidate 重复 bench 次数(M1 去噪)")
     p.add_argument("--search-mode", default="agent", choices=["agent", "grid", "bo"],
-                   help="P2 搜索模式:agent=旧单步候选,grid=坐标小网格,bo=热启动 BO v1 排序")
-    p.add_argument("--search-width", type=int, default=3, help="grid/bo 每个旋钮展开的候选档数")
+                   help="P2 搜索模式：agent=旧单步候选,grid=坐标小网格,bo=热启动 BO v1 排序")
+    p.add_argument("--search-width", type=int, default=3, help="grid/bo 每个参数展开的候选档数")
     p.add_argument("--workload", default=None, choices=sorted(WORKLOAD_SHAPES),
-                   help="业务形态:自带 bench 负载参数与默认 SLA(M1 业务形态 WorkloadSpec);"
+                   help="业务形态：自带 bench 负载参数与默认 SLA(M1 业务形态 WorkloadSpec);"
                         "显式 --bench-*/--ttft/--tpot 优先于形态,custom=全手动透传")
     p.add_argument("--quality-gate", action="store_true", help="放开 T2 质量类候选(默认只 T1)")
     p.add_argument("--rounds", type=int, default=30)
@@ -133,7 +133,7 @@ def main(argv: list[str] | None = None) -> int:
                        "gpu_memory_utilization": args.baseline_gpu_util}
     if args.baseline_max_model_len is not None:
         baseline_config["max_model_len"] = args.baseline_max_model_len
-    # 业务形态 WorkloadSpec:显式 flag > 形态默认 > 旧兜底(8/128/BENCH_SPEC)
+    # 业务形态 WorkloadSpec：显式 flag > 形态默认 > 旧兜底(8/128/BENCH_SPEC)
     shape = args.workload or ""
     _rb = resolve_bench(shape, {"prompt_tokens": args.bench_prompt_tokens,
                                 "output_tokens": args.bench_output_tokens,
@@ -160,7 +160,7 @@ def main(argv: list[str] | None = None) -> int:
         sid = sess.session_id
         objective = sess.objective
         budget = sess.budget
-        # 时间预算按 session 起点算,不因进程重启而重置(§9.1 G5:双预算任一到顶即停)
+        # 时间预算按 session 起点算,不因进程重启而重置(§9.1 G5：双预算任一到顶即停)
         try:
             import calendar
             started = calendar.timegm(time.strptime(sess.started_ts, "%Y-%m-%dT%H:%M:%SZ"))
@@ -201,10 +201,10 @@ def main(argv: list[str] | None = None) -> int:
                     search_mode=args.search_mode, search_width=args.search_width,
                     elapsed_s=elapsed_s)
     # bridge 停止 session 是靠 os.killpg(SIGINT)(跨进程,没法直接调 Python 方法)。默认
-    # SIGINT 行为是抛 KeyboardInterrupt——真机复现(2026-07-22):这个进程正卡在 agent 的
+    # SIGINT 行为是抛 KeyboardInterrupt——真机复现(2026-07-22)：这个进程正卡在 agent 的
     # HTTPS 阻塞调用里时,KeyboardInterrupt 经常没能及时打断(ssl 模块内部重试对信号不够
     # 敏感,是 Python 生态的已知灰色地带),bridge 10s 优雅期等不到,只能 SIGKILL 强杀,
-    # session 没有 stop_cause、没走 _finalize()。改成显式接管 SIGINT/SIGTERM:只 set
+    # session 没有 stop_cause、没走 _finalize()。改成显式接管 SIGINT/SIGTERM：只 set
     # runner._stopping,不抛异常——agent.propose() 的重试循环现在按 0.5s 粒度轮询这个
     # 标志(见 agent.py _HTTPAgent.propose),能在整次阻塞调用完成前就跳出。
     def _on_stop_signal(signum, frame):  # noqa: ARG001
@@ -237,7 +237,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  R{r['round']:<2} {r['kind']:<9} {r['decision']:<9} "
               f"tps={round(sc.get('output_tps', 0)) if sc else '-':<6} "
               f"{(r.get('action') or {}).get('flag', '')}{p0_note}")
-    print(f"[autopilot] 推荐: {st.get('recommended_command')}")
+    print(f"[autopilot] 推荐： {st.get('recommended_command')}")
     print(f"[autopilot] JSONL: {session_dir / (sid + '.jsonl')}")
     return 0
 

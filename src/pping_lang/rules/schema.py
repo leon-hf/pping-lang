@@ -14,7 +14,7 @@ Severity = Literal["info", "warning", "critical"]
 Op = Literal["<", "<=", ">", ">=", "==", "!="]
 Aggregation = Literal["avg", "p50", "p95", "p99", "max", "min", "count"]
 
-# 认识论分类(与领域 category 正交):一条输出是哪种主张。见
+# 认识论分类(与领域 category 正交)：一条输出是哪种主张。见
 # _design-notes/产品原则-事实显性结论署名-1.0前spec.md §3。
 #   measurement  直接测量(仍带测量误差)
 #   derived      派生/分类(定义性映射,如阈值越界、占比归类)

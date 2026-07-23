@@ -38,24 +38,24 @@ from pping_lang.autopilot.repeat import aggregate_scorecards
 from pping_lang.autopilot.search import prepare_search_candidates
 
 BASELINE_CONFIG = {"max_num_seqs": 64, "gpu_memory_utilization": 0.70}
-# 2026-07-12 复盘:K_NO_IMPROVE 曾被临时拍到 999(强制跑满预算),但真机证据显示——
+# 2026-07-12 复盘：K_NO_IMPROVE 曾被临时拍到 999(强制跑满预算),但真机证据显示——
 # Agent 判 done 时桌上永远还摆着候选(候选真空由 T1→T2 fallback 在问它之前就兜掉了,
 # 见 _run_loop 的 `if not cands` 分支),它是在做"值不值得冒 SLA 风险"的定性判断,
 # 不是"没得选"。而且强制它多跑的那些轮次实测"几乎没有性能提升"——纯烧预算换不来信息。
-# 折中:MIN_EXPLORE_ROUNDS 防它探索不够就撂挑子,过了这道门槛就信任它的判断;
+# 折中：MIN_EXPLORE_ROUNDS 防它探索不够就撂挑子,过了这道门槛就信任它的判断;
 # K_NO_IMPROVE 恢复成不依赖信任 LLM 的机械兜底(它从不主动认输时的保险)。
 K_NO_IMPROVE = 4
 MIN_EXPLORE_ROUNDS = 2   # 判 done 前至少要真探索这么多轮候选,防止刚起步就撂挑子
-# 相对门槛(③):桌面超过一半候选没试过就判 done = 草率收尾,强制多试;但同一 session
+# 相对门槛(③)：桌面超过一半候选没试过就判 done = 草率收尾,强制多试;但同一 session
 # 连续强制达到上限就采信——再逼下去就是烧 bench 换不到信息(同 K_NO_IMPROVE 复盘结论)。
 MAX_FORCED_RELATIVE = 3
-MAX_ILLEGAL = 2          # proposing:连续非法提案上限 → failed(§9.3)
+MAX_ILLEGAL = 2          # proposing：连续非法提案上限 → failed(§9.3)
 INCOMPLETE_STATES = {"applying", "warming_up", "benchmarking", "deciding"}
-# T2 等价判定阈值:serving 输出非 seed 决定性(§6.2),batching 差异可致个别 token 漂移,
+# T2 等价判定阈值：serving 输出非 seed 决定性(§6.2),batching 差异可致个别 token 漂移,
 # 精确串比对会误杀好候选;fp8/量化真跑偏时相似度远低于此阈值。
 EQUIVALENCE_MIN_SIMILARITY = 0.85
-# 停机归因:session 结束时 stop 轮的 stop_cause 取值。分布统计直接 grep
-# session JSONL 的 stop_cause 字段(疗效度量:agent_done 中 load_limited 类应消失)。
+# 停机归因：session 结束时 stop 轮的 stop_cause 取值。分布统计直接 grep
+# session JSONL 的 stop_cause 字段(疗效度量：agent_done 中 load_limited 类应消失)。
 STOP_CAUSES = ("agent_done", "no_candidates", "budget_rounds", "budget_time",
                "no_improve_k", "user_stop", "failed")
 
@@ -76,7 +76,7 @@ def _probe_stat(sc: Scorecard | None, group: str, field: str = "avg") -> float |
 
 
 def _round(v, nd: int = 2):
-    """诊断数值进 LLM prompt 前取整:未取整的浮点(如 running=30.366666...)会被
+    """诊断数值进 LLM prompt 前取整：未取整的浮点(如 running=30.366666...)会被
     agent 原样抄进它自己的 evidence_refs,UI 里显得毛糙(dogfood 实测发现)。"""
     try:
         return round(float(v), nd) if v is not None else None
@@ -89,7 +89,7 @@ def diag_block(config: dict, sc: Scorecard) -> dict:
     映射成 {bottleneck, fired_rules, mfu, mbu, running, waiting, kv_util, ttft/tpot/tps,
     evidence_refs};没有则回退 config 启发式 diagnose()。
 
-    语义注意:`kv_util` = KV cache 占用比(0-1,容量维,D 的证据),来源
+    语义注意：`kv_util` = KV cache 占用比(0-1,容量维,D 的证据),来源
     `runtime_probe.kv_cache_usage` / `vllm.scheduler.kv_cache_usage_ratio`;
     `mbu` = NVML HBM 控制器繁忙%(带宽维,B 的证据),来源 `gpu.mem_util_pct`。别混。"""
     live = (sc.run_meta or {}).get("diagnosis")
@@ -115,11 +115,11 @@ def diag_block(config: dict, sc: Scorecard) -> dict:
 def load_binding(config: dict, diag: dict, sc: Scorecard | None = None) -> bool | None:
     """准入闸是否真绑定(§4.4 守卫的姊妹判据)。
 
-    决定性证据是 **waiting 队列**,但 waiting==0 有两种物理上完全不同的成因,必须分清:
+    决定性证据是 **waiting 队列**,但 waiting==0 有两种物理上完全不同的成因,必须分清：
     ① running 明显低于 max_num_seqs → 真喂不饱,提上限确定没用(False);
     ② running 顶满/贴近 max_num_seqs 但 waiting 仍是 0 → 要看 bench 并发有没有真的
        超过这个上限试过。**bench 并发若 ≤ max_num_seqs,压根没有第 33 个请求去排队,
-       waiting=0 是必然结果、不是证据**(真机教训:bridge 默认并发=32 恰好撞上默认基线
+       waiting=0 是必然结果、不是证据**(真机教训：bridge 默认并发=32 恰好撞上默认基线
        max_num_seqs=32,导致这条闸在第一轮就恒判"没绑定",连 max_num_seqs 这个最该试的
        候选都被剪掉)。这种"没测过"要老实返回 None(未知),不能当 False 用。
     只有 bench 并发确实超过 max_num_seqs、且仍无排队,才是"真没绑定"的硬证据。
@@ -148,7 +148,7 @@ def load_binding(config: dict, diag: dict, sc: Scorecard | None = None) -> bool 
 
 
 def kv_headroom(config: dict, diag: dict, sc: Scorecard | None = None) -> float:
-    """KV 余量(§4.4 D 守卫)。优先真证据:bench 窗口 KV 占用峰值(runtime_probe /
+    """KV 余量(§4.4 D 守卫)。优先真证据：bench 窗口 KV 占用峰值(runtime_probe /
     diag.kv_util,0-1)→ 余量 = 1 - 峰值;没有再退准入闸代理(running≈max_num_seqs
     → 余量低),最后 sim 路由的 kv_pressure。"""
     kv = _probe_stat(sc, "kv_cache_usage", "max")
@@ -168,7 +168,7 @@ def kv_headroom(config: dict, diag: dict, sc: Scorecard | None = None) -> float:
 
 
 def diagnose(config: dict, sc: Scorecard) -> dict:
-    """observe:从配置+实测推出当前命中瓶颈(sim 路由)。真路由换成读 /api/diagnoses。
+    """observe：从配置+实测推出当前命中瓶颈(sim 路由)。真路由换成读 /api/diagnoses。
 
     KV 压力 = 并发 / KV 容量(∝ gpu_util)。<0.6 双低(A,喂不饱)/ 0.6–1 带宽瓶颈(B,KV 在填)/
     >1 容量瓶颈(D,抢占)。
@@ -194,7 +194,7 @@ def diagnose(config: dict, sc: Scorecard) -> dict:
 
 
 def applies_to(model: str, obj: ObjectiveSpec, sc: Scorecard | None) -> dict:
-    """报告适用边界(§9.3):一次 Autopilot 结论只能绑定到当时的模型/GPU/vLLM/workload/objective。"""
+    """报告适用边界(§9.3)：一次 Autopilot 结论只能绑定到当时的模型/GPU/vLLM/workload/objective。"""
     meta = sc.run_meta if sc else {}
     return {
         "model": model or meta.get("model") or "unknown",
@@ -254,12 +254,12 @@ class Runner(threading.Thread):
         self._secs_budget = float(budget.get("seconds", budget.get("minutes", 30) * 60))
         self._model = model
         self._delay = step_delay_s          # UI 逐轮观感(真路由由 bench 时长自然产生)
-        self._baseline = dict(baseline_config or BASELINE_CONFIG)   # 可配:压低=造"喂不饱"工况
+        self._baseline = dict(baseline_config or BASELINE_CONFIG)   # 可配：压低=造"喂不饱"工况
         self._quality_gate = quality_gate          # 开则放 T2(质量类)候选;M0 默认关(只 T1)
         self._bench_repeats = max(1, int(bench_repeats))
         self._search_mode = search_mode
         self._search_width = max(1, int(search_width))
-        self._elapsed_s = max(0.0, float(elapsed_s))   # resume:时间预算不因进程重启归零
+        self._elapsed_s = max(0.0, float(elapsed_s))   # resume：时间预算不因进程重启归零
         self._stopping = threading.Event()
         self._best_cfg: dict = {}
         self._best_sc: Scorecard | None = None
@@ -318,7 +318,7 @@ class Runner(threading.Thread):
 
     def _heartbeat_run(self, phase: str, label: str, fn, extra=None):
         """跑 fn(),期间每 15s 发一条 "{label} Xs …" 事件——盲等段(压测 50-80s、
-        LLM 思考+重试最坏可达数分钟)UI 需要活着的信号。extra() 可选:附加一段
+        LLM 思考+重试最坏可达数分钟)UI 需要活着的信号。extra() 可选：附加一段
         实时状态(如候选引擎的 running/KV/MFU),失败静默跳过。"""
         stop_beat = threading.Event()
 
@@ -330,7 +330,7 @@ class Runner(threading.Thread):
                     try:
                         line = extra()
                         if line:
-                            msg += f"(引擎:{line})"
+                            msg += f"(引擎：{line})"
                     except Exception:  # noqa: BLE001
                         pass
                 self._event(phase, msg + " …", round=self._cur_round)
@@ -362,7 +362,7 @@ class Runner(threading.Thread):
             return None
 
     def _ensure_equivalence_golden(self) -> bool:
-        """T2 前置:golden 输出必须取自「当前 best 已加载」的沙盒。
+        """T2 前置：golden 输出必须取自「当前 best 已加载」的沙盒。
         只允许在 apply 候选**之前**调用——候选加载后再取会把候选自己的输出当 golden,
         等价检查恒真(且兜底 re-apply 会把 bench 打到错误配置上)。"""
         if self._equivalence_golden is not None:
@@ -370,7 +370,7 @@ class Runner(threading.Thread):
         self._equivalence_golden = self._sample_outputs()
         if self._equivalence_golden is not None:
             return True
-        try:                                     # resume 等场景:沙盒还没加载 → 先回 best
+        try:                                     # resume 等场景：沙盒还没加载 → 先回 best
             self._sb.apply(self._best_cfg)
             self._equivalence_golden = self._sample_outputs()
         except Exception:  # noqa: BLE001
@@ -384,7 +384,7 @@ class Runner(threading.Thread):
     def _equivalence_ok(self, dec) -> tuple[bool, str]:
         """候选已加载后比对。golden 缺失 → fail-closed(判负,不 bench)。
 
-        比对用逐条相似度阈值而非精确相等:serving 输出非 seed 决定性(§6.2),
+        比对用逐条相似度阈值而非精确相等：serving 输出非 seed 决定性(§6.2),
         batching 差异可致个别 token 漂移;质量真坏(fp8 跑偏)时相似度会远低于阈值。"""
         if not self._needs_equivalence(dec):
             return True, ""
@@ -412,7 +412,7 @@ class Runner(threading.Thread):
             try:                             # 停机归因 best-effort;细节已在 session.error
                 self._append_stop((self._cur_round or 0) + 1,
                                   AgentDecision(done=True,
-                                                reason=f"异常终止: {type(e).__name__}: {e}"[:300]),
+                                                reason=f"异常终止： {type(e).__name__}: {e}"[:300]),
                                   None, cause="failed")
             except Exception:                # noqa: BLE001
                 pass
@@ -476,7 +476,7 @@ class Runner(threading.Thread):
     def _run_baseline(self) -> None:
         self._cur_round = 0
         self._store.set_state("baselining")
-        self._event("baseline", "建立基线:启动沙盒并跑第一轮压测",
+        self._event("baseline", "建立基线：启动沙盒并跑第一轮压测",
                     round=0, detail={"config": dict(self._baseline), "bench": self._bench_plan()})
         try:
             sc = self._measure(self._baseline)
@@ -488,12 +488,12 @@ class Runner(threading.Thread):
                 try:
                     tail = self._sb._logs_tail()
                     if tail:
-                        err += "\n容器日志尾:\n" + tail
+                        err += "\n容器日志尾：\n" + tail
                 except Exception:  # noqa: BLE001
                     pass
-            self._event("decide", f"基线失败:{type(e).__name__}: {err[:200]}",
+            self._event("decide", f"基线失败：{type(e).__name__}: {err[:200]}",
                         round=0, level="error", detail={"error": err[:1200]})
-            # B+C:让 LLM 感知失败、选择修复动作、执行后重试
+            # B+C：让 LLM 感知失败、选择修复动作、执行后重试
             sc = self._run_baseline_recovery(err)
             if sc is None:
                 raise
@@ -510,13 +510,13 @@ class Runner(threading.Thread):
             decision="baseline", bench_spec=sc.run_meta, agent_model=self._agent.model
             if hasattr(self._agent, "model") else "",
             rationale="朴素基线(后续候选都跟它 + best-so-far 比)。"))
-        self._event("decide", f"基线完成: {sc.output_tps:g} tok/s",
+        self._event("decide", f"基线完成： {sc.output_tps:g} tok/s",
                     round=0, detail={"output_tps": sc.output_tps, "ttft_p99_ms": sc.ttft_p99_ms,
                                      "tpot_p99_ms": sc.tpot_p99_ms})
         self._tick()
 
     def _run_baseline_recovery(self, error: str) -> Scorecard | None:
-        """B+C:基线失败自愈。让 LLM/启发式根据错误日志选系统级修复动作,执行后重试 baseline。
+        """B+C：基线失败自愈。让 LLM/启发式根据错误日志选系统级修复动作,执行后重试 baseline。
         返回成功 Scorecard 或 None(无法修复)。"""
         MAX_RECOVERY = 3
         tried: list[str] = []
@@ -538,7 +538,7 @@ class Runner(threading.Thread):
                 budget={"rounds_left": self._rounds_budget, "seconds_left": self._secs_budget},
                 current_config=dict(self._baseline),
                 diagnosis={"bench_plan": self._bench_plan()},
-                candidates=[],       # recovery 模式不用候选旋钮
+                candidates=[],       # recovery 模式不用候选参数
                 history=[],
                 recovery_mode=True,
                 failure_context=failure_ctx,
@@ -546,7 +546,7 @@ class Runner(threading.Thread):
             dec = self._agent.propose(ctx)
             val_err = validate(dec, ctx)
             if val_err:
-                self._event("decide", f"recovery 非法提案: {val_err}", round=0, level="warn")
+                self._event("decide", f"recovery 非法提案： {val_err}", round=0, level="warn")
                 tried.append(dec.recovery_action or "invalid")
                 continue
             action = dec.recovery_action
@@ -554,7 +554,7 @@ class Runner(threading.Thread):
                 self._event("decide", "recovery: agent 判无法修复,结束 session",
                             round=0, level="error")
                 return None
-            self._event("baseline", f"recovery 第{attempt}次: 执行 {action} — {dec.rationale}",
+            self._event("baseline", f"recovery 第{attempt}次： 执行 {action} — {dec.rationale}",
                         round=0, detail={"recovery_action": action,
                                          "expected_effect": dec.expected_effect,
                                          "baseline_before": dict(self._baseline),
@@ -567,7 +567,7 @@ class Runner(threading.Thread):
                 continue
             try:
                 sc = self._measure(self._baseline)
-                self._event("decide", f"recovery 成功: 第{attempt}次 {action} 后 baseline 跑通",
+                self._event("decide", f"recovery 成功： 第{attempt}次 {action} 后 baseline 跑通",
                             round=0, detail={"recovery_action": action,
                                              "baseline_after": dict(self._baseline),
                                              "bench_after": self._bench_plan()})
@@ -578,11 +578,11 @@ class Runner(threading.Thread):
                     try:
                         tail = self._sb._logs_tail()
                         if tail:
-                            err2 += "\n容器日志尾:\n" + tail
+                            err2 += "\n容器日志尾：\n" + tail
                     except Exception:  # noqa: BLE001
                         pass
                 error = err2  # 用最新错误继续下一轮 recovery
-                self._event("decide", f"recovery 第{attempt}次仍失败: {err2[:200]}",
+                self._event("decide", f"recovery 第{attempt}次仍失败： {err2[:200]}",
                             round=0, level="error", detail={"error": err2[:1200]})
         self._event("decide", f"recovery 耗尽 {MAX_RECOVERY} 次尝试,无法自愈",
                     round=0, level="error")
@@ -647,12 +647,12 @@ class Runner(threading.Thread):
             effective_cfg = self._effective_config()
             diag = diag_block(effective_cfg, self._best_sc)             # ③ observe(真诊断优先)
             binding = load_binding(effective_cfg, diag, self._best_sc)
-            if binding is False:            # 负载受限:亮成证据,让 agent/UI/报告都看得见
+            if binding is False:            # 负载受限：亮成证据,让 agent/UI/报告都看得见
                 diag.setdefault("evidence_refs", []).append(
                     f"load_limited:running_peak={_probe_stat(self._best_sc, 'running_reqs', 'max')}"
                     f"<max_num_seqs={effective_cfg.get('max_num_seqs')},waiting=0")
                 diag["load_limited"] = True
-            elif binding is None:           # 准入闸绑不绑定未知:说清楚为什么,别让候选悄悄冒出来
+            elif binding is None:           # 准入闸绑不绑定未知：说清楚为什么,别让候选悄悄冒出来
                 bc = (self._best_sc.run_meta or {}).get("concurrency") if self._best_sc else None
                 if bc is not None and float(bc) <= float(effective_cfg.get("max_num_seqs") or 0):
                     diag.setdefault("evidence_refs", []).append(
@@ -666,9 +666,9 @@ class Runner(threading.Thread):
                 cands, effective_cfg, diag["bottleneck"], history,
                 mode=self._search_mode, max_values_per_knob=self._search_width)
             p0 = evaluate_kvfit(cands, effective_cfg, self._best_sc)      # §5.2 P0:0-eval KV-fit 剪枝
-            for pc in p0.pruned:                       # 漏斗可见:0-eval 预测省掉的轮次亮出来
+            for pc in p0.pruned:                       # 漏斗可见：0-eval 预测省掉的轮次亮出来
                 self._event("propose",
-                            f"P0 预测剪枝:{pc['knob']} → {pc['to']}"
+                            f"P0 预测剪枝：{pc['knob']} → {pc['to']}"
                             f"({(pc.get('p0') or {}).get('reason', '')[:70]})",
                             round=rnd, detail={"p0": pc.get("p0")})
             cands = p0.candidates
@@ -676,7 +676,7 @@ class Runner(threading.Thread):
             diag["p2_search"] = {"mode": self._search_mode, "candidates": len(cands)}
             self._event(
                 "propose",
-                f"诊断命中{bottleneck_label(diag.get('bottleneck'))}:从 {len(cands)} 个候选里请求 agent 选择",
+                f"诊断命中{bottleneck_label(diag.get('bottleneck'))}：从 {len(cands)} 个候选里请求 agent 选择",
                 round=rnd,
                 detail={
                     "bottleneck": diag.get("bottleneck"),
@@ -696,9 +696,9 @@ class Runner(threading.Thread):
             rounds_left = self._rounds_budget - rnd + 1
             if not cands:                                                # 无对症候选 → 停止
                 # 曾经在这里 T1 耗尽就自动开 quality_gate 找 T2 候选凑轮次——T2 都是会降精度
-                # 的旋钮(quantization/kv-cache-dtype/speculative 等),不该在无对症候选时
-                # 自动顶上去,交给用户显式选择(§用户反馈:别碰这些旋钮,不提供这些动作)。
-                reason = ("瓶颈在提供的负载(bench 并发喂不满准入闸),server 旋钮无对症动作;"
+                # 的参数(quantization/kv-cache-dtype/speculative 等),不该在无对症候选时
+                # 自动顶上去,交给用户显式选择(§用户反馈：别碰这些参数,不提供这些动作)。
+                reason = ("瓶颈在提供的负载(bench 并发喂不满准入闸),server 参数无对症动作;"
                           "提高压测并发或换真实 workload 再调"
                           if diag.get("load_limited") else "无对症候选 → 近最优")
                 self._event("decide", f"没有对症候选,准备停止并恢复 best({reason})", round=rnd)
@@ -712,7 +712,7 @@ class Runner(threading.Thread):
                     lambda: self._propose_valid(ctx))                   # 校验 ∈ 候选 + 防重(2 次非法→failed)
             except AgentStopRequested:
                 # 用户手动停止,且当时正卡在 agent 调用里——不等这轮跑完再在循环顶部发现
-                # self._stopping,立刻记 stop 轮 + 正常 return(_finalize 仍会跑,收尾干净:
+                # self._stopping,立刻记 stop 轮 + 正常 return(_finalize 仍会跑,收尾干净：
                 # 恢复 best、生成上线包),不需要 bridge 硬发 SIGKILL(真机复现,2026-07-22:
                 # 卡在等 agent 时点停止,10s 优雅期不够,被强杀,session 没有 final 记录)。
                 self._event("decide", "用户手动停止", round=rnd)
@@ -728,17 +728,17 @@ class Runner(threading.Thread):
                 self._store.set_state("failed", "agent 连续 2 次非法提案(§9.3)")
                 return
             fb = (dec.candidate_meta or {}).get("llm_fallback")
-            if fb:                          # 兜底要显眼:用户以为在看 LLM 调优,实际是启发式
+            if fb:                          # 兜底要显眼：用户以为在看 LLM 调优,实际是启发式
                 self._event("propose",
                             f"LLM 调用失败({fb}),本轮由确定性启发式兜底——检查 agent 配置/额度",
                             round=rnd, level="warn", detail={"llm_fallback": fb})
             thinking = getattr(dec, "thinking", "") or ""
             if thinking:                    # 思考过程即刻直播(摘要),全文进事件 detail + round
-                self._event("propose", f"agent 思考:…{thinking[-160:]}", round=rnd,
+                self._event("propose", f"agent 思考：…{thinking[-160:]}", round=rnd,
                             detail={"thinking": thinking[:2400]})
             if not dec.done and dec.knob:   # 决策到达即刻全文直播,不等 bench 落定
                 self._event("propose",
-                            f"agent 决策:{dec.knob} {dec.from_val}→{dec.to_val} —— "
+                            f"agent 决策：{dec.knob} {dec.from_val}→{dec.to_val} —— "
                             f"{(dec.rationale or '')[:110]}",
                             round=rnd,
                             detail={"rationale": dec.rationale,
@@ -749,17 +749,17 @@ class Runner(threading.Thread):
             if dec.done:
                 prior_explored = rnd - 1
                 # prior_explored = 本轮之前已经真跑过多少个候选轮(不含 baseline)。
-                # 三种独立的"别信这次 done"场景:
+                # 三种独立的"别信这次 done"场景：
                 # ① 探索不够(prior_explored < MIN_EXPLORE_ROUNDS)——防止 Agent 刚起步、
                 #    一个候选没试就撂挑子;
                 # ② best_score 仍是 -inf,即从没有任何配置真正通过 SLA——这跟"收益递减"
                 #    是完全不同的风险等级,"我放弃了"和"从没成功过、我放弃了"分量不一样,
                 #    不该被①单独取代(哪怕已经探索够轮次,SLA 从没达标也不该轻易采信);
-                # ③ 相对门槛:桌面超过一半候选还没试过——探索轮数达标不代表桌面听审充分
+                # ③ 相对门槛：桌面超过一半候选还没试过——探索轮数达标不代表桌面听审充分
                 #    (6 个候选试 2 个就走 ≠ 2 个候选全试完),连续强制 MAX_FORCED_RELATIVE
                 #    次后采信,防止为了听审桌面烧 bench。
                 # 达到探索门槛 且 SLA 已至少通过一次 且桌面大半已试时,才真正信任它的判断
-                # (见上方 K_NO_IMPROVE 注释:真机证据显示这类 done 通常是靠谱的定性判断)。
+                # (见上方 K_NO_IMPROVE 注释：真机证据显示这类 done 通常是靠谱的定性判断)。
                 sla_never_met = self._best_score == float("-inf")
                 tried_hashes = {t["hash"] for t in tried}
                 untried_n = sum(1 for c in cands
@@ -781,7 +781,7 @@ class Runner(threading.Thread):
                         dec = AgentDecision(
                             done=False, knob=forced["knob"], config=forced["config"],
                             from_val=forced["from"], to_val=forced["to"], flag=forced["flag"],
-                            rationale=f"agent 判 done,但{why},强制多试一个候选:"
+                            rationale=f"agent 判 done,但{why},强制多试一个候选："
                                       f"{forced['knob']} {forced['from']}→{forced['to']}",
                             expected_effect="主指标↑,不破 SLA",
                             evidence_refs=list(diag.get("evidence_refs", [])),
@@ -827,13 +827,13 @@ class Runner(threading.Thread):
             no_improve = 0 if last.decision == "kept" else no_improve + 1
             rnd += 1
         else:
-            # 自然耗尽(非 break):轮数/时间/K/手动停 —— 这几条路径以前静默退出,
+            # 自然耗尽(非 break)：轮数/时间/K/手动停 —— 这几条路径以前静默退出,
             # 停机原因只能靠猜;统一补记 stop 轮归因(while-else:break 的路径已记过)。
             if self._stopping.is_set():
                 cause, reason = "user_stop", "用户手动停止"
             elif getattr(self._store.current, "state", None) == "failed":
                 cause = "failed"
-                reason = f"session 失败: {getattr(self._store.current, 'error', '') or ''}"[:300]
+                reason = f"session 失败： {getattr(self._store.current, 'error', '') or ''}"[:300]
             elif no_improve >= K_NO_IMPROVE:
                 cause, reason = "no_improve_k", f"连续 {K_NO_IMPROVE} 轮无 kept,收益耗尽"
             elif rnd > self._rounds_budget:
@@ -844,7 +844,7 @@ class Runner(threading.Thread):
             self._append_stop(rnd, AgentDecision(done=True, reason=reason), diag, cause=cause)
 
     def _propose_valid(self, ctx: AgentContext) -> AgentDecision | None:
-        """proposing:最多 MAX_ILLEGAL 次,要 ∈ 候选集 + 不防重命中;都非法 → None(→ failed)。"""
+        """proposing：最多 MAX_ILLEGAL 次,要 ∈ 候选集 + 不防重命中;都非法 → None(→ failed)。"""
         for _ in range(MAX_ILLEGAL):
             dec = self._agent.propose(ctx)
             if validate(dec, ctx) is None:
@@ -870,7 +870,7 @@ class Runner(threading.Thread):
         before_cfg, before_sc, before_score = self._best_cfg, self._best_sc, self._best_score
         self._event(
             "apply",
-            f"应用候选:{dec.flag or dec.knob} {dec.from_val} → {dec.to_val}",
+            f"应用候选：{dec.flag or dec.knob} {dec.from_val} → {dec.to_val}",
             round=rnd,
             detail={
                 "knob": dec.knob, "from": dec.from_val, "to": dec.to_val,
@@ -888,7 +888,7 @@ class Runner(threading.Thread):
                 self._sb.apply(dec.config)
                 ok, reason = self._equivalence_ok(dec)
                 if not ok:
-                    self._event("decide", f"质量等价检查失败:{reason}", round=rnd, level="warn")
+                    self._event("decide", f"质量等价检查失败：{reason}", round=rnd, level="warn")
                     dec.rationale += f" [{reason}]"
                     sc, score = None, float("-inf")
                 else:
@@ -906,7 +906,7 @@ class Runner(threading.Thread):
                         score = objective_score(sc, self._obj)
                         why = self._borderline(sc, before_score, score)
                         if why and self._bench_repeats == 1:
-                            # 条件 median-of-3:只有贴近判定边界的成绩才补测去噪,
+                            # 条件 median-of-3：只有贴近判定边界的成绩才补测去噪,
                             # 省下的 bench 时间就是轮数预算(默认 bench_repeats=1 不变)。
                             self._event("benchmark", f"{why},补测 2 次取中位去噪", round=rnd)
                             more = [self._sb.measure(self._obj) for _ in range(2)]
@@ -921,12 +921,12 @@ class Runner(threading.Thread):
                 try:                          # BenchError(压测期死亡)也要能看到候选临终日志
                     tail = self._sb._logs_tail()
                     if tail:
-                        err += "\n容器日志尾:\n" + tail
+                        err += "\n容器日志尾：\n" + tail
                 except Exception:  # noqa: BLE001
                     pass
-            self._event("decide", f"候选失败:{type(e).__name__}: {err[:200]}",
+            self._event("decide", f"候选失败：{type(e).__name__}: {err[:200]}",
                         round=rnd, level="warn", detail={"error": err[:1200]})
-            dec.rationale += f" [候选失败:{type(e).__name__}: {err[:300]}]"
+            dec.rationale += f" [候选失败：{type(e).__name__}: {err[:300]}]"
         decision = decide(score, before_score, self._obj.noise_margin)
         if decision == "kept":
             self._best_cfg, self._best_sc, self._best_score = dict(dec.config), sc, score
@@ -954,7 +954,7 @@ class Runner(threading.Thread):
                                 "ttft_p99_ms": sc.ttft_p99_ms, "tpot_p99_ms": sc.tpot_p99_ms,
                                 "noise_margin": self._obj.noise_margin})
         else:
-            self._event("decide", f"判定 {decision}:候选未产生有效 score,回滚 best", round=rnd,
+            self._event("decide", f"判定 {decision}：候选未产生有效 score,回滚 best", round=rnd,
                         detail={"decision": decision}, level="warn")
         if decision != "kept":                # 运行时也回 best,保证下一轮 observe 的是 best
             try:
@@ -969,7 +969,7 @@ class Runner(threading.Thread):
         self._tick()
 
     def _table_snapshot(self, cands: list[dict] | None, tried: list[dict], p0) -> list[dict]:
-        """判停瞬间的桌面快照:每个候选试没试过(untried/kept/reverted/tie)、
+        """判停瞬间的桌面快照：每个候选试没试过(untried/kept/reverted/tie)、
         P0 剪没剪 —— 让"agent 说没值得试的"可事后审计。"""
         by_hash = {t["hash"]: t.get("decision") for t in tried or []}
         snap = [{"knob": c.get("knob"), "from": c.get("from"), "to": c.get("to"),
@@ -993,10 +993,10 @@ class Runner(threading.Thread):
         self._tick()
 
     def _build_action_space_summary(self) -> dict:
-        """全量旋钮面里这次 session 实际"够得着"多少、试了多少——回答"为什么只调
+        """全量参数面里这次 session 实际"够得着"多少、试了多少——回答"为什么只调
         这 2-3 个参数,不调其他的"(用户反馈,2026-07-22)。跳过原因分三类(见
         action_space_stats 文档字符串);剩下候选池里,再按本次实际诊断到的瓶颈
-        (可能不止一种)筛出对症旋钮,跟实际试过的旋钮对照。"""
+        (可能不止一种)筛出对症参数,跟实际试过的参数对照。"""
         stats = action_space_stats()
         rounds = self._store.current.rounds if self._store.current else []
         bottlenecks_seen = sorted({
@@ -1020,7 +1020,7 @@ class Runner(threading.Thread):
     def _finalize(self) -> None:
         self._cur_round = None           # 收尾期心跳不再挂在最后一轮上
         self._store.set_state("finalizing")
-        self._event("finalize", "收尾:恢复 best 配置并生成上线包")
+        self._event("finalize", "收尾：恢复 best 配置并生成上线包")
         try:                                 # 收尾强制回 best 并验证就绪
             self._sb.apply(self._best_cfg)
         except Exception:                    # noqa: BLE001

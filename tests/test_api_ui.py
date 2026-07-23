@@ -34,14 +34,14 @@ def test_root_returns_html(client):
 
 def test_root_contains_required_libs(client):
     body = client.get("/").text
-    # vendor 本地化:Alpine/Chart 走 /vendor/ 而非 CDN,离线/air-gapped 主机也能渲染
+    # vendor 本地化：Alpine/Chart 走 /vendor/ 而非 CDN,离线/air-gapped 主机也能渲染
     assert "alpine.min.js" in body.lower()
     assert "chart.umd" in body.lower()
     assert "jsdelivr" not in body.lower() and "cdn." not in body.lower()
 
 
 def test_vendor_assets_served(client):
-    """vendor JS 本地服务可用(C:不再依赖 CDN)。"""
+    """vendor JS 本地服务可用(C：不再依赖 CDN)。"""
     alp = client.get("/vendor/alpine.min.js")
     assert alp.status_code == 200 and "javascript" in alp.headers["content-type"]
     assert len(alp.text) > 1000
@@ -69,9 +69,9 @@ def test_root_references_known_api_endpoints(client):
 
 
 def test_autopilot_cold_open_shows_last_result_as_past(client):
-    """打开 Autopilot tab 时,历史 done session 曾被整个隐藏(dogfood 实测暴露:调优结果 —
+    """打开 Autopilot tab 时,历史 done session 曾被整个隐藏(dogfood 实测暴露：调优结果 —
     包括推荐命令 — 是产品的核心产出,单卡单 session 工具上刷新一次页面就整个消失,等于白跑)。
-    现在改为:仍然显示,但标成"上次结果"而非伪装成刚跑完。"""
+    现在改为：仍然显示,但标成"上次结果"而非伪装成刚跑完。"""
     js = client.get("/dashboard.js").text
     body = client.get("/").text + js
     assert "coldLoaded" in js                          # 冷启动加载的历史 session 有独立标记
@@ -111,7 +111,7 @@ def test_autopilot_start_button_uses_execute_label(client):
 
 
 def test_autopilot_result_card_explains_outcome_not_just_ratio(client):
-    """用户反馈:session 跑完只甩一句"仍满足 TTFT SLA"(还写死,基线破 SLA 时是假话)+
+    """用户反馈：session 跑完只甩一句"仍满足 TTFT SLA"(还写死,基线破 SLA 时是假话)+
     一个吞吐比值,看不出到底是"没提升"还是"基线本身就没达标",很懵逼。结果卡现在要带
     上 resultSummary/resultSummaryText 拼出的解释(是否保留了候选、SLA 违规/持平/更差
     各几个、停机原因人话),不能再是裸的写死断言。"""
@@ -128,10 +128,10 @@ def test_autopilot_result_card_explains_outcome_not_just_ratio(client):
 
 
 def test_autopilot_result_card_explains_which_knobs_were_considered(client):
-    """用户反馈(2026-07-22):每次 session 只调 2-3 个参数,不知道剩下的参数是"不该调"
+    """用户反馈(2026-07-22)：每次 session 只调 2-3 个参数,不知道剩下的参数是"不该调"
     还是"没顾上调"——结果卡(吞吐提升那张卡,指令行上方)现在还要带上 action_space_summary
-    拼出的解释:全量旋钮按跳过原因分类计数(默认已优/当前版本不支持/降精度排除),
-    再对照本次实际诊断到的瓶颈,列出对症但没试到的旋钮。"""
+    拼出的解释：全量参数按跳过原因分类计数(默认已优/当前版本不支持/降精度排除),
+    再对照本次实际诊断到的瓶颈,列出对症但没试到的参数。"""
     html = client.get("/").text
     js = client.get("/dashboard.js").text
     assert "actionSpaceSummaryText" in html and "actionSpaceSummaryText" in js
@@ -140,6 +140,46 @@ def test_autopilot_result_card_explains_which_knobs_were_considered(client):
     idx_summary = html.index('x-text="actionSpaceSummaryText"')
     idx_cmd = html.index('class="ap-cmd"')
     assert idx_summary < idx_cmd
+
+
+def test_autopilot_result_card_explains_the_narrative_across_rounds(client):
+    """用户反馈(2026-07-22)：总结只有"可调范围"一个维度,缺"整个多轮次下来的逻辑是
+    什么、为什么是这样"——最关键的是跟瓶颈诊断挂钩的因果链(诊断到什么瓶颈、瓶颈中途
+    有没有变、为什么在这轮停),要单独一节讲清楚(2-4 句因果,不逐轮复述)。"""
+    html = client.get("/").text
+    js = client.get("/dashboard.js").text
+    assert "sessionNarrativeText" in html and "get sessionNarrativeText" in js
+    assert "从头到尾都诊断为" in js and "转为" in js
+    assert "当前配置能做的上限" in js
+    # 挂在结果卡里,在"结果"和"候选池"之间,指令行上方
+    idx_result = html.index('x-text="resultSummaryText"')
+    idx_narrative = html.index('x-text="sessionNarrativeText"')
+    idx_pool = html.index('x-text="actionSpaceSummaryText"')
+    idx_cmd = html.index('class="ap-cmd"')
+    assert idx_result < idx_narrative < idx_pool < idx_cmd
+
+
+def test_autopilot_result_card_lists_each_tried_knob_with_its_outcome(client):
+    """用户反馈(2026-07-22):"可调范围"里"实际试了 4 个"只甩名字,看不出每个的结果——
+    改成结构化的逐轮账本(参数 → kept/reverted/tie + 幅度),不再是名字堆砌的一句话。
+    用户反馈(2026-07-23)：逐轮账本写的还是不具体——每行要说清楚做了什么、参数从什么值
+    调到什么值、为什么这么调(简要),而且全项目不该再用"旋钮"这个词,统一改"参数"。"""
+    html = client.get("/").text
+    js = client.get("/dashboard.js").text
+    css = client.get("/dashboard.css").text
+    assert "旋钮" not in html and "旋钮" not in js
+    assert "knobLedger" in html and "get knobLedger" in js
+    assert "ap-ledger-row" in html and ".ap-ledger" in css
+    assert "row.verdictClass" in html and "row.deltaText" in html
+    # 每行：参数名 + from→to + 简要原因(挂回本轮诊断到的瓶颈,呼应"为什么"小节的因果链)
+    assert "row.param" in html and "row.fromText" in html and "row.toText" in html
+    assert "row.whyText" in html
+    assert "为了缓解" in js
+    # 结果见上方逐轮账本：候选池段落不再重复堆砌已试参数的名字列表
+    assert "结果见上方逐轮账本" in js
+    idx_ledger = html.index('class="ap-ledger"')
+    idx_cmd = html.index('class="ap-cmd"')
+    assert idx_ledger < idx_cmd
 
 
 def test_autopilot_budget_is_max_rounds_not_fixed_six(client):
@@ -187,6 +227,21 @@ def test_autopilot_pending_round_uses_event_round_not_list_length(client):
     assert "'R'+(shownRounds.length)" not in body
 
 
+def test_autopilot_round_shows_thinking_preview_without_needing_a_click(client):
+    """用户反馈(2026-07-23):折叠态之前完全不露 agent 思考/推理的任何内容,不点开就跟
+    没调用过 agent 一样。思考过程原文可能几千到几万字,不能整段常驻列表里,但至少要露一小
+    段预览——全文仍然点击展开(expandedRounds)才看,预览本身不受这个门槛限制。"""
+    html = client.get("/").text
+    js = client.get("/dashboard.js").text
+    assert "thinkingPreview" in html and "thinkingPreview" in js
+    # 预览这一行不应该被 expandedRounds 折叠门槛卡住(那是给"完整推理"用的)
+    idx_preview = html.index('x-if="r.thinkingPreview"')
+    idx_gated_detail = html.index('x-show="expandedRounds.includes(r.round)"')
+    assert idx_preview < idx_gated_detail
+    preview_line = html[idx_preview:idx_gated_detail]
+    assert "expandedRounds" not in preview_line
+
+
 def test_autopilot_status_poll_failure_keeps_last_frame_briefly(client):
     js = client.get("/dashboard.js").text
     assert "pollFailures" in js
@@ -222,7 +277,7 @@ def test_autopilot_treats_stopped_bridge_as_terminal(client):
 def test_root_references_marquee_kpi_labels(client):
     """Dashboard 必须把 marquee KPI 标签暴露给用户。
 
-    i18n 后:标签文本搬进 dashboard.js 的 I18N 字典,HTML 用 t('key') 引用。
+    i18n 后：标签文本搬进 dashboard.js 的 I18N 字典,HTML 用 t('key') 引用。
     所以查 html + js 合起来(同 test_rules_tab 的做法)。
     """
     body = client.get("/").text + client.get("/dashboard.js").text
@@ -239,7 +294,7 @@ def test_ui_assets_split_and_under_budget():
     markup 实打实变多。once-load、gzip 后才十几 KB,为这点体积上构建工具不划算。
 
     i18n(中/英):dashboard.js 多了双语字典 I18N(每串两份),index.html 的中文文本
-    换成 `<span x-text="t('key')">`(比裸文本长)。全站 i18n 后字典 ~280 键×2 语言:
+    换成 `<span x-text="t('key')">`(比裸文本长)。全站 i18n 后字典 ~280 键×2 语言：
     js 95KB→135KB;index.html 反而变小(中文文本被 t('key') 取代)。
     gzip 后仍十几 KB(双语字典压缩比高),拆 i18n.js 多一个路由不划算。"""
     ui = Path(__file__).parent.parent / "src" / "pping_lang" / "ui"
@@ -256,7 +311,7 @@ def test_ui_assets_split_and_under_budget():
     # Autopilot 预览 tab 的 autopilotTab()(mock 轨迹 + 脚本播放)过了 140KB → 抬到 155KB。
     # 结果卡加 resultSummary/resultSummaryText + STOP_LABELS(把 stop_cause/SLA 违规/
     # 回滚原因拼成人话,不然用户看完只有一个吞吐比值,看不出"为什么")过了 155KB → 抬到 160KB。
-    # 结果卡再加 actionSpaceSummaryText(用户反馈,2026-07-22:说清楚为什么只调 2-3 个
+    # 结果卡再加 actionSpaceSummaryText(用户反馈,2026-07-22：说清楚为什么只调 2-3 个
     # 参数,剩下的是"不该调"还是"没顾上调")过了 160KB → 抬到 165KB。
     assert js < 165_000, f"dashboard.js is {js} bytes, exceeds 165KB"
 
@@ -299,7 +354,7 @@ def test_home_slo_panel_and_diagnosis_table(client):
     assert "advancedOpen" in body                     # 高级阈值折叠开关
     assert "advKeys()" in body and "advLabels" in body  # 高级阈值网格(只放 4 瓶颈阈值)
     assert "slaPass(" in body                         # 达标判定(当前 p99 vs SLA)
-    # 诊断 tab = 内置 4 瓶颈目录(detector-group):每瓶颈多条跨层检测手段,命中即高亮(几条互证)
+    # 诊断 tab = 内置 4 瓶颈目录(detector-group)：每瓶颈多条跨层检测手段,命中即高亮(几条互证)
     assert "rules.builtinTitle" in body and "rules.colMethods" in body
     for token in ["ruleName(r.id)", "ruleHyp(r)", "ruleSug(r)", "firedFor(r.id, diagnoses)",
                   "r.detectors", "detFired(det", "detCond(det)", "hitCount(r, diagnoses)",

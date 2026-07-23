@@ -7,7 +7,7 @@ Day 3 status：完整数据流通了。
 - GPU peak 表查找成功则计算 MFU / mem_bw_util_ratio
 
 环境变量：
-- PPING_LANG_DB_PATH              落盘目录基准(取其父目录):指标/诊断写 JSONL,
+- PPING_LANG_DB_PATH              落盘目录基准(取其父目录)：指标/诊断写 JSONL,
                                   bench_runs 仍用同目录 .duckdb。默认 ~/.pping-lang/local.duckdb
 - PPING_LANG_INSTANCE_ID          默认 local-{engine_index}
 - PPING_LANG_NVML_INTERVAL_S      默认 0.1（NVML 采样间隔，秒）
@@ -88,7 +88,7 @@ DEFAULT_DB_PATH = Path.home() / ".pping-lang" / "local.duckdb"
 
 # Env-var prefixes exposed in /api/system. Anything else is filtered out to
 # avoid leaking shell history / unrelated process env / accidental secrets.
-# 注意:不收 PPING_LANG_* —— 那是插件自己的配置旋钮(DB 路径/端口/采样间隔/feature flag),
+# 注意：不收 PPING_LANG_* —— 那是插件自己的配置参数(DB 路径/端口/采样间隔/feature flag),
 # 不是 vLLM workload 的上下文,对看面板的人是噪声(启动信息只展示 vLLM/模型/GPU/CUDA 环境)。
 _ENV_PREFIXES_INCLUDED = (
     "VLLM_",
@@ -241,12 +241,12 @@ class PpingLangStatLogger(StatLoggerBase):
         #       PPING_LANG_ENABLE_PCS=1   → PC sampling(Deep Evidence,采样实测;长期主干)
         #       PPING_LANG_ENABLE_CUPTI=1 → CUPTI Activity(精确 μs;可选,PCS 未开时才用)
         #     PC sampling 需 .so 注入(CUDA_INJECTION64_PATH,驱动 cuInit 时加载)+ 采集须与
-        #     引擎**同进程**:多进程 serve 下插件在前端进程、碰不到 EngineCore 的 kernel,
+        #     引擎**同进程**：多进程 serve 下插件在前端进程、碰不到 EngineCore 的 kernel,
         #     故单进程(VLLM_ENABLE_V1_MULTIPROCESSING=0)才生效。详见设计 §11/§12。
         if os.environ.get("PPING_LANG_ENABLE_PCS") == "1":
             from pping_lang.collector.cupti import FakeActivitySource  # noqa: PLC0415
             from pping_lang.engine_pcs import FilePcSampling  # noqa: PLC0415
-            # 多进程 serve:本进程(前端 stat_logger)没有 CUDA context、不能本地采样。
+            # 多进程 serve：本进程(前端 stat_logger)没有 CUDA context、不能本地采样。
             # 真采集由 EngineCore 进程的 general_plugin(engine_pcs.init_engine_pcs)做,
             # 把每窗结果写共享文件;这里只读文件喂 Deep Evidence。单进程时两者同进程也成立。
             pcs = FilePcSampling()

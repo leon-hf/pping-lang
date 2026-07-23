@@ -1,11 +1,11 @@
-"""P3 行级归因:把 PC 样本的 (cubinCrc, pcOffset, functionName) 关联到源码行 / SASS 偏移。
+"""P3 行级归因：把 PC 样本的 (cubinCrc, pcOffset, functionName) 关联到源码行 / SASS 偏移。
 
 双轨(M0 实测划清的边界,见 _design-notes/phase-3-行级归因-M0铁证与价值边界.md):
   - 可映射 kernel(Triton/自编译,带 lineinfo)→ `file.py:line`(wow 那一轨);
   - 闭源库(cutlass/flash,无 lineinfo)→ 退到 SASS 偏移 + 解码 kernel 名(tile/dtype)。
 
 两个 CUPTI API 都在主 libcupti.so.13,离线可调(无需 CUDA context):
-  - cuptiGetCubinCrc(cubin 字节)→ crc:用来匹配 PC 样本里的 cubinCrc(运行时 crc 与磁盘
+  - cuptiGetCubinCrc(cubin 字节)→ crc：用来匹配 PC 样本里的 cubinCrc(运行时 crc 与磁盘
     cubin 的 cuptiGetCubinCrc 实测相等,M0 已证);
   - cuptiGetSassToSourceCorrelation(cubin, fn, pcOffset)→ lineNumber/fileName。
 
@@ -70,7 +70,7 @@ def _triton_cache_globs() -> list[str]:
     return pats
 
 
-# kernel 名解码:闭源 GEMM/attention 名里编码了 tile/dtype/指令类,本身就有诊断价值。
+# kernel 名解码：闭源 GEMM/attention 名里编码了 tile/dtype/指令类,本身就有诊断价值。
 _CUTLASS_RE = re.compile(r"cutlass_\w*?(?P<arch>\d+)_(?P<inst>wmma_tensorop|tensorop|simt)"
                          r"_(?P<dtype>[a-z0-9]+)_\w*?(?P<tile>\d+x\d+)_(?P<stages>\d+x\d+)")
 
@@ -78,7 +78,7 @@ _CUTLASS_RE = re.compile(r"cutlass_\w*?(?P<arch>\d+)_(?P<inst>wmma_tensorop|tens
 def decode_kernel_name(name: str) -> str | None:
     """把 mangled kernel 名解码成人话(库来源 / tile / dtype)。认不出返回 None。
 
-    注意区分:`_ZN...` 是 C++ Itanium mangled(cutlass/cuBLAS/PyTorch/vLLM 自定义 CUDA);
+    注意区分：`_ZN...` 是 C++ Itanium mangled(cutlass/cuBLAS/PyTorch/vLLM 自定义 CUDA);
     Triton JIT kernel 是未 mangle 的普通名(如 `_topk_topp_kernel`)。早期把所有下划线开头
     当 Triton 是错的(M1 实测踩到)。
     """
@@ -96,7 +96,7 @@ def decode_kernel_name(name: str) -> str | None:
         return "FlashAttention · forward kernel"
     if "cutlass" in low and "gemm" in low:
         return "cutlass GEMM kernel"
-    # 常见 C++ kernel(_ZN mangled):按内嵌库标识归类
+    # 常见 C++ kernel(_ZN mangled)：按内嵌库标识归类
     if mangled:
         if "cublaslt" in low or "cublas" in low:
             if "splitkreduce" in low:
@@ -132,7 +132,7 @@ def decode_kernel_name(name: str) -> str | None:
 class SourceCorrelator:
     """PC → 源码行 / SASS 偏移 关联器。构造一次复用;crc→cubin 与关联结果都带缓存。
 
-    fail-soft:任何一步出问题(无 libcupti / 无 cubin / API 失败)→ correlate 返回降级结果。
+    fail-soft：任何一步出问题(无 libcupti / 无 cubin / API 失败)→ correlate 返回降级结果。
     """
 
     def __init__(self, libcupti_path: str | None = None) -> None:
@@ -142,7 +142,7 @@ class SourceCorrelator:
         self._file_cache: dict[str, list[str]] = {}  # 源码文件 → 行列表(读一次缓存)
         path = libcupti_path or _find_libcupti()
         if not path:
-            logger.info("[pping-lang] sass_source:未找到 libcupti,源码行关联禁用(SASS 偏移仍可用)")
+            logger.info("[pping-lang] sass_source：未找到 libcupti,源码行关联禁用(SASS 偏移仍可用)")
             return
         try:
             lib = ctypes.CDLL(path)

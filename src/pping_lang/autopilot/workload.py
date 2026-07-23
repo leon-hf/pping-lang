@@ -1,11 +1,11 @@
 """业务形态 WorkloadSpec(M1 优先级 5):bench 负载 + 默认 SLA 一张表。
 
-动机(2026-07-19 真机 session `ap-20260719-004104`):泛目标(吞吐优先)+ 泛负载
+动机(2026-07-19 真机 session `ap-20260719-004104`)：泛目标(吞吐优先)+ 泛负载
 (c32 mixed-short)在真实轻载下 `load_limited` 交白卷——**调优空间 = 具体业务负载 ×
 具体配置的不匹配**,泛形态造不出也测不准。形态与首页实时 tab 同套词汇
 (chat/rag/agent/reasoning/code/custom),让 bench、SLA、诊断 regime 说同一种负载语言。
 
-优先级:显式 flag / 表单值 > 形态默认 > 各调用方原有兜底;`custom` = 全手动透传
+优先级：显式 flag / 表单值 > 形态默认 > 各调用方原有兜底;`custom` = 全手动透传
 (形态不施加任何影响,行为同引入形态之前)。
 """
 from __future__ import annotations

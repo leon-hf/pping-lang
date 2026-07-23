@@ -1,9 +1,9 @@
 """运行时把打包的 ppingcupti.cpp 编成 libppingcupti.so —— 实现"纯 pip 装上即用"。
 
-在目标(vLLM)环境里现编:自动探测 cu12/cu13 的 libcupti + cupti 头 + cuda.h + libcuda
+在目标(vLLM)环境里现编：自动探测 cu12/cu13 的 libcupti + cupti 头 + cuda.h + libcuda
 stub(逻辑同 deploy/runw/build_so.sh),g++ 编译,缓存到 ~/.pping-lang/lib/。
 
-入口:`ensure_so()` → 返回 (so_path, cupti_libdir);失败抛 BuildError(调用方降级)。
+入口：`ensure_so()` → 返回 (so_path, cupti_libdir);失败抛 BuildError(调用方降级)。
 """
 from __future__ import annotations
 
@@ -53,7 +53,7 @@ def _detect() -> dict[str, str]:
     ])
     if not cupti_h:
         raise BuildError("找不到 cupti_pcsampling.h")
-    # cuda.h:必须挑**同时有 crt/host_defines.h** 的 include 目录 —— cupti 头会层层
+    # cuda.h：必须挑**同时有 crt/host_defines.h** 的 include 目录 —— cupti 头会层层
     # include 到 crt/host_defines.h;triton 自带整套 CUDA 头(含 crt/),而 nvidia/cuXX/
     # include 只有 cupti+部分头、缺 crt/ → 选错就 "fatal error: crt/host_defines.h"。
     cuda_inc: str | None = None
@@ -68,7 +68,7 @@ def _detect() -> dict[str, str]:
             break
     if cuda_inc is None:
         raise BuildError("找不到含 crt/host_defines.h 的 cuda.h include 目录(通常 triton 自带)")
-    # libcuda 链接:优先 stub,否则真 .so.1
+    # libcuda 链接：优先 stub,否则真 .so.1
     stub = _glob1([
         "/usr/local/cuda*/targets/*/lib/stubs/libcuda.so",
         "/usr/local/cuda*/lib64/stubs/libcuda.so",
@@ -105,12 +105,12 @@ def ensure_so(force: bool = False) -> tuple[str, str]:
         return explicit, det_libdir
 
     if not _CPP.exists():
-        raise BuildError(f"打包的源码缺失:{_CPP}(wheel 未含 native/*.cpp?)")
+        raise BuildError(f"打包的源码缺失：{_CPP}(wheel 未含 native/*.cpp?)")
 
     det = _detect()
     out = _cache_so()
     out.parent.mkdir(parents=True, exist_ok=True)
-    # 缓存命中:.so 比 .cpp 和 .h 都新
+    # 缓存命中：.so 比 .cpp 和 .h 都新
     if out.exists() and not force:
         hdr = _NATIVE_DIR / "ppingcupti.h"
         newest_src = max(_CPP.stat().st_mtime, hdr.stat().st_mtime if hdr.exists() else 0)

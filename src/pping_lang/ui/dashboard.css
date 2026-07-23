@@ -1,5 +1,5 @@
 :root {
-    /* Linear 风格:冷石板灰基底 + 靛蓝主强调。
+    /* Linear 风格：冷石板灰基底 + 靛蓝主强调。
        --coral 现为「品牌靛蓝」(原所有品牌处自动跟着变);红色(compute roof / 错误)走 --rose。 */
     --bg: #fbfbfd;
     --surface: #ffffff;
@@ -190,7 +190,7 @@
     border-bottom: 1px solid var(--border);
     background: var(--surface);
     /* 滚动时吸顶,吸在 sticky header(高 64px:padding 16×2 + brand-mark 32)正下方。
-       z-index 9 < header 的 10:万一像素级重叠,header 压在上面。--surface 不透明,内容不透上来。*/
+       z-index 9 < header 的 10：万一像素级重叠,header 压在上面。--surface 不透明,内容不透上来。*/
     position: sticky;
     top: 64px;
     z-index: 9;
@@ -627,8 +627,8 @@
   }
   .kpi .sub-line span { color: var(--text); font-weight: 600; }
 
-  /* 延迟分位分布:三行式,每分位一条(p99=满刻度;三段挤一条看不清,实测反馈改的)。
-     行间颜色渐淡:p50 深(典型)、p99 浅(尾部),长度差一眼即尾部恶化程度 */
+  /* 延迟分位分布：三行式,每分位一条(p99=满刻度;三段挤一条看不清,实测反馈改的)。
+     行间颜色渐淡：p50 深(典型)、p99 浅(尾部),长度差一眼即尾部恶化程度 */
   .kpi .pct-rows {
     display: flex;
     flex-direction: column;
@@ -1011,7 +1011,7 @@
     align-items: center;
   }
 
-  /* 诊断配置:规则 tab 顶部常驻上下文条(业务形态 + SLA 常显,10 个阈值折进高级) */
+  /* 诊断配置：规则 tab 顶部常驻上下文条(业务形态 + SLA 常显,10 个阈值折进高级) */
   .cfg-bar {
     background: var(--surface);
     border: 1px solid var(--border);
@@ -1779,7 +1779,7 @@
   .slo-chip.fail { background: var(--rose-soft); color: var(--rose); }
   .slo-chip.na { background: var(--surface-alt); color: var(--muted); }
 
-  /* 压测结果对比:行内选择按钮(选中后标 A/B) */
+  /* 压测结果对比：行内选择按钮(选中后标 A/B) */
   .cmp-pill {
     font-size: 10.5px;
     padding: 2px 9px;
@@ -1793,7 +1793,7 @@
   .cmp-pill:hover { border-color: var(--teal); color: var(--teal); }
   .cmp-pill.on { background: var(--teal-soft); border-color: var(--teal); color: var(--teal); }
 
-  /* 对比面板:指标卡网格,每卡 A/B 双横条 + Δ 徽标 */
+  /* 对比面板：指标卡网格,每卡 A/B 双横条 + Δ 徽标 */
   .cmp-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
@@ -1901,7 +1901,7 @@
     .section-head h2 { font-size: 18px; }
   }
 
-  /* ── 诊断:密集表(点行展开详情 + 证据)── */
+  /* ── 诊断：密集表(点行展开详情 + 证据)── */
   .dtbl { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-lg); overflow:hidden; box-shadow:var(--shadow-sm); }
   .dtbl .drow { display:grid; grid-template-columns:28px 1.4fr 96px 1.6fr 20px; gap:14px; align-items:center; padding:12px 16px; border-bottom:1px solid var(--border); cursor:pointer; }
   .dtbl .drow > * { min-width:0; }            /* fr 列可收窄 → 文本省略号、各行对齐 */
@@ -1910,12 +1910,12 @@
   .dtbl .drow.open { background:var(--surface-tint); }
   .dtbl .sdot { width:8px; height:8px; border-radius:50%; justify-self:center; }
   .dtbl .sdot.info { background:var(--coral); } .dtbl .sdot.warning { background:var(--amber); } .dtbl .sdot.critical { background:var(--rose); }
-  .dtbl .sdot.idle { background:#cbd2d9; }                 /* 未命中:灰点 */
+  .dtbl .sdot.idle { background:#cbd2d9; }                 /* 未命中：灰点 */
   .dtbl .drow.miss:not(.open) { opacity:.6; }              /* 未命中行淡化,命中行突出 */
   .hit-badge { font-size:10.5px; font-weight:800; padding:2px 9px; border-radius:999px; letter-spacing:.02em; white-space:nowrap; }
-  .hit-badge.hit { background:#fbe2e2; color:#b42424; }    /* 命中:红 */
+  .hit-badge.hit { background:#fbe2e2; color:#b42424; }    /* 命中：红 */
   .hit-badge.miss { background:var(--surface-2); color:var(--muted); }
-  /* 检测手段:行内层徽标(lit=当前命中)+ 展开后的手段清单 */
+  /* 检测手段：行内层徽标(lit=当前命中)+ 展开后的手段清单 */
   .detchips { display:flex; gap:4px; flex-wrap:wrap; min-width:0; }
   .layer { font-size:10px; font-weight:800; padding:1px 6px; border-radius:5px; background:var(--surface-2); color:var(--muted-2); letter-spacing:.02em; white-space:nowrap; }
   .layer.lit { background:#fbe2e2; color:#b42424; }     /* 当前命中的手段 */
@@ -1926,7 +1926,7 @@
   .detrow .detname { font-weight:600; color:var(--text-strong); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .detrow .detcond { color:var(--muted); font-variant-numeric:tabular-nums; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .detrow .detmark { color:#1a7f48; font-weight:700; white-space:nowrap; }
-  /* 操作点 gauge:离屋顶有多远 */
+  /* 操作点 gauge：离屋顶有多远 */
   .roofcard { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-lg); box-shadow:var(--shadow-sm); padding:18px 20px; display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:20px 28px; margin-bottom:8px; }
   .gauge-head { display:flex; align-items:baseline; gap:8px; margin-bottom:7px; }
   .gauge-head .gl { font-size:12.5px; font-weight:700; color:var(--text-strong); }
@@ -2003,7 +2003,7 @@
   .ap-start svg{width:16px;height:16px}
   /* 用户反馈(2026-07-22):"真实调优中"按钮的图标是静态的,不转,看起来像挂了——
      其实一直在跑,只是这颗 loading 图标(圆环+缺口弧线,天生长得像 spinner)从没接
-     旋转动画。真机复现:agent 单次调用可拖到 90s+(kimi-for-coding 直连 api.kimi.com
+     旋转动画。真机复现：agent 单次调用可拖到 90s+(kimi-for-coding 直连 api.kimi.com
      偶发 TLS RST,§_HTTPAgent 重试注释),这几十秒里页面上唯一还在动的只有状态条那个
      心跳圆点(.ap-state .pulse),按钮本身长时间看着一动不动,像卡死,容易被误按"停止"。
      补上旋转动画,复用 apspin(见 .ap-rtput 附近定义)。 */
@@ -2049,9 +2049,11 @@
   .ap-changed{display:inline-block;margin-left:8px;font-family:ui-monospace,Consolas,monospace;font-size:11px;font-weight:700;color:var(--coral-strong);background:var(--coral-soft);border-radius:5px;padding:1px 7px}
   .ap-rcmd{font-family:ui-monospace,Consolas,monospace;font-size:11px;color:var(--muted);background:var(--surface-alt);border:1px solid var(--border);border-radius:6px;padding:4px 9px;margin-top:6px;line-height:1.5;word-break:break-all}
   .ap-rcmd .pfx{color:var(--coral)}
-  .ap-rdiag,.ap-rhyp{line-height:1.55}
+  .ap-rdiag,.ap-rhyp,.ap-rthink{line-height:1.55}
   .ap-rdiag b{color:var(--teal);font-weight:700;font-size:10px;margin-right:6px;text-transform:uppercase;letter-spacing:.03em}
   .ap-rhyp b{color:var(--coral-strong);font-weight:700;font-size:10px;margin-right:6px;text-transform:uppercase;letter-spacing:.03em}
+  .ap-rthink{color:var(--muted-2);font-style:italic}
+  .ap-rthink b{color:var(--indigo);font-weight:700;font-size:10px;margin-right:6px;text-transform:uppercase;letter-spacing:.03em;font-style:normal}
   .ap-rrun{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:12.5px}
   .ap-rrun .sp{width:13px;height:13px;border:2px solid var(--coral-soft);border-top-color:var(--coral);border-radius:50%;animation:apspin .7s linear infinite}
   .ap-rrun small{color:var(--muted-3);font-size:11px}
@@ -2085,6 +2087,17 @@
   .ap-result .honest{font-size:12px;color:var(--muted);margin-top:11px;line-height:1.55;border-left:2px solid var(--coral-soft);padding-left:12px}
   .ap-result .summary{font-size:13px;color:var(--text);line-height:1.6;background:var(--surface);border:1px solid var(--border);border-radius:9px;padding:10px 13px;margin-bottom:12px}
   .ap-result .summary.warn{border-color:rgba(217,119,6,.35);background:rgba(217,119,6,.07)}
+  /* 结果卡分节标签(结果/为什么/逐轮账本/候选池)——多维度总结拆成小节,别再挤一整段 */
+  .summary-label{display:block;font-size:10.5px;font-weight:800;color:var(--muted-2);text-transform:uppercase;letter-spacing:.04em;margin-bottom:3px}
+  .ap-ledger{background:var(--surface);border:1px solid var(--border);border-radius:9px;padding:10px 13px;margin-bottom:12px}
+  .ap-ledger-row{padding:5px 0}
+  .ap-ledger-row+.ap-ledger-row{border-top:1px solid var(--border)}
+  .ap-ledger-head{display:grid;grid-template-columns:32px minmax(90px,1fr) auto auto 56px;gap:10px;align-items:center;font-size:12.5px}
+  .ap-ledger-round{color:var(--muted-2);font-family:ui-monospace,Consolas,monospace;font-size:11px}
+  .ap-ledger-param{font-family:ui-monospace,Consolas,monospace;color:var(--text-strong);word-break:break-all}
+  .ap-ledger-change{font-family:ui-monospace,Consolas,monospace;font-size:11.5px;color:var(--muted);white-space:nowrap}
+  .ap-ledger-delta{font-family:ui-monospace,Consolas,monospace;font-size:11px;font-weight:700;color:var(--muted-2);text-align:right}
+  .ap-ledger-why{font-size:11px;color:var(--muted-2);margin-top:2px;padding-left:42px}
   .ap-result .actions{display:flex;gap:9px;margin-top:13px}
   .ap-result .actions button{font-family:inherit;font-size:12.5px;font-weight:600;border:1px solid var(--border-strong);background:var(--surface);color:var(--text-strong);border-radius:8px;padding:7px 13px;cursor:pointer}
   .ap-result .actions .promote{border-color:var(--coral);color:var(--coral-strong)}

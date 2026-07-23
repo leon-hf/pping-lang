@@ -1,4 +1,4 @@
-"""操作点:算出 regime / MFU / MBU / AI。两条来源,**实测优先、解析兜底**。
+"""操作点：算出 regime / MFU / MBU / AI。两条来源,**实测优先、解析兜底**。
 
 ① 实测(perf_stats 在):AI = flops/(read+write 字节)，字节**含 KV-cache 读写**(vLLM perf.py
    的 AttentionMetrics 计了 KV）。吞吐/带宽用真字节。与 `/api/roofline` 的 measured 路径同口径。

@@ -30,12 +30,12 @@ def build_agent(cfg: dict | None):
     """可插拔(§8,G3 默认 Claude):
     - provider=anthropic 或 base_url 含 anthropic → ClaudeAgent;
     - provider=kimi_coding 或 base_url 含 api.kimi.com/coding → KimiCodingAgent;
-    - 有 base_url+key+model(OpenAI 兼容:DeepSeek/OpenRouter/本地)→ OpenAIAgent;
+    - 有 base_url+key+model(OpenAI 兼容：DeepSeek/OpenRouter/本地)→ OpenAIAgent;
     - 否则纯 StubAgent。真 LLM 一律用 ResilientAgent 兜底 StubAgent(网络/解析失败不死)。"""
     cfg = cfg or {}
     key, base, model = cfg.get("api_key"), cfg.get("base_url"), cfg.get("model")
     common = dict(guidance=cfg.get("guidance", ""), temperature=float(cfg.get("temperature", 0.4)),
-                  timeout_s=float(cfg.get("timeout_s", 90)),    # thinking 模型常 >30s(见 _HTTPAgent)
+                  timeout_s=float(cfg.get("timeout_s", 240)),   # thinking 模型可以很慢(见 _HTTPAgent)
                   lang=cfg.get("lang", "zh"))                   # 自由文本应答语言,默认中文
     primary = None
     if key and (cfg.get("provider") == "anthropic" or (base and "anthropic" in base)):
@@ -235,7 +235,7 @@ class AutopilotController:
         # 没内存 session → 读 session_dir 最新 JSONL(host CLI 跑的真 session,跑完即见)。
         # 按 mtime 排序,不按文件名字典序——sid 一旦带非日期后缀(如 ap-expA-2026...),
         # 字典序 'e' > 数字,会把陈旧的手工实验 session 误判成"最新",把真正刚跑完的
-        # 会话晾在一边(真机复现:ap-expA-20260718-... 挡住了 ap-20260721-...)。
+        # 会话晾在一边(真机复现：ap-expA-20260718-... 挡住了 ap-20260721-...)。
         if self._session_dir and self._session_dir.exists():
             files = sorted(self._session_dir.glob("*.jsonl"), key=lambda p: p.stat().st_mtime)
             if files:

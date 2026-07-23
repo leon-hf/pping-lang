@@ -14,7 +14,7 @@ def test_entry_point_registered():
     names = {ep.name for ep in eps}
     assert "pping_lang" in names, (
         f"pping_lang entry point 未注册到 {ENTRY_POINT_GROUP}。"
-        f"已注册的: {names or '(空)'}。"
+        f"已注册的： {names or '(空)'}。"
         f"是否执行过 `pip install -e .`？"
     )
 

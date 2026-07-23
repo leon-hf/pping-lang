@@ -2,10 +2,10 @@
 
 见 `_design-notes/诊断规则-方法论映射到信号.md`。
 
-设计铁律:**阈值绝不内嵌进规则**,全部集中在这里;各规则只「引用」配置项。
+设计铁律：**阈值绝不内嵌进规则**,全部集中在这里;各规则只「引用」配置项。
 换 workload / 改 SLA / 阈值随硬件代际演进时,改一处即可(防 §7「阈值会过期」)。
 
-环境变量:
+环境变量：
 - `PPING_LANG_DIAGNOSIS_CONFIG`: 指向 JSON 文件,字段同 `DiagnosisConfig`;加载后覆盖默认。
   只给 `workload_form` 也行 —— 会带出该形态的 SLA 默认。
 """
@@ -48,22 +48,22 @@ class DiagnosisConfig:
     sla_tpot_p99_ms: float = 50.0        # S2
     sla_e2e_p99_ms: float = 5000.0       # S3 · 端到端(首页三卡 TTFT/TPOT/E2E 之一)
     # --- 阈值(各规则引用;名称对应规则)---
-    long_prompt_tokens: int = 2048       # (保留:历史字段)
-    waiting_reqs: float = 50.0           # (保留:历史字段)
-    min_running_reqs: float = 0.5        # A 空载守卫:窗口内平均在跑请求数下限(挡掉"空载也双低"误报)
-    mbu_low_pct: float = 50.0            # A 远离带宽屋顶:NVML HBM 控制器繁忙% < 此(有界 0-100)
-    stall_scheduler_slack_pct: float = 30.0   # A 内核佐证手段:warp 就绪未选中(scheduler_slack)占 stall%
-    mbu_high_pct: float = 85.0           # B 贴带宽屋顶:NVML HBM 控制器繁忙% > 此(有界;实测 perf-MBU 因 L2 复用无界,弃用作阈)
-    stall_memory_throttle_pct: float = 25.0   # B 内核佐证:访存管线 throttle 占 stall%
-    stall_memory_dep_pct: float = 25.0   # B 内核佐证:访存延迟(long_scoreboard)占 stall%
-    stall_math_pipe_pct: float = 25.0    # C 内核佐证:计算管线(FMA/ALU/Tensor)打满占 stall%
-    batch_small_reqs: float = 4.0        # (保留:历史字段)
+    long_prompt_tokens: int = 2048       # (保留：历史字段)
+    waiting_reqs: float = 50.0           # (保留：历史字段)
+    min_running_reqs: float = 0.5        # A 空载守卫：窗口内平均在跑请求数下限(挡掉"空载也双低"误报)
+    mbu_low_pct: float = 50.0            # A 远离带宽屋顶：NVML HBM 控制器繁忙% < 此(有界 0-100)
+    stall_scheduler_slack_pct: float = 30.0   # A 内核佐证手段：warp 就绪未选中(scheduler_slack)占 stall%
+    mbu_high_pct: float = 85.0           # B 贴带宽屋顶：NVML HBM 控制器繁忙% > 此(有界;实测 perf-MBU 因 L2 复用无界,弃用作阈)
+    stall_memory_throttle_pct: float = 25.0   # B 内核佐证：访存管线 throttle 占 stall%
+    stall_memory_dep_pct: float = 25.0   # B 内核佐证：访存延迟(long_scoreboard)占 stall%
+    stall_math_pipe_pct: float = 25.0    # C 内核佐证：计算管线(FMA/ALU/Tensor)打满占 stall%
+    batch_small_reqs: float = 4.0        # (保留：历史字段)
     mfu_low_ratio: float = 0.20          # A 算力利用低(配 MBU 低 = 双低 / 喂不饱)
     mfu_high_ratio: float = 0.50         # C 算力打满(算力瓶颈)
-    tail_ratio: float = 5.0              # (保留:历史字段)
+    tail_ratio: float = 5.0              # (保留：历史字段)
     kv_pressure_ratio: float = 0.90      # D KV 用量
-    prefix_hit_low: float = 0.10         # (保留:历史字段)
-    weights_hbm_ratio: float = 0.90      # (保留:历史字段)
+    prefix_hit_low: float = 0.10         # (保留：历史字段)
+    weights_hbm_ratio: float = 0.90      # (保留：历史字段)
 
 
 def default_config(workload_form: str = "custom") -> DiagnosisConfig:
@@ -100,7 +100,7 @@ def validate_config(cfg: DiagnosisConfig) -> None:
 
 
 def from_dict(d: dict) -> DiagnosisConfig:
-    """从 dict 构建:先按 workload_form 取默认,再覆盖给定字段,最后校验。"""
+    """从 dict 构建：先按 workload_form 取默认,再覆盖给定字段,最后校验。"""
     form = d.get("workload_form", "custom")
     base = default_config(form)
     known = {f.name for f in fields(DiagnosisConfig)}

@@ -1,11 +1,11 @@
 """LocalSink — Embedded mode: 顺序追加 JSONL,同进程落盘(替代进程内 DuckDB)。
 
-为什么不放 DuckDB:嵌入式分析库在每秒指标洪流下批量 INSERT,会和 colocated 的
-vLLM serving 抢 GIL/IO。改成**顺序追加 JSONL**(AppendLog):无查询引擎、无事务、
+为什么不放 DuckDB：嵌入式分析库在每秒指标洪流下批量 INSERT,会和 colocated 的
+vLLM serving 抢 GIL/IO。改成**顺序追加 JSONL**(AppendLog)：无查询引擎、无事务、
 无索引,写入近乎零争用。长窗历史回放按需扫文件(JsonlStore),那是冷路径。
 
-落盘两份:metrics.jsonl(洪流) + diagnoses.jsonl(稀疏)。文件落在 `db_path` 同目录
-(`db_path` 这个历史参数名沿用:嵌入模式它是一个文件路径,我们取其父目录当 store 目录;
+落盘两份：metrics.jsonl(洪流) + diagnoses.jsonl(稀疏)。文件落在 `db_path` 同目录
+(`db_path` 这个历史参数名沿用：嵌入模式它是一个文件路径,我们取其父目录当 store 目录;
 bench 仍用它的 .duckdb 存可变的 bench_runs 行)。instance_id 在 Sink 出站边界打上
 (RFC §1.1);嵌入模式每进程一个 instance,故不逐行重复存,由 JsonlStore 统一报告。
 

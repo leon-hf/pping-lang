@@ -1,7 +1,7 @@
 # Autopilot 真机调优 Quickstart
 
 在**你自己的 GPU 机器**上跑一次真实的 Autopilot 调优 session：Agent 在一次性容器沙盒里迭代
-「诊断 → 改一个旋钮 → 压测 → 留下/回滚」，最后给出实测验证过的 `vllm serve` 推荐命令。
+「诊断 → 改一个参数 → 压测 → 留下/回滚」，最后给出实测验证过的 `vllm serve` 推荐命令。
 
 > **先读这三行**
 > 1. **你的 serve 会被暂停**：单卡机器上候选沙盒要独占 GPU，session 期间指定的主 serve 容器会被 `docker stop`，结束后自动重启（`--restore-cmd` 可自定义恢复动作）。
@@ -44,7 +44,7 @@ python -m pping_lang.autopilot.run \
 | `--bench-concurrency` | **必须明显高于**基线 `max_num_seqs`（不能只是等于！等于时 waiting 永远测不出 >0，Agent 会误判"准入闸没绑定"而不去试提并发——留出 1.5× 左右余量） |
 | `--bench-repeats 3` | median-of-3 去噪：p99 延迟在 SLA 边界不再因单次离群翻转判定 |
 | `--baseline-max-num-seqs / --baseline-gpu-util` | 基线起点；默认 32 / 0.70（故意朴素的常见配置） |
-| `--quality-gate` | 放开 T2 质量类旋钮（kv-cache fp8 / 量化 / 投机解码），带输出等价检查 |
+| `--quality-gate` | 放开 T2 质量类参数（kv-cache fp8 / 量化 / 投机解码），带输出等价检查 |
 | `--dash-port 8013` | 候选容器带 pping 插件时发布其 dashboard：Agent 直接读**真诊断**而非启发式 |
 | `--agent-lang zh\|en` | Agent 自由文本应答语言（rationale/reason/思考过程）；默认 `zh`。不指定时 LLM 会跟着上下文里的英文技术标识符默认答英文，即使 system prompt 本身是中文 |
 
@@ -67,7 +67,7 @@ Agent 供应商任选其一：
 
 ## 已知边界（诚实声明）
 
-- 动作空间按 **vLLM 0.21 (V1)** 校准（默认值、`unsupported` 旋钮标记均针对该版本）；
+- 动作空间按 **vLLM 0.21 (V1)** 校准（默认值、`unsupported` 参数标记均针对该版本）；
 - 单卡单 session；多卡 TP/PP 调优在路线图 M3；
 - 收益与起点强相关：朴素基线常见 ×2~6，已调过的基线只应期待诚实的边际收益；
 - 每轮成本约 5-7 分钟（容器冷启动 + 压测），6 轮 session ≈ 30-45 分钟；

@@ -93,7 +93,7 @@ def test_persist_decimation_thins_inflow_keeps_live_full_rate():
 
         assert sink.downsampled_metrics > 0          # 入流被有意稀释
         assert sink.queue_depth <= 2048              # 队列有界
-        # 实时读路径全速:latest 反映最后一次 push(降采样只作用于持久化队列)
+        # 实时读路径全速：latest 反映最后一次 push(降采样只作用于持久化队列)
         assert sink.latest("gpu.utilization_pct") == (1999.0, 11_999)
     finally:
         sink.close()

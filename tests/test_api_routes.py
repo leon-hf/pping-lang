@@ -299,7 +299,7 @@ def test_diagnosis_rules_endpoint_lists_fact_rules_and_config(empty_app):
 
 
 def test_update_diagnosis_config_validates_and_echoes(empty_app):
-    """PUT /api/diagnosis_config:合法配置回显解析后的值;无引擎时 applied=False。"""
+    """PUT /api/diagnosis_config：合法配置回显解析后的值;无引擎时 applied=False。"""
     client, _db, _sink = empty_app
     r = client.put("/api/diagnosis_config", json={"workload_form": "code", "mfu_low_ratio": 0.15})
     assert r.status_code == 200
@@ -322,7 +322,7 @@ def test_update_diagnosis_config_rejects_invalid(empty_app):
 
 
 def test_diagnosis_config_hot_reload_into_running_engine(tmp_path):
-    """接了真 DiagnosisEngine 时,PUT 热生效:engine.config 立即变。"""
+    """接了真 DiagnosisEngine 时,PUT 热生效：engine.config 立即变。"""
     from pping_lang.rules.diagnosis_config import default_config
     from pping_lang.rules.diagnosis_runtime import DiagnosisEngine
     db = tmp_path / "dr.duckdb"
@@ -368,7 +368,7 @@ def test_kernels_endpoint_with_data(tmp_path):
         assert r.status_code == 200
         data = r.json()
         assert data["enabled"] is True
-        # 降序:attention(42) > gemm(31) > other(27)
+        # 降序：attention(42) > gemm(31) > other(27)
         shares = data["class_shares"]
         assert [c["cls"] for c in shares] == ["attention", "gemm", "other"]
         assert data["gpu_busy_pct"] == 88.0
@@ -408,7 +408,7 @@ def test_kernels_endpoint_top_kernels_from_collector(tmp_path):
         assert tk[0]["name"] == "flash_fwd_kernel"
         assert tk[1]["name"] == "cutlass_80_tensorop_s16816gemm_f16"
         assert tk[0]["count"] == 120
-        # 数据时刻字段:刚 stamp 的 ts → age 很小;窗宽 1s
+        # 数据时刻字段：刚 stamp 的 ts → age 很小;窗宽 1s
         assert data["snapshot_age_s"] is not None and data["snapshot_age_s"] < 5.0
         assert abs(data["rollup_window_s"] - 1.0) < 0.01
     finally:
@@ -416,7 +416,7 @@ def test_kernels_endpoint_top_kernels_from_collector(tmp_path):
 
 
 def test_kernel_findings_logic():
-    """诊断结论:从 kernel 指标派生人话结论(GEMM-bound / 单kernel / launch-bound / 碎片化)。"""
+    """诊断结论：从 kernel 指标派生人话结论(GEMM-bound / 单kernel / launch-bound / 碎片化)。"""
     from pping_lang.api.routes import _kernel_findings
     class_shares = [{"cls": "gemm", "pct": 87.0}, {"cls": "attention", "pct": 6.0}]
     top_kernels = [{"name": "cutlass_x", "cls": "gemm", "pct": 50.0}] + [
@@ -490,7 +490,7 @@ def test_kernel_findings_quiet_when_healthy():
 
 
 def test_kernel_findings_i18n_en():
-    """findings 支持 lang='en':英文无中文;默认 zh 不变。kernel + deep-evidence(stall)两套都测。"""
+    """findings 支持 lang='en'：英文无中文;默认 zh 不变。kernel + deep-evidence(stall)两套都测。"""
     import re
 
     from pping_lang.api.routes import _kernel_findings, _stall_findings

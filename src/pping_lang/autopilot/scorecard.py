@@ -31,7 +31,7 @@ def bench_scorecard(endpoint: str, model: str, spec: dict,
                     run_meta: dict | None = None, on_progress=None) -> Scorecard:
     """对一个真实 OpenAI 兼容端点跑标准 bench → Scorecard(复用 bench/runner + client)。
 
-    on_progress(可选)透传给 run_static:采集期每 ~10s 一份运行中快照,供直播。"""
+    on_progress(可选)透传给 run_static：采集期每 ~10s 一份运行中快照,供直播。"""
     import asyncio
 
     from pping_lang.bench.client import OpenAIStreamClient
@@ -74,7 +74,7 @@ def bench_scorecard(endpoint: str, model: str, spec: dict,
 def scorecard_view(sc: Scorecard, obj: ObjectiveSpec, *,
                    best_sc: Scorecard | None = None,
                    diagnosis: dict | None = None) -> dict:
-    """§6.2 记分牌视图:bench 字段 + sla_ok + objective_score + primary_delta_pct + 诊断快照。"""
+    """§6.2 记分牌视图：bench 字段 + sla_ok + objective_score + primary_delta_pct + 诊断快照。"""
     score = objective_score(sc, obj)
     d = sc.to_dict()
     d["sla_ok"] = sla_ok(sc, obj)

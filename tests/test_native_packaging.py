@@ -1,6 +1,6 @@
 """builder.py(.so 现编)+ cli.py(pping-vllm 包装)单测。
 
-实际 g++ 编译要 GPU/CUPTI 环境(由 runw 端到端覆盖);这里测不依赖 GPU 的逻辑:
+实际 g++ 编译要 GPU/CUPTI 环境(由 runw 端到端覆盖);这里测不依赖 GPU 的逻辑：
 缓存路径、显式 .so 路径、源缺失报错、cli 设 env + exec、cli 降级。
 """
 from __future__ import annotations
@@ -123,7 +123,7 @@ def test_cli_degrades_when_build_fails(monkeypatch, tmp_path):
     try:
         cli.pping_vllm_main()
         assert captured["argv"] == [str(fake_vllm), "serve", "m"]
-        assert "CUDA_INJECTION64_PATH" not in os.environ  # 降级:没设注入
+        assert "CUDA_INJECTION64_PATH" not in os.environ  # 降级：没设注入
     finally:
         os.environ.clear()
         os.environ.update(_snap)

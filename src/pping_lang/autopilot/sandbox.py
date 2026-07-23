@@ -1,9 +1,9 @@
 """沙盒 —— serve 生命周期(§7)。
 
-接口:apply(config) 起+就绪、measure(obj) 跑标准 bench 打分、teardown() 干净停。
-- **SimSandbox**:确定性公式(无 GPU、无网络),复现 mock 那条"提并发→撞 KV 容量瓶颈"的
+接口：apply(config) 起+就绪、measure(obj) 跑标准 bench 打分、teardown() 干净停。
+- **SimSandbox**：确定性公式(无 GPU、无网络),复现 mock 那条"提并发→撞 KV 容量瓶颈"的
   调优曲线;M0 本层跑通闭环 + 单测用。
-- **DockerSandbox**:真起 `vllm/vllm-openai` 一次性容器 → 真 bench → `docker rm -f`。
+- **DockerSandbox**：真起 `vllm/vllm-openai` 一次性容器 → 真 bench → `docker rm -f`。
   独占整张卡(决策 G2),会顶掉在跑的 serve;作下一增量,**未单测**(需 runw)。
 """
 from __future__ import annotations
@@ -23,7 +23,7 @@ __all__ = [
     "TeardownError", "bench_scorecard",
 ]
 
-# §7.1 配置常量(可 env 覆盖):端口与 dashboard 8765 区隔;就绪超时含模型加载+cudagraph。
+# §7.1 配置常量(可 env 覆盖)：端口与 dashboard 8765 区隔;就绪超时含模型加载+cudagraph。
 AUTOPILOT_PORT = 8011
 READY_TIMEOUT_S = 180.0
 WARMUP_REQUESTS = 3
@@ -34,7 +34,7 @@ EQUIVALENCE_PROMPTS = (
     "Write exactly one concise sentence about GPU memory.",
 )
 
-# 就绪心跳的日志摘取:vLLM 启动日志九成是噪声("Unknown vLLM environment variable
+# 就绪心跳的日志摘取：vLLM 启动日志九成是噪声("Unknown vLLM environment variable
 # detected"之类),只挑真的标志进度的行(加载/编译/CUDA graph/显存/KV);挑到的行再
 # 剥掉 "(APIServer pid=N) INFO MM-DD HH:MM:SS [file.py:NNN]" 这层前缀,只剩人话。
 _LOG_INTERESTING_RE = re.compile(
@@ -47,7 +47,7 @@ _LOG_TS_PREFIX_RE = re.compile(r"^(?:INFO|WARNING|ERROR)\s+[\d-]+\s+[\d:]+\s+\[[
 
 
 def _clean_log_line(line: str) -> str:
-    # 两层前缀顺序剥离:"(EngineCore pid=206) " 和 "INFO 07-08 23:35:42 [monitor.py:53] "
+    # 两层前缀顺序剥离："(EngineCore pid=206) " 和 "INFO 07-08 23:35:42 [monitor.py:53] "
     # 常常叠在一起,单条 ^ 锚定的正则一次 sub 只能吃掉最外层那层。
     s = _LOG_PID_PREFIX_RE.sub("", line.strip())
     return _LOG_TS_PREFIX_RE.sub("", s)
@@ -86,9 +86,9 @@ class TeardownError(RuntimeError):
 
 
 class SimSandbox:
-    """确定性模拟:Scorecard = f(max_num_seqs, gpu_memory_utilization)。
+    """确定性模拟：Scorecard = f(max_num_seqs, gpu_memory_utilization)。
 
-    物理直觉:并发越高吞吐越高(次线性);但 KV 容量 ∝ gpu_util,并发超过 KV 容量 →
+    物理直觉：并发越高吞吐越高(次线性);但 KV 容量 ∝ gpu_util,并发超过 KV 容量 →
     抢占 → 吞吐回落 + TTFT 飙升破 SLA。这正是 B↔D 一根绳 / demo trace 的内核。
     """
 
@@ -98,7 +98,7 @@ class SimSandbox:
         self._cfg: dict = {}
 
     def apply(self, config: dict) -> None:
-        # 朴素越界守卫:gpu_util > 0.97 视为 OOM 起不来(launch-catch)
+        # 朴素越界守卫：gpu_util > 0.97 视为 OOM 起不来(launch-catch)
         if config.get("gpu_memory_utilization", 0.7) > 0.97:
             raise LaunchError("gpu_memory_utilization too high (sim OOM)")
         self._cfg = dict(config)
@@ -120,7 +120,7 @@ class SimSandbox:
         util = float(self._cfg.get("gpu_memory_utilization", 0.70))
         kv_capacity = 140.0 * (util / 0.70)                  # KV 能撑住的并发上限
         eff = min(seqs, kv_capacity)
-        tps = 1240.0 * (eff / 32.0) ** 0.62                  # 吞吐:次线性升
+        tps = 1240.0 * (eff / 32.0) ** 0.62                  # 吞吐：次线性升
         ttft = 380.0 * (eff / 32.0) ** 0.55
         tpot = 22.0 * (eff / 32.0) ** 0.25
         err = 0.0
@@ -139,7 +139,7 @@ class SimSandbox:
 
 
 class DockerSandbox:
-    """真沙盒:`docker run -d` 一次性候选 vLLM 容器 → 等就绪 → 真 bench → `docker rm -f`。
+    """真沙盒：`docker run -d` 一次性候选 vLLM 容器 → 等就绪 → 真 bench → `docker rm -f`。
 
     跑在有 docker 的主机上(runner 是 host 侧 CLI,自身不碰 GPU)。候选独占整张卡(G2):
     调 session 期间机上无 prod 要保护,当前 serve 让位。teardown 幂等;起不来/OOM/就绪超时
@@ -160,10 +160,10 @@ class DockerSandbox:
         self._gpus, self._container = gpus, container
         self._serve_cmd = list(serve_cmd)
         self._entrypoint = entrypoint
-        # cmd_template:用 {model}/{port}/{flags} 占位的 shell 串(需配 --entrypoint /bin/bash)。
+        # cmd_template：用 {model}/{port}/{flags} 占位的 shell 串(需配 --entrypoint /bin/bash)。
         # 给镜像 entrypoint 不是 serve 的场景(如本仓 image entrypoint=vllm serve,必须覆盖)。
         self._cmd_template = cmd_template
-        # dash_port:发布候选自己的 dashboard 端口 → measure 后读真 /api/diagnoses(③ 真诊断)
+        # dash_port：发布候选自己的 dashboard 端口 → measure 后读真 /api/diagnoses(③ 真诊断)
         self._dash_port = int(dash_port) if dash_port else None
         self._dash_internal = int(dash_internal)
         self._env = dict(env or {})
@@ -219,7 +219,7 @@ class DockerSandbox:
         return subprocess.run(["docker", *args], capture_output=True, text=True)
 
     def teardown(self) -> None:
-        self._docker("rm", "-f", self._container)        # 幂等:容器不存在也不报错
+        self._docker("rm", "-f", self._container)        # 幂等：容器不存在也不报错
         self._verify_teardown()
 
     def _port_open(self, port: int) -> bool:
@@ -248,7 +248,7 @@ class DockerSandbox:
         return sum(vals) if vals else None
 
     def _verify_teardown(self) -> None:
-        """显式 teardown 验证(§7.2):容器停、端口释放、GPU 显存回到启动前基线附近。
+        """显式 teardown 验证(§7.2)：容器停、端口释放、GPU 显存回到启动前基线附近。
 
         GPU 查询不可用时只跳过显存项;端口仍是硬验证。这样本地无 GPU 单测不会被环境误伤。
         """
@@ -265,7 +265,7 @@ class DockerSandbox:
         used = self._gpu_used_mib()
         open_ports = [p for p in ports if self._port_open(p)]
         raise TeardownError(
-            f"候选清理未完成: running={self._alive()} open_ports={open_ports} "
+            f"候选清理未完成： running={self._alive()} open_ports={open_ports} "
             f"gpu_used_mib={used} baseline_mib={self._gpu_baseline_mib}")
 
     def _alive(self) -> bool:
@@ -284,7 +284,7 @@ class DockerSandbox:
         return None
 
     def _logs_tail_interesting(self, n: int = 30) -> str | None:
-        """就绪心跳用:最近日志里最后一条真正标志进度的行(加载/编译/CUDA graph/显存),
+        """就绪心跳用：最近日志里最后一条真正标志进度的行(加载/编译/CUDA graph/显存),
         跳过环境变量警告之类的噪声;命中的行剥掉 pid/时间戳前缀。没有可报的行 → None
         (心跳退化成纯计时,总比刷一行没用的噪声强)。"""
         r = self._docker("logs", "--tail", str(n), self._container)
@@ -314,12 +314,12 @@ class DockerSandbox:
             quoted = " ".join(shlex.quote(f) for f in flags)   # JSON flag 值须防 shell 拆词/吃引号
             shell = self._cmd_template.format(model=self._model, port=self._internal, flags=quoted)
             tail = ["--entrypoint", self._entrypoint or "/bin/bash", self._image, "-c", shell]
-        else:                                            # 简单形:直接 serve_cmd model flags
+        else:                                            # 简单形：直接 serve_cmd model flags
             ep = ["--entrypoint", self._entrypoint] if self._entrypoint else []
             tail = [*ep, self._image, *self._serve_cmd, self._model, *flags, *self._extra]
         run = self._docker(*head, *tail)
         if run.returncode != 0:
-            raise LaunchError(f"docker run 失败:{(run.stderr or run.stdout).strip()}")
+            raise LaunchError(f"docker run 失败：{(run.stderr or run.stdout).strip()}")
         self._cfg = dict(config)
         self._report("候选容器已启动,等待 vLLM API 就绪(模型加载 + 显存分配)…")
         self._wait_ready()
@@ -333,7 +333,7 @@ class DockerSandbox:
             return False
 
     def _inference_probe(self, timeout: float) -> bool:
-        """发一个真推理请求:既确认推理可用,又触发并跑完冷引擎首个 Triton kernel JIT 编译。
+        """发一个真推理请求：既确认推理可用,又触发并跑完冷引擎首个 Triton kernel JIT 编译。
 
         Blackwell(sm_120)上冷引擎首请求要 JIT 编译 _compute_slot_mapping_kernel,耗时常
         超过整个 bench 窗口 → 不预热则窗口内零请求完成(0 样本判负)。给足超时让它编完。
@@ -377,13 +377,13 @@ class DockerSandbox:
             if not self._alive():                        # 容器退出 = 起不来/OOM
                 logs = self._logs_tail()
                 self.teardown()
-                raise LaunchError(f"候选容器退出(起不来/OOM)。日志尾:\n{logs}")
+                raise LaunchError(f"候选容器退出(起不来/OOM)。日志尾：\n{logs}")
             now = time.monotonic()
             if now >= deadline:
                 logs = self._logs_tail()
                 self.teardown()
-                raise LaunchError(f"候选 API 就绪超时({self._ready_timeout:.0f}s)。日志尾:\n{logs}")
-            if now - last_report >= 15:                  # 心跳:长静默窗内 UI 不能死着
+                raise LaunchError(f"候选 API 就绪超时({self._ready_timeout:.0f}s)。日志尾：\n{logs}")
+            if now - last_report >= 15:                  # 心跳：长静默窗内 UI 不能死着
                 stage = self._logs_tail_interesting()     # 过滤噪声,只留有信息量的进度行
                 self._report(f"等待 vLLM API 就绪 {int(now - start)}s / {self._ready_timeout:.0f}s"
                              + (f" · {stage}" if stage else " …"))
@@ -391,9 +391,9 @@ class DockerSandbox:
             time.sleep(self._poll)
         kv_line = self._find_log_line("KV cache size")   # 引擎实测 KV 池,D regime 的关键底数
         if kv_line:
-            self._report(f"引擎就绪:{_clean_log_line(kv_line)[-110:]}")
-        # 阶段2:真推理探针 —— 确认推理可用 + 跑完首个 JIT(冷引擎首请求慢,否则 bench 0 样本)。
-        # 重试式:Blackwell 首推理时长高方差(实测 26s ~ >180s,JIT/cudagraph 竞争),单发长超时
+            self._report(f"引擎就绪：{_clean_log_line(kv_line)[-110:]}")
+        # 阶段2：真推理探针 —— 确认推理可用 + 跑完首个 JIT(冷引擎首请求慢,否则 bench 0 样本)。
+        # 重试式：Blackwell 首推理时长高方差(实测 26s ~ >180s,JIT/cudagraph 竞争),单发长超时
         # 会被一次卡死请求挂满;短超时 + 重试,新连接往往立即成功。
         self._report(f"API 已就绪({int(time.monotonic() - start)}s),推理探针 + kernel JIT 预热中…")
         warm_deadline = time.monotonic() + min(self._ready_timeout, 180.0)
@@ -405,7 +405,7 @@ class DockerSandbox:
             if time.monotonic() >= warm_deadline:
                 logs = self._logs_tail()
                 self.teardown()
-                raise LaunchError(f"候选推理探针失败(JIT/推理卡死,{attempt} 次尝试)。日志尾:\n{logs}")
+                raise LaunchError(f"候选推理探针失败(JIT/推理卡死,{attempt} 次尝试)。日志尾：\n{logs}")
             self._report(f"推理探针第 {attempt} 次未通过,重试(JIT 预热可能仍在进行)…")
             time.sleep(2.0)
         self._report("候选就绪,进入压测")
@@ -491,8 +491,8 @@ class DockerSandbox:
         return out
 
     def _bench_progress(self, p: dict) -> None:
-        """run_static 的运行中快照 → 直播事件:看着分数长出来。"""
-        msg = f"压测 {p['elapsed_s']}s:完成 {p['ok']} req · 瞬时 {p['tps']:g} tok/s"
+        """run_static 的运行中快照 → 直播事件：看着分数长出来。"""
+        msg = f"压测 {p['elapsed_s']}s：完成 {p['ok']} req · 瞬时 {p['tps']:g} tok/s"
         if p.get("ttft_p50_ms") is not None:
             msg += f" · TTFT p50 {p['ttft_p50_ms']:g}ms"
         if p.get("errors"):

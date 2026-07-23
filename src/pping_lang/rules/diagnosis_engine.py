@@ -5,7 +5,7 @@
 - 每个瓶颈(`FactRule`)有多条独立检测手段(`Detector`,各是一组 check 的 AND);
 - **任一手段命中 → 瓶颈触发**(OR);返回触发的 `DiagFinding`(带命中了哪几条手段 = 几路互证)。
 
-好处:同一套逻辑既能合成数据单测,又能喂真实指标跑验证,引擎本身不依赖 GPU/vLLM。
+好处：同一套逻辑既能合成数据单测,又能喂真实指标跑验证,引擎本身不依赖 GPU/vLLM。
 """
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ MetricFn = Callable[[str, int, str], "float | None"]
 
 @dataclass(frozen=True)
 class DiagFinding:
-    """一个触发的瓶颈:事实 + 署名推断 + 命中了哪几条检测手段(几路互证)。"""
+    """一个触发的瓶颈：事实 + 署名推断 + 命中了哪几条检测手段(几路互证)。"""
 
     rule_id: str
     name: str                       # 客观事实(瓶颈名)
@@ -70,7 +70,7 @@ def evaluate(
     rules: tuple[FactRule, ...] = DIAGNOSIS_RULES,
     regime: str | None = None,   # 兼容旧签名;现不依赖 regime(纯物理判)
 ) -> list[DiagFinding]:
-    """一次求值:每个瓶颈任一 detector 命中即触发,返回所有触发的诊断。"""
+    """一次求值：每个瓶颈任一 detector 命中即触发,返回所有触发的诊断。"""
     findings: list[DiagFinding] = []
     for r in rules:
         values: dict[str, float] = {}

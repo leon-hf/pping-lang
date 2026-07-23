@@ -39,13 +39,18 @@ def test_sla_ok_and_score():
     assert objective_score(bad, OBJ) == float("-inf")
 
 
-def test_sla_ok_e2e_gate():
-    """E2E p99 进闸门:超阈值判负,没设 e2e 时不影响。"""
+def test_sla_ok_e2e_is_monitoring_only_not_a_gate():
+    """E2E p99 不进闸门,只监控上报,不影响 sla_ok/objective_score(2026-07-23)。
+
+    E2E ≈ TTFT + TPOT×输出 token 数,后者是负载形态的固定属性,不受 vLLM 参数影响——
+    真机复现:7B-AWQ 上 chat/code 形态的默认 E2E 阈值比基线还紧,基线一开局就 -inf,
+    后续候选无论怎么改都过不了这道硬门槛,session 全程"无改进",但 TTFT/TPOT 实际都在
+    变好,收益被硬门槛整个盖住。只要 TTFT/TPOT 仍达标,E2E 超再多也不该判负。"""
     o = ObjectiveSpec(target="throughput", sla=SLA(e2e_p99_ms=5000.0))
-    ok = Scorecard(output_tps=2000, ttft_p99_ms=500, tpot_p99_ms=20, e2e_p99_ms=4000)
-    no = Scorecard(output_tps=2000, ttft_p99_ms=500, tpot_p99_ms=20, e2e_p99_ms=6000)
-    assert sla_ok(ok, o) and not sla_ok(no, o)
-    assert objective_score(no, o) == float("-inf")
+    within = Scorecard(output_tps=2000, ttft_p99_ms=500, tpot_p99_ms=20, e2e_p99_ms=4000)
+    over = Scorecard(output_tps=2000, ttft_p99_ms=500, tpot_p99_ms=20, e2e_p99_ms=6000)
+    assert sla_ok(within, o) and sla_ok(over, o)
+    assert objective_score(over, o) == 2000
 
 
 def test_score_high_error_rejected():
@@ -61,7 +66,7 @@ def test_decide_kept_revert_tie():
 
 
 def test_decide_worse_than_noise_margin_is_reverted_not_tie():
-    """真机复现(2026-07-16 dogfood):候选 1682.9 vs best 1784.1(-5.7%,远超 3% 噪声边界)
+    """真机复现(2026-07-16 dogfood)：候选 1682.9 vs best 1784.1(-5.7%,远超 3% 噪声边界)
     被判成了 tie(UI 显示"≈持平")——decide() 曾经只挡"赢得不够多"的上界,没挡"输得
     不是噪声"的下界,任何没到 -inf 的退化候选都会落进 tie,把真实退化说成没变化。"""
     assert decide(1682.9, 1784.1, 0.03) == "reverted"
@@ -166,7 +171,7 @@ def test_bottleneck_label_gives_context_not_bare_letter():
 
 
 def test_action_space_stats_categorizes_all_knobs():
-    """用户反馈(2026-07-22):每次 session 只调 2-3 个参数,看不出剩下的参数是"不该调"
+    """用户反馈(2026-07-22)：每次 session 只调 2-3 个参数,看不出剩下的参数是"不该调"
     还是"没顾上调"。action_space_stats() 给出全量分类计数,四类互斥且总数对得上。"""
     s = action_space_stats()
     assert s["total"] == (s["default_on_count"] + s["unsupported_count"]
@@ -178,8 +183,8 @@ def test_action_space_stats_categorizes_all_knobs():
 
 
 def test_knobs_helping_includes_bd_coupling():
-    """knobs_helping 要跟 propose_candidates 的 B↔D 共生逻辑(§4.3)对齐,否则耦合旋钮
-    (如 cpu_offload_gb)被试过却不在"相关旋钮"列表里,总结文案会自相矛盾。"""
+    """knobs_helping 要跟 propose_candidates 的 B↔D 共生逻辑(§4.3)对齐,否则耦合参数
+    (如 cpu_offload_gb)被试过却不在"相关参数"列表里,总结文案会自相矛盾。"""
     helping_b = knobs_helping("B")
     assert "gpu_memory_utilization" in helping_b      # 直接对症 B
     assert "cpu_offload_gb" in helping_b              # D 缓解类,因 B↔D 耦合并入
@@ -221,7 +226,7 @@ def test_propose_quality_gate_opens_mtp_and_speculative_knobs():
 def test_runner_does_not_auto_escalate_to_quality_gate_when_t1_exhausted():
     """曾经 T1(不降精度)候选耗尽时,runner 会自动开 quality_gate 找 T2 候选
     (quantization/kv-cache-dtype 等)凑轮次续跑——用户反馈(2026-07-21)明确不要
-    碰这些会降精度的旋钮、不提供这些动作,所以耗尽就该老实停(cause=no_candidates),
+    碰这些会降精度的参数、不提供这些动作,所以耗尽就该老实停(cause=no_candidates),
     不该悄悄换个更激进的候选池接着凑。真机上这条路径已经被 runw bridge 的硬编码
     --quality-gate 长期掩盖过(见 deploy/runw/autopilot_bridge.py),这里锁死源码
     层面不会再有这条自动切换。"""
@@ -244,7 +249,7 @@ def test_render_flags_skips_zero_default_overrides():
 
 
 def test_introspect_engine_args_reads_defaults_from_vllm_source(tmp_path):
-    """半自动 introspect:从 vLLM 源码读取 EngineArgs 默认值,不导入 torch/vllm。
+    """半自动 introspect：从 vLLM 源码读取 EngineArgs 默认值,不导入 torch/vllm。
 
     用 tmp_path 现搭一份最小 EngineArgs 源码骨架驱动同一段正则解析逻辑,而不是指向
     某台机器上才存在的真实 vllm checkout——原先硬编码 D:\\GitCode\\vllm,只在原作者
@@ -281,7 +286,7 @@ def test_introspect_engine_args_reads_defaults_from_vllm_source(tmp_path):
 
 
 def test_propose_d_headroom_guard():
-    # 推大-batch 类(max_num_seqs↑)在 KV 余量不足时被守卫挡掉(§4.4),改给治 D 的旋钮
+    # 推大-batch 类(max_num_seqs↑)在 KV 余量不足时被守卫挡掉(§4.4),改给治 D 的参数
     cfg = {"max_num_seqs": 8, "gpu_memory_utilization": 0.70}
     tight = {c["knob"] for c in propose_candidates("A", cfg, kv_headroom=0.05)}
     loose = {c["knob"] for c in propose_candidates("A", cfg, kv_headroom=0.9)}
@@ -289,22 +294,22 @@ def test_propose_d_headroom_guard():
 
 
 def test_propose_b_unions_d_relief_knobs():
-    # B↔D 共生(§4.3):诊断 B 时并入 D 缓解类旋钮(治 B 要推大 batch,batch 要 KV 空间)
+    # B↔D 共生(§4.3)：诊断 B 时并入 D 缓解类参数(治 B 要推大 batch,batch 要 KV 空间)
     cfg = {"max_num_seqs": 64, "gpu_memory_utilization": 0.70}
     cands = propose_candidates("B", cfg)
     knobs = [c["knob"] for c in cands]
-    assert len(knobs) == len(set(knobs))                       # 并集不产生重复旋钮
+    assert len(knobs) == len(set(knobs))                       # 并集不产生重复参数
     secondary = {c["knob"]: c for c in cands if c.get("secondary_regime") == "D"}
-    assert secondary, "B 诊断应并入 D 缓解类旋钮"
+    assert secondary, "B 诊断应并入 D 缓解类参数"
     for key in ("cpu_offload_gb", "num_gpu_blocks_override", "block_size"):
         assert key in secondary
-    # 主 regime 版优先:gpu_memory_utilization 同属 B/D,只出现一次且不带并集标记
+    # 主 regime 版优先：gpu_memory_utilization 同属 B/D,只出现一次且不带并集标记
     gpu = [c for c in cands if c["knob"] == "gpu_memory_utilization"]
     assert len(gpu) == 1 and "secondary_regime" not in gpu[0]
     # 并集排在主 regime 候选之后
     first_secondary = next(i for i, c in enumerate(cands) if c.get("secondary_regime"))
     assert all("secondary_regime" not in c for c in cands[:first_secondary])
-    # 方向按 D 语义:max_model_len 往下(腾容量)——需 config 带真实值才有降的空间
+    # 方向按 D 语义：max_model_len 往下(腾容量)——需 config 带真实值才有降的空间
     cfg_len = {**cfg, "max_model_len": 32768}
     sec_len = {c["knob"]: c for c in propose_candidates("B", cfg_len)
                if c.get("secondary_regime") == "D"}
@@ -312,7 +317,7 @@ def test_propose_b_unions_d_relief_knobs():
 
 
 def test_propose_b_union_respects_d_guard_and_disable():
-    # 并集候选同样受 D 余量守卫硬约束:KV 紧张时 big_batch 照剪,容量缓解类照给
+    # 并集候选同样受 D 余量守卫硬约束：KV 紧张时 big_batch 照剪,容量缓解类照给
     cfg = {"max_num_seqs": 64, "gpu_memory_utilization": 0.70}
     tight = {c["knob"] for c in propose_candidates("B", cfg, kv_headroom=0.05)}
     assert "max_num_seqs" not in tight                        # 推大 batch 被剪
@@ -321,7 +326,7 @@ def test_propose_b_union_respects_d_guard_and_disable():
     # couple_regimes 关掉 → 退回单 regime 交集
     solo = {c["knob"] for c in propose_candidates("B", cfg, couple_regimes=False)}
     assert "num_gpu_blocks_override" not in solo and "cpu_offload_gb" not in solo
-    # 其他 regime 不受影响:D 诊断不并 B 的旋钮(无 secondary 标记)
+    # 其他 regime 不受影响：D 诊断不并 B 的参数(无 secondary 标记)
     d_cands = propose_candidates("D", {"max_num_seqs": 128, "gpu_memory_utilization": 0.70})
     assert not any(c.get("secondary_regime") for c in d_cands)
 
@@ -393,7 +398,7 @@ def test_propose_skips_removed_v0_scheduler_knobs():
 
 
 def test_constraint_graph_needs_mechanism():
-    # 约束图 needs 机制本身(§4.5):前置 flag 关着 → 不可行。
+    # 约束图 needs 机制本身(§4.5)：前置 flag 关着 → 不可行。
     from pping_lang.autopilot.action_space import Knob, _feasible
     k = Knob("x", "--x", "int", "test", helps=("A",), hurts=(), primary_slo="ttft",
              default=1, lo=1, hi=8, needs=("enable_chunked_prefill",))
@@ -494,7 +499,7 @@ def test_session_store_roundtrip(tmp_path):
 
 def test_status_dict_sanitizes_infinite_scores_for_strict_json(tmp_path):
     """objective_score() 用 float('-inf') 当"SLA 破/候选起不来"的合法内部哨兵——
-    这条一旦真机复现:tight SLA 形态(如代码补全 ttft<=100ms)下 baseline 自己都可能
+    这条一旦真机复现：tight SLA 形态(如代码补全 ttft<=100ms)下 baseline 自己都可能
     破线,round 0 起就带 -inf 分。Python 的 json.dumps 默认把它原样写成 -Infinity,
     Python 自己的 json.loads 认,但浏览器原生 fetch().json() 直接 SyntaxError——
     dashboard 每 2s 轮询 /api/autopilot/status 从此永久解析失败,UI 误报"失败"且
@@ -555,6 +560,28 @@ def test_runner_full_session_improves(tmp_path):
     store.close()
 
 
+def test_e2e_sla_violation_does_not_block_real_improvement(tmp_path):
+    """回归测试(真机复现,2026-07-23):7B-AWQ 上 chat/code 形态默认的 E2E 阈值比基线还紧,
+    旧版 sla_ok() 把 E2E 也纳入闸门,导致基线一开局就判 -inf,后续候选无论怎么改都过不了
+    这道硬门槛(-inf 打不过 -inf),session 全程"无改进",尽管 TTFT/TPOT 实际都在变好——
+    用户反馈"性能怎么都上不去"正是这个根因。E2E 现在只监控上报,不进闸门,只要 TTFT/TPOT
+    仍达标,更优候选就该正常被 kept。"""
+    store = SessionStore(tmp_path / "e2e.jsonl")
+    sla = {"ttft_p99_ms": 2000.0, "tpot_p99_ms": 50.0, "e2e_p99_ms": 500.0}   # e2e 阈值故意卡得比基线还紧
+    obj = ObjectiveSpec(target="throughput", sla=SLA(**sla))
+    store.new_session("ap-e2e", {"target": "throughput", "sla": sla}, {"rounds": 6})
+    Runner(store=store, sandbox=SimSandbox(), agent=StubAgent(), obj=obj,
+           budget={"rounds": 6, "seconds": 900}, model="M", step_delay_s=0.0).run()
+    d = store.status_dict()
+    baseline_sc = d["rounds"][0]["scorecard_after"]
+    assert baseline_sc["e2e_p99_ms"] > 500                    # 基线本身就超 E2E 监控阈值
+    assert baseline_sc["ttft_p99_ms"] <= 2000                 # 但 TTFT/TPOT 仍达标
+    kept = [r for r in d["rounds"] if r["decision"] == "kept"]
+    assert len(kept) >= 1                                     # E2E 超标不再拖累 kept 判定
+    assert d["best"]["score"] > d["baseline_score"]
+    store.close()
+
+
 def test_runner_stops_cleanly_when_agent_raises_stop_requested(tmp_path):
     """agent.propose() 抛 AgentStopRequested(用户手动停止,卡在阻塞调用里被打断)时,
     _run_loop 要记一条 stop_cause=user_stop 的 stop 轮就 return,而不是当成异常走
@@ -572,7 +599,7 @@ def test_runner_stops_cleanly_when_agent_raises_stop_requested(tmp_path):
         def propose(self, ctx):
             self.calls += 1
             if self.calls >= 2:
-                self.runner.stop()   # 对应真机:_should_stop() 命中时 runner._stopping 已被 set
+                self.runner.stop()   # 对应真机：_should_stop() 命中时 runner._stopping 已被 set
                 raise AgentStopRequested("用户手动停止")
             cand = ctx.candidates[0]
             return AgentDecision(knob=cand["knob"], config=cand["config"],
@@ -627,7 +654,7 @@ def test_runner_repeats_bench_and_reports_config_review(tmp_path):
 
 
 def test_runner_conditional_repeats_only_on_borderline(tmp_path):
-    """条件 median-of-3:默认 bench_repeats=1;Δ 落噪声带(gpu_util 微调恒 tie)才补测
+    """条件 median-of-3：默认 bench_repeats=1;Δ 落噪声带(gpu_util 微调恒 tie)才补测
     2 次走 median;明确改进(max_num_seqs 大幅提升)不补——补测时间只花在判定边界上。"""
     from pping_lang.autopilot.agent import AgentDecision
 
@@ -651,26 +678,26 @@ def test_runner_conditional_repeats_only_on_borderline(tmp_path):
                                  from_val=cand["from"], to_val=cand["to"], flag=cand["flag"],
                                  rationale=f"试 {self._key}")
 
-    # Δ 在噪声带内 → 补测:baseline 1 + candidate 3
+    # Δ 在噪声带内 → 补测：baseline 1 + candidate 3
     sb = CountingSandbox()
     store = SessionStore(tmp_path / "cond-rep.jsonl")
     store.new_session("ap-cond-rep", {"target": "throughput"}, {"rounds": 1})
     Runner(store=store, sandbox=sb, agent=PickKnobAgent("long_prefill_token_threshold"), obj=OBJ,
            budget={"rounds": 1, "seconds": 900}, model="M", step_delay_s=0.0).run()
     d = store.status_dict()
-    assert sb.measures == 4, f"边界成绩应补测:measure {sb.measures} 次,预期 4(1+3)"
+    assert sb.measures == 4, f"边界成绩应补测：measure {sb.measures} 次,预期 4(1+3)"
     cand = next(r for r in d["rounds"] if r["kind"] == "candidate")
     assert cand["bench_spec"]["bench_repeats"] == 3
     assert cand["bench_spec"]["repeats_trigger"] == "borderline"
     store.close()
 
-    # 明确改进 → 不补:baseline 1 + candidate 1
+    # 明确改进 → 不补：baseline 1 + candidate 1
     sb2 = CountingSandbox()
     store2 = SessionStore(tmp_path / "cond-norep.jsonl")
     store2.new_session("ap-cond-norep", {"target": "throughput"}, {"rounds": 1})
     Runner(store=store2, sandbox=sb2, agent=PickKnobAgent("max_num_seqs"), obj=OBJ,
            budget={"rounds": 1, "seconds": 900}, model="M", step_delay_s=0.0).run()
-    assert sb2.measures == 2, f"明确改进不该补测:measure {sb2.measures} 次,预期 2(1+1)"
+    assert sb2.measures == 2, f"明确改进不该补测：measure {sb2.measures} 次,预期 2(1+1)"
     cand2 = next(r for r in store2.status_dict()["rounds"] if r["kind"] == "candidate")
     assert cand2["bench_spec"]["bench_repeats"] == 1
     assert "repeats_trigger" not in cand2["bench_spec"]
@@ -747,7 +774,7 @@ def test_runner_defaults_and_no_improve_backstop(tmp_path):
                     obj=build_objective({"target": "throughput"}), budget={}, model="M")
     assert runner._rounds_budget == 12
     assert runner._secs_budget == 30 * 60
-    # 2026-07-12 复盘:999 曾是"强制跑满预算"的临时值;真机证据显示 agent 判 done 时
+    # 2026-07-12 复盘：999 曾是"强制跑满预算"的临时值;真机证据显示 agent 判 done 时
     # 桌上永远还有候选(候选真空由 T1→T2 fallback 在问它之前就兜掉了),它是在做定性
     # 判断而非"没得选",且被强制的额外轮次实测收益也有限——K_NO_IMPROVE 恢复成不依赖
     # 信任 LLM 的机械兜底,MIN_EXPLORE_ROUNDS 单独兜底"防止刚起步就撂挑子"。
@@ -771,7 +798,7 @@ def test_runner_sla_never_met_overrides_agent_done(tmp_path):
             call_count[0] += 1
             return AgentDecision(done=True, rationale="我判断非配置可解")
 
-    # SLA 极严:基线 tpot=22 远超 10ms -> best_score 恒 -inf
+    # SLA 极严：基线 tpot=22 远超 10ms -> best_score 恒 -inf
     tight_obj = ObjectiveSpec(target="throughput", sla=SLA(tpot_p99_ms=10.0))
     store = SessionStore(tmp_path / "sla-guard.jsonl")
     store.new_session("ap-sla-guard", {"target": "throughput"}, {"rounds": 12})
@@ -779,14 +806,14 @@ def test_runner_sla_never_met_overrides_agent_done(tmp_path):
            budget={"rounds": 12, "seconds": 900}, model="M", step_delay_s=0.0).run()
     d = store.status_dict()
 
-    # K_NO_IMPROVE=4:每轮 done 都被强制继续、每轮都判负(SLA 恒不达标) -> 连续 4 轮
+    # K_NO_IMPROVE=4：每轮 done 都被强制继续、每轮都判负(SLA 恒不达标) -> 连续 4 轮
     # 无改善,兜底触发,agent 恰好被调 4 次(不是跑满 12 轮预算)
     assert call_count[0] == 4, f"agent 被调 {call_count[0]} 次,预期 4(K_NO_IMPROVE 兜底)"
     overrides = [e for e in d["events"] if "从未通过 SLA" in e.get("message", "")]
     assert len(overrides) == 4, f"强制继续 {len(overrides)} 次,预期 4"
     # 最终状态仍是 done(K_NO_IMPROVE 是正常收尾路径,不是 failed/stopped)
     assert d["state"] == "done"
-    # 停机归因:K 兜底触发的自然退出必须补记 stop 轮
+    # 停机归因：K 兜底触发的自然退出必须补记 stop 轮
     stop = next(r for r in d["rounds"] if r["kind"] == "stop")
     assert stop["stop_cause"] == "no_improve_k"
     store.close()
@@ -819,7 +846,7 @@ def test_runner_forced_continue_preserves_original_agent_thinking(tmp_path):
 
 def test_runner_honors_done_after_min_explore_rounds_when_sla_ok(tmp_path):
     """SLA 已通过 + 探索满 MIN_EXPLORE_ROUNDS + 桌面大半已试过后,agent 的 done 才真正
-    生效。相对门槛(③):桌面超过一半候选没试过时 done 被强制覆盖——"2 轮探索 + 1 轮
+    生效。相对门槛(③)：桌面超过一半候选没试过时 done 被强制覆盖——"2 轮探索 + 1 轮
     判 done"不再直接信任;本例第 3 轮的 done 被 ③ 强制(桌面 2/3 未试),第 4 轮桌面
     已听审充分,采信。"""
     from pping_lang.autopilot.agent import AgentDecision
@@ -859,7 +886,7 @@ def test_runner_honors_done_after_min_explore_rounds_when_sla_ok(tmp_path):
 
 
 def test_runner_relative_gate_forced_cap_then_honors(tmp_path, monkeypatch):
-    """相对门槛(③)的连续强制有上限(MAX_FORCED_RELATIVE):达到上限后,即使桌面仍有
+    """相对门槛(③)的连续强制有上限(MAX_FORCED_RELATIVE)：达到上限后,即使桌面仍有
     大半未试也采信 done 并在 rationale 注记——再逼下去就是烧 bench 换不到信息
     (monkeypatch 上限为 0 直接走采信路径验证注记机制)。"""
     from pping_lang.autopilot.agent import AgentDecision
@@ -895,7 +922,7 @@ def test_runner_forced_continue_stops_honestly_when_all_candidates_already_faile
         model = "done-immediately"
 
         def propose(self, ctx):
-            # 候选集只有 1 个旋钮时,防重命中即可制造"仅剩候选已判负"的场景
+            # 候选集只有 1 个参数时,防重命中即可制造"仅剩候选已判负"的场景
             if not ctx.tried_configs:
                 cand = ctx.candidates[0]
                 return AgentDecision(knob=cand["knob"], config=cand["config"],
@@ -919,7 +946,7 @@ def test_runner_forced_continue_stops_honestly_when_all_candidates_already_faile
 # ---- stop_cause 停机归因 ----
 
 def test_runner_stop_cause_budget_rounds(tmp_path):
-    """轮数预算耗尽是自然退出(非 break):以前静默,现在必须补记 stop 轮,
+    """轮数预算耗尽是自然退出(非 break)：以前静默,现在必须补记 stop 轮,
     stop_cause=budget_rounds。"""
     store = SessionStore(tmp_path / "cause-rounds.jsonl")
     store.new_session("ap-cause-rounds", {"target": "throughput"}, {"rounds": 1})
@@ -968,13 +995,13 @@ def test_runner_stop_cause_agent_done_carries_table_snapshot(tmp_path):
 
 
 def test_runner_stop_cause_user_stop(tmp_path):
-    """手动 stop:循环头部直接退出,补记的 stop 轮 stop_cause=user_stop,
+    """手动 stop：循环头部直接退出,补记的 stop 轮 stop_cause=user_stop,
     最终状态 stopped。"""
     store = SessionStore(tmp_path / "cause-stop.jsonl")
     store.new_session("ap-cause-stop", {"target": "throughput"}, {"rounds": 12})
     runner = Runner(store=store, sandbox=SimSandbox(), agent=StubAgent(), obj=OBJ,
                     budget={"rounds": 12, "seconds": 900}, model="M", step_delay_s=0.0)
-    runner.stop()                    # baseline 之前发出停止:baseline 跑完,主循环不进
+    runner.stop()                    # baseline 之前发出停止：baseline 跑完,主循环不进
     runner.run()
     d = store.status_dict()
     assert d["state"] == "stopped"
@@ -984,7 +1011,7 @@ def test_runner_stop_cause_user_stop(tmp_path):
 
 
 def test_resume_session_tolerates_rounds_without_stop_fields(tmp_path):
-    """向后兼容:旧 JSONL 的 round 行没有 stop_cause/table_snapshot(且可能带未知字段),
+    """向后兼容：旧 JSONL 的 round 行没有 stop_cause/table_snapshot(且可能带未知字段),
     resume 时不报错,新字段取默认值。"""
     path = tmp_path / "old.jsonl"
     path.write_text(
@@ -1088,7 +1115,7 @@ def test_agent_config_kimi_coding_probe(monkeypatch):
 
 
 def test_agent_config_anthropic_probe(monkeypatch):
-    """agent-test 必须与 build_agent 的 ClaudeAgent 路由一致:/v1/messages + x-api-key。"""
+    """agent-test 必须与 build_agent 的 ClaudeAgent 路由一致：/v1/messages + x-api-key。"""
     from pping_lang.autopilot import api as ap_api
 
     class Resp:
@@ -1133,6 +1160,25 @@ def _ctx(cands, bottleneck="A", config=None, tried=None):
         current_config=config or {"max_num_seqs": 32, "gpu_memory_utilization": 0.70},
         diagnosis={"bottleneck": bottleneck, "evidence_refs": [f"{bottleneck}:roofline"]},
         candidates=cands, tried_configs=tried or [])
+
+
+class _SSEResp:
+    """假流式响应(stream:true 之后 _call() 逐行读 data: 帧,不再一次性 read())。
+    events 是逐个要发的 dict,末尾自动补 [DONE]；context manager + 逐行可迭代都要支持。"""
+
+    def __init__(self, events):
+        lines = [f"data: {json.dumps(e)}\n".encode("utf-8") for e in events]
+        lines.append(b"data: [DONE]\n")
+        self._lines = lines
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        return False
+
+    def __iter__(self):
+        return iter(self._lines)
 
 
 def test_build_messages_lang_directive_defaults_to_chinese():
@@ -1229,26 +1275,62 @@ def test_openai_agent_done(monkeypatch):
     assert d.done
 
 
+def test_openai_agent_request_sets_generous_max_tokens(monkeypatch):
+    """回归测试(真机复现 2026-07-23,ap-20260723-112536,glm-5.2):OpenAIAgent 之前请求体
+    里没设 max_tokens,吃 provider 默认值——thinking 类模型想得越久(超时拉到 240s + 流式
+    之后敢无限想下去,不再被网络超时先打断)越容易把默认额度吃满,text 被截断成非法 JSON
+    (第一次调用报 JSONDecodeError,靠运气重试第二次才成功)。给够预算才是根治,不能靠
+    重试撞运气。"""
+    import urllib.request
+
+    from pping_lang.autopilot.agent import OpenAIAgent
+
+    seen = {}
+
+    def fake_urlopen(req, timeout):
+        seen["body"] = json.loads(req.data.decode("utf-8"))
+        return _SSEResp([{"choices": [{"delta": {"content": '{"done":true,"reason":"ok"}'}}]}])
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    a = OpenAIAgent("http://x/v1", "k", "m")
+    a.propose(_ctx([], bottleneck="B"))
+    assert seen["body"]["max_tokens"] >= 8192
+
+
+def test_claude_agent_request_sets_generous_max_tokens(monkeypatch):
+    """同上一条:ClaudeAgent 原本 max_tokens=1024,同类 provider 里明显偏小,一并抬高
+    避免 thinking+text 合计被截断。"""
+    import urllib.request
+
+    from pping_lang.autopilot.agent import ClaudeAgent
+
+    seen = {}
+
+    def fake_urlopen(req, timeout):
+        seen["body"] = json.loads(req.data.decode("utf-8"))
+        return _SSEResp([{"delta": {"type": "text_delta", "text": '{"done":true,"reason":"ok"}'}}])
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    a = ClaudeAgent(api_key="k")
+    a.propose(_ctx([], bottleneck="B"))
+    assert seen["body"]["max_tokens"] >= 8192
+
+
 def test_kimi_agent_captures_thinking(monkeypatch):
-    """思考过程直播:provider 响应里的 thinking block 随决策带出(dec.thinking)。"""
+    """思考过程直播：provider 流式响应里的 thinking_delta 随决策带出(dec.thinking)。"""
     from pping_lang.autopilot.agent import KimiCodingAgent
 
-    class Resp:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_):
-            return False
-
-        def read(self):
-            return json.dumps({"content": [
-                {"type": "thinking", "thinking": "waiting=28 说明需求远超准入闸,一步到位"},
-                {"type": "text", "text": '{"done":false,"action":{"knob":"max_num_seqs","value":32},'
-                                         '"rationale":"提并发","evidence_refs":["A:live"]}'},
-            ]}).encode("utf-8")
+    events = [
+        {"type": "content_block_delta",
+         "delta": {"type": "thinking_delta", "thinking": "waiting=28 说明需求远超准入闸,一步到位"}},
+        {"type": "content_block_delta",
+         "delta": {"type": "text_delta", "text": '{"done":false,"action":{"knob":"max_num_seqs",'
+                                                  '"value":32},"rationale":"提并发",'
+                                                  '"evidence_refs":["A:live"]}'}},
+    ]
 
     import urllib.request
-    monkeypatch.setattr(urllib.request, "urlopen", lambda req, timeout: Resp())
+    monkeypatch.setattr(urllib.request, "urlopen", lambda req, timeout: _SSEResp(events))
     a = KimiCodingAgent(api_key="k")
     cands = propose_candidates("A", {"max_num_seqs": 4, "gpu_memory_utilization": 0.70})
     d = a.propose(_ctx(cands, config={"max_num_seqs": 4}))
@@ -1286,6 +1368,94 @@ def test_http_agent_propose_stops_promptly_without_waiting_for_call_to_finish(mo
     assert not call_finished.is_set()    # 弃置的调用线程还没跑完(是守护线程,不阻塞退出)
 
 
+def _serve_sse_chunks(chunks, gap_s):
+    """起一个真实本地 HTTP server,按 gap_s 间隔逐块推 SSE 帧;返回 (server, thread, port)。
+    调用方负责 server.shutdown() + thread.join()。用真 socket 而不是 mock,才能真正验证
+    urllib 的 socket timeout 是"两块数据之间的间隔"而不是"整次调用的总时长"。"""
+    import http.server
+    import threading as _threading
+    import time as _time
+
+    class _Handler(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.end_headers()
+            for c in chunks:
+                self.wfile.write(f"data: {json.dumps(c)}\n\n".encode("utf-8"))
+                self.wfile.flush()
+                _time.sleep(gap_s)
+            self.wfile.write(b"data: [DONE]\n\n")
+
+        def log_message(self, *_a):  # noqa: ANN001 — 测试不需要 access log 噪声
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), _Handler)
+    thread = _threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return server, thread, server.server_address[1]
+
+
+def test_http_agent_streaming_idle_timeout_survives_slow_total_time(monkeypatch):
+    """彻底根治的核心验证(2026-07-23,真实 socket 而非 mock):流式之后 timeout_s 的语义
+    变成"两块数据之间的最大间隔",不是"整次调用的总时长"。3 个数据块之间各间隔 0.5s,
+    总耗时 1.5s+ > timeout_s=0.8s,但因为每次间隔都 < 0.8s,应该正常拿到完整响应而不是
+    超时——这正是要修的问题:旧版非流式一次性 resp.read() 必须在 timeout_s 内拿到全部
+    内容,thinking 慢一点整次就超时,重试也没用(真机 glm-5.2 卡在 90s 超时线上 10 次)。"""
+    from pping_lang.autopilot.agent import OpenAIAgent
+
+    chunks = [
+        {"choices": [{"delta": {"reasoning_content": "先想第一步…"}}]},
+        {"choices": [{"delta": {"reasoning_content": "再想第二步…"}}]},
+        {"choices": [{"delta": {"content": '{"done":true,"reason":"想清楚了"}'}}]},
+    ]
+    server, thread, port = _serve_sse_chunks(chunks, gap_s=0.5)
+    try:
+        a = OpenAIAgent(f"http://127.0.0.1:{port}", "k", "m", timeout_s=0.8)
+        t0 = __import__("time").monotonic()
+        d = a.propose(_ctx([], bottleneck="B"))
+        elapsed = __import__("time").monotonic() - t0
+        assert d.done and d.reason == "想清楚了"
+        assert elapsed > 1.0                 # 总耗时确实超过了单次 timeout_s(0.8s)
+        assert "先想第一步" in d.thinking and "再想第二步" in d.thinking
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+
+
+def test_http_agent_call_stops_mid_stream_via_real_socket(monkeypatch):
+    """_iter_sse_data 在真实流式连接的数据块之间也会查 _should_stop()(不只是外层线程
+    轮询兜底)——用真 socket 起一个会一直吐数据块的 server,stop_check 在收到第 2 块后
+    变真,验证 _call() 能在拿到完整响应前就主动跳出,而不是把它当普通异常重试。"""
+    from pping_lang.autopilot.agent import AgentStopRequested, OpenAIAgent
+
+    # 数据块管够(server 端不知道客户端会提前挂断),数量远超测试需要的"第 2 块后停"
+    chunks = [{"choices": [{"delta": {"reasoning_content": f"第{i}块…"}}]} for i in range(20)]
+    server, thread, port = _serve_sse_chunks(chunks, gap_s=0.2)
+    try:
+        a = OpenAIAgent(f"http://127.0.0.1:{port}", "k", "m", timeout_s=5.0)
+        seen = {"n": 0}
+        orig_iter = a._iter_sse_data
+
+        def _counting_stop_check():
+            return seen["n"] >= 2
+
+        a.set_stop_check(_counting_stop_check)
+
+        def _patched_iter(resp):
+            for evt in orig_iter(resp):
+                seen["n"] += 1
+                yield evt
+
+        monkeypatch.setattr(a, "_iter_sse_data", _patched_iter)
+        with pytest.raises(AgentStopRequested):
+            a.propose(_ctx([], bottleneck="B"))
+        assert seen["n"] < len(chunks)        # 提前跳出,没有把 20 块全读完
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+
+
 def test_runner_persists_thinking_and_streams_decision(tmp_path):
     """思考落 round 记录(agent_thinking)+ 决策到达即刻直播(不等 bench 落定)。"""
     from pping_lang.autopilot.agent import AgentDecision
@@ -1308,8 +1478,8 @@ def test_runner_persists_thinking_and_streams_decision(tmp_path):
     cand = [r for r in st["rounds"] if r["kind"] == "candidate"][0]
     assert "先动准入闸" in cand["agent_thinking"]
     msgs = [e["message"] for e in st["events"]]
-    assert any(m.startswith("agent 思考:") for m in msgs)
-    assert any(m.startswith("agent 决策:max_num_seqs") for m in msgs)
+    assert any(m.startswith("agent 思考：") for m in msgs)
+    assert any(m.startswith("agent 决策：max_num_seqs") for m in msgs)
     store.close()
 
 
@@ -1377,6 +1547,52 @@ def test_validate_recovery_action():
     assert validate(AgentDecision(), ctx) is not None
 
 
+def test_extract_last_json_object_skips_braces_mentioned_in_prose():
+    """回归测试(真机复现 2026-07-23,ap-20260723-120120,自定义 provider):有的模型不把
+    thinking 单独放进 reasoning_content,连同最终 JSON 一起算进普通 content 流,思考文字
+    提到"配置形如 {...}"这类非 JSON 花括号很常见。朴素的 find('{')/rfind('}') 会把思考
+    文字里的花括号也截进来,做出非法 JSON——真正的平衡扫描应该跳过这些,只取最后一个
+    完整闭合的顶层块。"""
+    from pping_lang.autopilot.agent import _extract_last_json_object
+
+    text = ('让我想想,配置形如 {key: value} 这样,但那只是举例,不是最终答案。\n'
+            '最终答案:\n{"done": false, "action": {"knob": "max_num_seqs", "value": 96}, '
+            '"rationale": "带宽瓶颈提并发"}')
+    out = json.loads(_extract_last_json_object(text))
+    assert out["action"]["knob"] == "max_num_seqs" and out["action"]["value"] == 96
+
+
+def test_extract_last_json_object_ignores_braces_inside_string_values():
+    """JSON 字符串值内部提到的花括号(如 rationale 里写"配置 {a:1}")不该被误判成
+    结构边界,深度扫描要跳过字符串字面量。"""
+    from pping_lang.autopilot.agent import _extract_last_json_object
+
+    text = '{"done": true, "reason": "配置形如 {a:1} 时不用再动", "rationale": "已近最优"}'
+    out = json.loads(_extract_last_json_object(text))
+    assert out["done"] is True and out["reason"] == "配置形如 {a:1} 时不用再动"
+
+
+def test_extract_last_json_object_picks_last_block_when_multiple_present():
+    """模型有时会先给一版草稿 JSON 又推翻重写,最后一个完整闭合块才是真正想要的答案。"""
+    from pping_lang.autopilot.agent import _extract_last_json_object
+
+    text = ('草稿:{"done": false, "action": {"knob": "wrong_knob", "value": 1}}\n'
+            '不对,重新想。\n'
+            '{"done": false, "action": {"knob": "max_num_seqs", "value": 128}}')
+    out = json.loads(_extract_last_json_object(text))
+    assert out["action"]["knob"] == "max_num_seqs"
+
+
+def test_extract_last_json_object_falls_back_on_truncated_response():
+    """真截断(没有任何闭合的顶层块)时退回朴素启发式,行为跟以前一致——不该在这种情况下
+    伪造出一个"看似合法"但实际残缺的边界,让 json.loads 该报错就报错(交给上层重试)。"""
+    from pping_lang.autopilot.agent import _extract_last_json_object
+
+    text = '{"done": false, "action": {"knob": "max_num_seqs", "value'   # 硬生生截断
+    with pytest.raises(json.JSONDecodeError):
+        json.loads(_extract_last_json_object(text))
+
+
 def test_decision_from_json_recovery_mode():
     from pping_lang.autopilot.agent import AgentContext, _decision_from_json
     ctx = AgentContext(
@@ -1438,7 +1654,7 @@ def _fake_proc(returncode=0, stdout="", stderr=""):
 
 
 def test_clean_log_line_strips_layered_prefixes():
-    """就绪心跳日志清理:pid 前缀 + INFO/时间戳/文件名前缀常叠两层,须都剥掉。"""
+    """就绪心跳日志清理：pid 前缀 + INFO/时间戳/文件名前缀常叠两层,须都剥掉。"""
     from pping_lang.autopilot.sandbox import _clean_log_line
     raw = "(EngineCore pid=206) INFO 07-08 23:35:42 [monitor.py:53] torch.compile took 12.3s"
     assert _clean_log_line(raw) == "torch.compile took 12.3s"
@@ -1602,7 +1818,7 @@ def test_bench_scorecard_scales_client_pool_to_concurrency(monkeypatch):
     assert seen["max_keepalive"] == 256
 
 
-# ---- ③ 真诊断:读候选 /api/diagnoses → bottleneck ----
+# ---- ③ 真诊断：读候选 /api/diagnoses → bottleneck ----
 
 def test_docker_sandbox_read_diagnosis_picks_most_severe(monkeypatch):
     from pping_lang.autopilot.sandbox import DockerSandbox
@@ -1857,7 +2073,7 @@ def test_runner_t2_equivalence_passes_and_benches(tmp_path):
 
 
 def test_runner_t2_equivalence_tolerates_minor_drift(tmp_path):
-    """serving 非 seed 决定性(§6.2):个别 token 漂移不应误杀 T2 候选,相似度阈值放行。"""
+    """serving 非 seed 决定性(§6.2)：个别 token 漂移不应误杀 T2 候选,相似度阈值放行。"""
     from pping_lang.autopilot.agent import AgentDecision
 
     class MinorDriftSandbox(SimSandbox):
@@ -1906,13 +2122,13 @@ def test_runner_baseline_failure_emits_error_event(tmp_path):
     errs = [e for e in st["events"] if e.get("level") == "error"]
     assert any("基线失败" in (e.get("message") or "") for e in errs)
     assert any((e.get("detail") or {}).get("error") for e in errs)
-    # recovery 痕迹:agent 被询求修复动作
+    # recovery 痕迹：agent 被询求修复动作
     assert any("recovery" in (e.get("message") or "").lower() for e in st["events"])
     store.close()
 
 
 def test_runner_baseline_recovery_success(tmp_path):
-    """B+C:基线第一次失败,recovery 降并发后成功,最终 session 完成且有有效 baseline。"""
+    """B+C：基线第一次失败,recovery 降并发后成功,最终 session 完成且有有效 baseline。"""
     from pping_lang.autopilot.scorecard import BenchError
 
     class RecoveringSandbox(SimSandbox):
@@ -1942,7 +2158,7 @@ def test_runner_baseline_recovery_success(tmp_path):
 
 
 def test_run_static_streams_progress_snapshots():
-    """bench 直播(反馈密度二期 A):采集期周期回调运行中快照,回调异常不影响压测。"""
+    """bench 直播(反馈密度二期 A)：采集期周期回调运行中快照,回调异常不影响压测。"""
     import asyncio
     import time as _t
 
@@ -1979,7 +2195,7 @@ def test_run_static_streams_progress_snapshots():
 
 
 def test_run_static_aborts_all_error_storm():
-    """候选死透(全错)时熔断:5s 后 0 成功即提前终止,不空烧整个压测窗口。"""
+    """候选死透(全错)时熔断：5s 后 0 成功即提前终止,不空烧整个压测窗口。"""
     import asyncio
     import time as _t
 
@@ -2006,7 +2222,7 @@ def test_run_static_aborts_all_error_storm():
 
 
 def test_agent_free_value_within_range():
-    """LLM 自选 value:证据支持时一步到位(4→32),不必逐档爬梯。"""
+    """LLM 自选 value：证据支持时一步到位(4→32),不必逐档爬梯。"""
     from pping_lang.autopilot.agent import _decision_from_json
     cands = propose_candidates("A", {"max_num_seqs": 4, "gpu_memory_utilization": 0.70})
     ctx = _ctx(cands, config={"max_num_seqs": 4, "gpu_memory_utilization": 0.70})
@@ -2048,7 +2264,7 @@ def test_agent_free_value_choice_knob_uses_ladder():
 
 
 def test_validate_dedup_uses_actual_config():
-    """防重按实际 config 查:同旋钮预定档已 reverted,自选不同值仍可提。"""
+    """防重按实际 config 查：同参数预定档已 reverted,自选不同值仍可提。"""
     from pping_lang.autopilot.agent import _decision_from_json, config_hash, validate
     cands = propose_candidates("A", {"max_num_seqs": 4, "gpu_memory_utilization": 0.70})
     ladder_cfg = next(c for c in cands if c["knob"] == "max_num_seqs")["config"]
@@ -2072,18 +2288,18 @@ def test_propose_candidates_load_binding_guard():
 
 
 def test_load_binding_from_probe():
-    """load_binding 证据链:running 峰值 vs max_num_seqs + waiting。"""
+    """load_binding 证据链：running 峰值 vs max_num_seqs + waiting。"""
     from pping_lang.autopilot.runner import load_binding
     cfg = {"max_num_seqs": 32}
 
     def sc_with(probe):
         return Scorecard(output_tps=1000, ttft_p99_ms=100, run_meta={"runtime_probe": probe})
 
-    # 并发 8 压 32 上限:running 峰值 8、无 waiting 证据 → 没绑定(running 代理)
+    # 并发 8 压 32 上限：running 峰值 8、无 waiting 证据 → 没绑定(running 代理)
     assert load_binding(cfg, {}, sc_with({"running_reqs": {"max": 8.0, "avg": 7.3}})) is False
-    # waiting 证据缺失时退化用 running 峰值代理:顶到上限 → 绑定
+    # waiting 证据缺失时退化用 running 峰值代理：顶到上限 → 绑定
     assert load_binding(cfg, {}, sc_with({"running_reqs": {"max": 31.0, "avg": 28.0}})) is True
-    # 决定性证据:running 顶满但 waiting==0 → 负载恰好吃满,提上限空转 → 没绑定
+    # 决定性证据：running 顶满但 waiting==0 → 负载恰好吃满,提上限空转 → 没绑定
     assert load_binding(cfg, {}, sc_with({"running_reqs": {"max": 32.0, "avg": 29.9},
                                           "waiting_reqs": {"max": 0.0, "avg": 0.0}})) is False
     # 有排队 → 绑定(不管 running)
@@ -2094,7 +2310,7 @@ def test_load_binding_from_probe():
 
 
 def test_load_binding_ambiguous_when_bench_concurrency_not_exceeding_cap():
-    """真机教训:bench 并发默认恰好等于基线 max_num_seqs(都是 32)时,waiting 结构性
+    """真机教训：bench 并发默认恰好等于基线 max_num_seqs(都是 32)时,waiting 结构性
     永远测不出 >0(client 自己就没发第 33 个请求)——不能把"没测过"当"真没绑定"(False),
     否则 max_num_seqs 会被误剪出候选集,agent 连试都试不了。"""
     from pping_lang.autopilot.runner import load_binding
@@ -2106,9 +2322,9 @@ def test_load_binding_ambiguous_when_bench_concurrency_not_exceeding_cap():
 
     running_saturated = {"running_reqs": {"max": 32.0, "avg": 29.9},
                          "waiting_reqs": {"max": 0.0, "avg": 0.0}}
-    # bench 并发 == 上限:没机会观察排队 → 未知(None),别误判 False
+    # bench 并发 == 上限：没机会观察排队 → 未知(None),别误判 False
     assert load_binding(cfg, {}, sc_with(running_saturated, concurrency=32)) is None
-    # bench 并发 < 上限:更没机会测出排队 → 同样未知
+    # bench 并发 < 上限：更没机会测出排队 → 同样未知
     assert load_binding(cfg, {}, sc_with(running_saturated, concurrency=24)) is None
     # bench 并发确实超过上限、仍无排队 → 这才是"真没绑定"的硬证据
     assert load_binding(cfg, {}, sc_with(running_saturated, concurrency=48)) is False
@@ -2153,7 +2369,7 @@ def test_runner_emits_fallback_warn_event(tmp_path):
 
 
 def test_runner_resume_elapsed_consumes_time_budget(tmp_path):
-    """resume 后时间预算按 session 起点算:已耗尽 → 不再跑候选轮,直接收尾。"""
+    """resume 后时间预算按 session 起点算：已耗尽 → 不再跑候选轮,直接收尾。"""
     store = SessionStore(tmp_path / "elapsed.jsonl")
     store.new_session("ap-elapsed", {"target": "throughput"}, {"rounds": 6})
     Runner(store=store, sandbox=SimSandbox("M"), agent=StubAgent(), obj=OBJ,
@@ -2162,7 +2378,7 @@ def test_runner_resume_elapsed_consumes_time_budget(tmp_path):
     st = store.status_dict()
     assert st["state"] == "done"
     kinds = [r["kind"] for r in st["rounds"]]
-    assert kinds == ["baseline", "stop"]                  # 预算已尽:零候选轮,补记归因 stop
+    assert kinds == ["baseline", "stop"]                  # 预算已尽：零候选轮,补记归因 stop
     assert st["rounds"][-1]["stop_cause"] == "budget_time"
     store.close()
 
@@ -2188,7 +2404,7 @@ def test_load_status_from_jsonl(tmp_path):
 
 def test_load_status_no_final_reconstructs_rounds(tmp_path):
     # 没 final 快照(崩溃/进行中)→ 回退用 session_start + 回放 round。
-    # 回归:'kind' 判别曾被 Round.kind 覆盖,round 行漏读 → 现用 'rec'。
+    # 回归：'kind' 判别曾被 Round.kind 覆盖,round 行漏读 → 现用 'rec'。
     p = tmp_path / "ap-crash.jsonl"
     st = SessionStore(p)
     st.new_session("ap-crash", {"target": "throughput"}, {"rounds": 6})
@@ -2293,7 +2509,7 @@ def test_controller_status_reads_disk(tmp_path):
 
 
 def test_controller_status_reads_disk_by_mtime_not_filename(tmp_path):
-    """真机复现:sid 带非日期后缀(如 ap-expA-20260718-...)时,字典序 'e' > 数字,
+    """真机复现：sid 带非日期后缀(如 ap-expA-20260718-...)时,字典序 'e' > 数字,
     会排在同一天甚至更晚的 ap-20260721-... 后面——bridge/controller 重启后没了
     内存 session,退回读磁盘"最新"JSONL 时,曾经按文件名字典序取 files[-1],把陈旧
     的手工实验 session 误判成刚跑完的,用户看不到真正最近一次 session 的结果。
@@ -2403,7 +2619,7 @@ def test_kv_headroom_prefers_measured_kv_usage():
 
 
 def test_runner_t2_golden_taken_before_candidate_apply(tmp_path):
-    # resume 场景 golden 缺失:必须在 apply 候选**前**取 golden(此刻沙盒是 best)。
+    # resume 场景 golden 缺失：必须在 apply 候选**前**取 golden(此刻沙盒是 best)。
     # 若在候选加载后再取,候选自己的输出会被当 golden → 等价检查恒真放行。
     from pping_lang.autopilot.agent import AgentDecision
 
@@ -2479,7 +2695,7 @@ def test_workload_resolve_bench_explicit_beats_shape():
     out = resolve_bench("chat", {"concurrency": 256, "prompt_tokens": None, "output_tokens": None})
     assert out["concurrency"] == 256
     assert out["prompt_tokens"] == 500 and out["output_tokens"] == 128   # 形态补上
-    # custom / 无形态:透传,只留显式值
+    # custom / 无形态：透传,只留显式值
     out = resolve_bench("custom", {"concurrency": 32, "prompt_tokens": None, "output_tokens": None})
     assert out == {"concurrency": 32}
     out = resolve_bench("", {"concurrency": None, "prompt_tokens": None, "output_tokens": None})
@@ -2496,7 +2712,7 @@ def test_workload_resolve_sla():
 
 
 def test_run_cli_workload_resolution(monkeypatch, tmp_path):
-    """run.py 接线:--workload 展开形态负载+SLA;显式 flag 覆盖;custom 行为同旧默认。"""
+    """run.py 接线：--workload 展开形态负载+SLA;显式 flag 覆盖;custom 行为同旧默认。"""
     from pping_lang.autopilot import run as run_cli
     from pping_lang.autopilot.sandbox import BENCH_SPEC
 
@@ -2538,7 +2754,7 @@ def test_run_cli_workload_resolution(monkeypatch, tmp_path):
         return captured
 
     base = ["--session-id", "ap-test"]
-    # 形态展开:chat → c64/p500/o128 + SLA 1000/50,objective 带 workload 标记
+    # 形态展开：chat → c64/p500/o128 + SLA 1000/50,objective 带 workload 标记
     c = _run(base + ["--workload", "chat"])
     bs = c["bench_spec"]
     assert (bs["concurrency"], bs["prompt_tokens"], bs["output_tokens"]) == (64, 500, 128)
@@ -2553,7 +2769,7 @@ def test_run_cli_workload_resolution(monkeypatch, tmp_path):
     assert c["objective"]["sla"]["ttft_p99_ms"] == 800
     assert c["objective"]["sla"]["tpot_p99_ms"] == 50
 
-    # custom / 无形态:行为同引入形态前(旧兜底 8/128/BENCH_SPEC,SLA 不加闸)
+    # custom / 无形态：行为同引入形态前(旧兜底 8/128/BENCH_SPEC,SLA 不加闸)
     c = _run(base + ["--workload", "custom"])
     assert c["bench_spec"]["concurrency"] == 8
     assert c["bench_spec"]["output_tokens"] == 128
@@ -2567,7 +2783,7 @@ def test_run_cli_workload_resolution(monkeypatch, tmp_path):
 
 def test_run_cli_registers_signal_handlers_that_stop_runner(monkeypatch, tmp_path):
     """bridge 跨进程停止 session 只能靠 os.killpg(SIGINT/SIGTERM)(没法直接调 Python 方法)。
-    真机复现(2026-07-22):默认 SIGINT→KeyboardInterrupt 在进程卡着阻塞 HTTPS 调用时不可靠,
+    真机复现(2026-07-22)：默认 SIGINT→KeyboardInterrupt 在进程卡着阻塞 HTTPS 调用时不可靠,
     bridge 10s 优雅期等不到就 SIGKILL 强杀,session 没有 stop_cause、没走 _finalize()。main()
     现在必须显式接管 SIGINT/SIGTERM,转译成 runner.stop()(配合 agent.py 里 0.5s 粒度轮询,
     能在阻塞调用完成前跳出)——这里锁死"注册了这两个信号且 handler 确实调用了 runner.stop()",

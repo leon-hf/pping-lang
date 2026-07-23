@@ -122,7 +122,7 @@
         </div>
       </div>
 
-      <!-- ===== SLO 达标监控:选业务形态 → SLA → 当前 p99 是否达标(阈值改这里热生效)===== -->
+      <!-- ===== SLO 达标监控：选业务形态 → SLA → 当前 p99 是否达标(阈值改这里热生效)===== -->
       <div class="slo-monitor" x-data="sloPanel()" x-init="init()">
         <div class="cfg-bar">
           <div class="cfg-bar-main">
@@ -165,7 +165,7 @@
             </div>
           </div>
         </div>
-        <!-- 达标:当前 p99(实时)vs SLA -->
+        <!-- 达标：当前 p99(实时)vs SLA -->
         <div class="slo-cards">
           <div class="slo-card" :class="{ ok: slaPass(kpis.ttft_p99_ms, cfgDraft.sla_ttft_p99_ms) === true, bad: slaPass(kpis.ttft_p99_ms, cfgDraft.sla_ttft_p99_ms) === false }">
             <div class="slo-card-head">
@@ -523,7 +523,7 @@
         <h2 x-text="t('kern.profileTitle')"><span class="hint" style="margin-left: 10px;" x-text="t('kern.profileHint')"></span></h2>
       </div>
 
-      <!-- Roofline(模型级,与 Overview 同数据)— 宏观定位:整模型在屋脊线哪、离峰值多远 -->
+      <!-- Roofline(模型级,与 Overview 同数据)— 宏观定位：整模型在屋脊线哪、离峰值多远 -->
       <div class="chart-card" style="margin-bottom: 18px;">
         <div class="head">
           <div>
@@ -537,7 +537,7 @@
           </div>
         </div>
         <div class="chart-wrap" style="height: 260px;"><canvas id="kernel-roofline-chart"></canvas></div>
-        <!-- 屋脊线怎么算的:两个峰值参数 + 拐点 -->
+        <!-- 屋脊线怎么算的：两个峰值参数 + 拐点 -->
         <template x-if="system.gpu_peak">
           <div style="margin-top: 10px; padding: 9px 13px; background: var(--surface-alt); border-radius: 8px; font-size: 11.5px; color: var(--muted); line-height: 1.75;">
             <strong style="color: var(--text); font-weight: 600;" x-text="t('kern.howComputed')"></strong>（<span x-text="system.gpu_name || 'GPU'"></span> · <span x-text="t('kern.rooflineFrom')"></span>）·
@@ -547,13 +547,13 @@
             <span style="color: var(--muted-2);" x-text="t('kern.kneeDesc')"></span>
           </div>
         </template>
-        <!-- Scaling 分析:decode AI≈batch,沿 envelope 外推扩 batch 的吞吐上界 -->
+        <!-- Scaling 分析：decode AI≈batch,沿 envelope 外推扩 batch 的吞吐上界 -->
         <template x-if="rooflineScale">
           <div style="margin-top: 10px; padding: 11px 14px; background: var(--teal-soft); border-radius: 8px; font-size: 12px; color: var(--text); line-height: 1.8;">
             <strong x-text="t('kern.scalingAnalysis')"></strong>
           </div>
         </template>
-        <!-- P0-C:实测 scaling 闭环 —— 一键压测扫并发,实测曲线叠在 envelope 上,外推变实测 -->
+        <!-- P0-C：实测 scaling 闭环 —— 一键压测扫并发,实测曲线叠在 envelope 上,外推变实测 -->
         <div style="margin-top: 10px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
           <button class="btn" :disabled="scalingSweep.running" @click="startScalingSweep()">
             <span x-show="!scalingSweep.running" x-text="t('kern.scalingSweepBtn')"></span>
@@ -623,7 +623,7 @@
               </template>
             </div>
           </div>
-          <!-- #1+#2+#3 诊断头条:GPU 在等多少 · 什么瓶颈 · 最大可回收点 -->
+          <!-- #1+#2+#3 诊断头条：GPU 在等多少 · 什么瓶颈 · 最大可回收点 -->
           <template x-if="issuedVerdict() && bottleneckVerdict()">
             <div style="margin-top: 16px; padding: 14px 16px; border-radius: 10px; border: 1px solid var(--border-strong); border-left: 3px solid var(--teal); background: var(--surface-tint);">
               <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
@@ -650,7 +650,7 @@
             </div>
           </template>
 
-          <!-- P3 源码级热点:能定位到 Python 行的 kernel(差异化能力,提到顶部免得埋在长表里)-->
+          <!-- P3 源码级热点：能定位到 Python 行的 kernel(差异化能力,提到顶部免得埋在长表里)-->
           <template x-if="sourceHotspots().length">
             <div style="margin-top: 16px; padding: 14px 16px; border-radius: 10px; border: 1px solid var(--border-strong); border-left: 3px solid var(--indigo); background: var(--surface-tint);">
               <div style="display: flex; align-items: center; gap: 9px; flex-wrap: wrap; margin-bottom: 4px;">
@@ -746,11 +746,11 @@
                           </template>
                         </div>
                         <div x-show="kernelSuggestion(k)" style="margin-top: 11px; padding: 9px 12px; background: var(--teal-soft); border-radius: 7px; font-size: 12px; color: var(--text);" x-text="'💡 ' + kernelSuggestion(k)"></div>
-                        <!-- P3 最深热点:双轨(源码行 / SASS 偏移 + kernel 名解码)-->
+                        <!-- P3 最深热点：双轨(源码行 / SASS 偏移 + kernel 名解码)-->
                         <template x-if="kernelHotspot(k)">
                           <div style="margin-top: 11px;">
                             <div style="font-size: 11px; font-weight: 600; color: var(--muted); margin-bottom: 7px; text-transform: uppercase; letter-spacing: 0.04em;" x-text="t('kern.kernelDeepHotspot')"><span style="font-weight: 400; text-transform: none; color: var(--muted-2);">· <span x-text="t('kern.kernelHotspotDesc')"></span></span></div>
-                            <!-- 轨一:可映射 → Python 源码行(行号 + 占比条 + 该行代码原文)-->
+                            <!-- 轨一：可映射 → Python 源码行(行号 + 占比条 + 该行代码原文)-->
                             <template x-if="kernelHotspot(k).mappable && kernelHotspot(k).lines.length">
                               <div style="display: flex; flex-direction: column; gap: 9px; max-width: 640px;">
                                 <template x-for="ln in kernelHotspot(k).lines" :key="ln.loc">
@@ -771,7 +771,7 @@
                                 <div style="font-size: 11px; color: var(--muted-2);" x-text="t('kern.sourceFile', {path: kernelHotspot(k).lines[0].path || ''})"></div>
                               </div>
                             </template>
-                            <!-- 轨二:闭源库 → SASS 偏移 + kernel 名解码 -->
+                            <!-- 轨二：闭源库 → SASS 偏移 + kernel 名解码 -->
                             <template x-if="!kernelHotspot(k).mappable">
                               <div style="font-size: 12px; color: var(--text); line-height: 1.7;">
                                 <span x-show="kernelHotspot(k).decode" style="display: inline-block; padding: 2px 8px; background: var(--surface); border: 1px solid var(--border); border-radius: 5px; font-size: 11.5px; margin-bottom: 6px;" x-text="kernelDecodeI18n(kernelHotspot(k).decode)"></span>
@@ -786,7 +786,7 @@
                                 </div>
                               </div>
                             </template>
-                            <!-- launch 栈:向外归因 —— 这个 kernel 从哪段 host 代码启动(闭源 GEMM ← nn.Linear)-->
+                            <!-- launch 栈：向外归因 —— 这个 kernel 从哪段 host 代码启动(闭源 GEMM ← nn.Linear)-->
                             <template x-if="launchFrames(kernelHotspot(k)).length">
                               <div style="margin-top: 9px; padding-top: 9px; border-top: 1px dashed var(--border);">
                                 <div style="font-size: 11px; color: var(--muted); margin-bottom: 5px;">
@@ -832,7 +832,7 @@
 
       <template x-if="kernels.enabled">
         <div>
-          <!-- 数据新鲜度:这批数据是哪一窗的、多久前采的 -->
+          <!-- 数据新鲜度：这批数据是哪一窗的、多久前采的 -->
           <div x-show="kernels.snapshot_age_s != null" class="kernel-freshness" :class="kernelFresh() ? 'live' : 'stale'">
             <template x-if="kernelFresh()">
               <span>🟢 <span x-text="t('kern.dataFreshness')"></span> · <span x-text="t('kern.aggregated', {w: fmt(kernels.rollup_window_s, 0), when: kernelAgeText()})"></span></span>
@@ -842,7 +842,7 @@
             </template>
           </div>
 
-          <!-- 诊断结论:把数字翻译成人话(诊断不止观测) -->
+          <!-- 诊断结论：把数字翻译成人话(诊断不止观测) -->
           <div x-show="kernels.findings && kernels.findings.length" style="margin-bottom: 18px;">
             <div style="font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 10px;" x-text="t('kern.findings')"></div>
             <div style="display: flex; flex-direction: column; gap: 9px;">
@@ -920,7 +920,7 @@
                   </template>
                 </div>
               </div>
-              <!-- 一行:导出 trace(左) + 实时/冻结/缩放控制(右)-->
+              <!-- 一行：导出 trace(左) + 实时/冻结/缩放控制(右)-->
               <div style="display: flex; align-items: center; gap: 10px; margin-top: 12px; padding: 9px 13px; background: var(--teal-soft); border: 1px solid color-mix(in srgb, var(--teal) 22%, transparent); border-radius: 8px; font-size: 11.5px; color: var(--text); flex-wrap: wrap;">
                 <button class="btn" @click="downloadTrace()" x-text="t('kern.exportTrace')"></button>
                 <span style="flex: 1; min-width: 180px; color: var(--muted);" x-text="t('kern.perfettoInst')"></span>
@@ -934,7 +934,7 @@
                 </span>
                 <span x-show="tlSelName" style="white-space: nowrap; color: var(--teal); font-weight: 600;" x-text="t('kern.selected', {name: tlSelName.slice(0,28)})"></span>
               </div>
-              <!-- 主时间线:左固定 stream 标签 + 右横向滚动条带(放大=内层变宽,平移=滚动)-->
+              <!-- 主时间线：左固定 stream 标签 + 右横向滚动条带(放大=内层变宽,平移=滚动)-->
               <div style="display: flex; gap: 8px; margin-top: 12px;">
                 <div style="flex: none; width: 60px; padding-top: 0;">
                   <template x-for="s in timelineView().streams" :key="s">
@@ -1066,8 +1066,8 @@
         <!-- 结果 -->
         <template x-if="deep.result && deep.result.available">
           <div style="margin-top: 14px;">
-            <!-- 注意:x-show 和内联 display:flex 不能放同一元素 —— Alpine 切回显示时把
-                 display 置空回退成 block,flex/gap 全丢(实测踩过:卡片黏死)。拆两层。 -->
+            <!-- 注意：x-show 和内联 display:flex 不能放同一元素 —— Alpine 切回显示时把
+                 display 置空回退成 block,flex/gap 全丢(实测踩过：卡片黏死)。拆两层。 -->
             <div x-show="deep.findings.length" style="margin-bottom: 20px;">
               <div style="display: flex; flex-direction: column; gap: 14px;">
                 <template x-for="(f, i) in deep.findings" :key="i">
@@ -1079,7 +1079,7 @@
               </div>
             </div>
 
-            <!-- #1 Warp 周期三态:发指令 / 就绪未选中(余量) / 真 stall -->
+            <!-- #1 Warp 周期三态：发指令 / 就绪未选中(余量) / 真 stall -->
             <template x-if="warpSplit()">
               <div style="margin-bottom: 18px;">
                 <div style="font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 8px;" x-text="t('kern.warpCycleDirection')"><span style="font-weight: 400; text-transform: none;" x-text="t('kern.allSamples', {n: fmt(deep.result.sample_total, 0)})"></span></div>
@@ -1128,7 +1128,7 @@
               </template>
             </div>
 
-            <!-- #3 测量方法卡:怎么测的 + 代价 -->
+            <!-- #3 测量方法卡：怎么测的 + 代价 -->
             <div style="margin-top: 18px; padding: 11px 14px; background: var(--surface-alt); border-radius: 8px; font-size: 11.5px; color: var(--muted); line-height: 1.7;">
               <strong style="color: var(--text); font-weight: 600;" x-text="t('kern.howMeasured')"></strong> <span x-text="t('kern.samplingPeriod', {period: Math.pow(2, deep.result.period_log2).toLocaleString(), log: deep.result.period_log2, w: fmt(deep.result.window_s, 0), samples: fmt(deep.result.sample_total, 0), getdata: fmt(deep.result.overhead.getdata_ms, 1), dropped: deep.result.overhead.dropped, hwfull: deep.result.overhead.hwfull})"></span>
             </div>
@@ -1145,7 +1145,7 @@
     <!-- ===== 规则 tab ===== -->
     <div x-show="tab === 'rules'" x-data="rulesTab()" x-init="init()">
 
-      <!-- 诊断 = 内置 4 瓶颈目录:每个瓶颈多条独立检测手段(跨测量层);命中即高亮(几条互证)-->
+      <!-- 诊断 = 内置 4 瓶颈目录：每个瓶颈多条独立检测手段(跨测量层);命中即高亮(几条互证)-->
       <div class="section-head" style="margin-top: 0;">
         <h2><span x-text="t('rules.builtinTitle')"></span><span class="count" x-text="`(${diagnoses.length}/${rules.length})`"></span></h2>
         <span class="hint" x-text="diagnoses.length > 0 ? (diagnosesStale ? t('rules.staleHint') : t('rules.hitHint', {n: diagnoses.length})) : t('rules.noneHint')"></span>
@@ -1186,7 +1186,7 @@
         </template>
       </div>
 
-      <!-- ===== 当前操作点:离三个瓶颈边界有多远(实测,瓶颈判据的原始证据)===== -->
+      <!-- ===== 当前操作点：离三个瓶颈边界有多远(实测,瓶颈判据的原始证据)===== -->
       <div class="section-head">
         <h2 x-text="t('rules.opTitle')"></h2>
         <span class="hint" x-text="t('rules.opHint')"></span>
@@ -1206,7 +1206,7 @@
           </div>
           <div class="gfoot" x-text="t('rules.roofC')"></div>
         </div>
-        <!-- 带宽屋顶:NVML HBM 控制器繁忙%(有界)→ B -->
+        <!-- 带宽屋顶：NVML HBM 控制器繁忙%(有界)→ B -->
         <div class="gauge">
           <div class="gauge-head">
             <span class="gl" x-text="t('rules.bwRoof')"></span>
@@ -1233,7 +1233,7 @@
           </div>
           <div class="gfoot" x-text="t('rules.roofD')"></div>
         </div>
-        <!-- 空载守卫:在跑请求 -->
+        <!-- 空载守卫：在跑请求 -->
         <div class="idleguard">
           <span x-text="t('rules.runningNow')"></span>
           <b x-text="kpis.running_reqs == null ? '—' : fmt(kpis.running_reqs, 1)"></b>
@@ -1242,7 +1242,7 @@
         </div>
       </div>
 
-      <!-- ===== 检测层图例:L1–L5 徽标含义 ===== -->
+      <!-- ===== 检测层图例：L1–L5 徽标含义 ===== -->
       <div class="section-head">
         <h2 x-text="t('rules.layersTitle')"></h2>
         <span class="hint" x-text="t('rules.layersHint')"></span>
@@ -1412,7 +1412,7 @@
         </div>
       </template>
 
-      <!-- 压测结果对比:任选两条 run(行内"对比"按钮),A=基准,Δ=B 相对 A -->
+      <!-- 压测结果对比：任选两条 run(行内"对比"按钮),A=基准,Δ=B 相对 A -->
       <template x-if="cmpRuns()">
         <div class="chart-card" style="margin-bottom: 14px;">
           <div class="head" style="margin-bottom: 10px;">
@@ -1423,7 +1423,7 @@
             <span><strong style="color: var(--indigo);" x-text="t('cleanup.aBaseline')"></strong> <span x-text="cmpRuns()[0].scenario_name"></span> · <code style="font-size: 11px;" x-text="cmpRuns()[0].run_id"></code> · <span style="color: var(--muted);" x-text="cmpScenario(cmpRuns()[0])"></span></span>
             <span><strong style="color: var(--teal);">B</strong> <span x-text="cmpRuns()[1].scenario_name"></span> · <code style="font-size: 11px;" x-text="cmpRuns()[1].run_id"></code> · <span style="color: var(--muted);" x-text="cmpScenario(cmpRuns()[1])"></span></span>
           </div>
-          <!-- 指标卡网格:每指标 A/B 双横条(按本指标 max 归一)+ Δ% 徽标 -->
+          <!-- 指标卡网格：每指标 A/B 双横条(按本指标 max 归一)+ Δ% 徽标 -->
           <div class="cmp-grid">
             <template x-for="row in cmpTable()" :key="row.label">
               <div class="cmp-block">
@@ -1539,15 +1539,15 @@
     <div x-show="tab === 'autopilot'" x-data="autopilotTab()" x-init="init()">
       <div class="ap-wrap">
         <div class="preview-note">
-          <span x-show="hasBridge()">真实模式:Autopilot 会在 runw host 侧停主 serve 腾卡 → 起候选 vLLM 沙盒 → 跑 bench → kept/reverted → 恢复主 serve。若 host bridge 未连接,开始按钮会报错而不是偷偷跑模拟。</span>
-          <span x-show="!hasBridge()">本地/dev 模式:当前没有 host bridge,开始后走 SimSandbox 验证闭环;在 runw dashboard 地址访问时才会启动真实 DockerSandbox 调优。</span>
+          <span x-show="hasBridge()">真实模式：Autopilot 会在 runw host 侧停主 serve 腾卡 → 起候选 vLLM 沙盒 → 跑 bench → kept/reverted → 恢复主 serve。若 host bridge 未连接,开始按钮会报错而不是偷偷跑模拟。</span>
+          <span x-show="!hasBridge()">本地/dev 模式：当前没有 host bridge,开始后走 SimSandbox 验证闭环;在 runw dashboard 地址访问时才会启动真实 DockerSandbox 调优。</span>
         </div>
 
-        <!-- 调优期间主 serve(含本页)会下线:直播由 host 侧 bridge 直连,刷新本页会打不开 -->
+        <!-- 调优期间主 serve(含本页)会下线：直播由 host 侧 bridge 直连,刷新本页会打不开 -->
         <div class="preview-note" x-show="running && hasBridge()"
              style="border-color:#fcd34d;background:#fffbeb;color:#92400e">
-          调优进行中:主 serve 已让位给候选沙盒,<b>本页(:8765)此刻打不开新标签,请勿刷新</b>。
-          本页直播直连 host bridge,不受影响;备用直播页:
+          调优进行中：主 serve 已让位给候选沙盒,<b>本页(:8765)此刻打不开新标签,请勿刷新</b>。
+          本页直播直连 host bridge,不受影响;备用直播页：
           <a :href="apiUrl('/')" target="_blank" style="color:#92400e;text-decoration:underline" x-text="apiUrl('/')"></a>。
           调优结束或点「停止」后主 serve 与本页自动恢复。
         </div>
@@ -1599,7 +1599,7 @@
             <span class="dl q">quantization（会降精度,不提供）</span>
             <span class="dl q">kv-cache-dtype（会降精度,不提供）</span>
           </div>
-          <div class="ap-agent-note" style="margin-top:0">这 ~250 个里大半 vLLM 启动时已自调到最优（KV block 数 / attention backend / 兼容门）；agent 实际只动 <b style="color:var(--coral-strong)">max-num-seqs / max-num-batched-tokens / gpu-util / performance_mode</b> 这一小撮 + 诊断点名的对症旋钮。安全不靠黑名单,靠 launch-catch + 一次性容器兜底 + 降精度旋钮永不提供。</div>
+          <div class="ap-agent-note" style="margin-top:0">这 ~250 个里大半 vLLM 启动时已自调到最优（KV block 数 / attention backend / 兼容门）；agent 实际只动 <b style="color:var(--coral-strong)">max-num-seqs / max-num-batched-tokens / gpu-util / performance_mode</b> 这一小撮 + 诊断点名的对症参数。安全不靠黑名单,靠 launch-catch + 一次性容器兜底 + 降精度参数永不提供。</div>
         </div>
 
         <div style="flex-basis:100%">
@@ -1610,7 +1610,7 @@
     </div>
   </div>
 
-  <!-- 形态条:形态是唯一主维度——自带 bench 负载 + 默认 SLA(同 Live tab 业务形态一套词汇);
+  <!-- 形态条：形态是唯一主维度——自带 bench 负载 + 默认 SLA(同 Live tab 业务形态一套词汇);
        调优目标固定为"不破 SLA 前提下最大化吞吐"(业界惯例),不再单独选 -->
   <div class="ap-bar">
     <div class="ap-goal">
@@ -1626,7 +1626,7 @@
       <span style="font-size:11.5px;color:var(--muted-2);" x-text="workloadHint()" title="形态自带 bench 负载参数与默认 SLA;SLA 仍可手改"></span>
       <span>SLA · TTFT p99 ≤ <input type="number" x-model="obj.ttft"> ms · TPOT p99 ≤ <input type="number" x-model="obj.tpot"> ms · E2E p99 ≤ <input type="number" x-model="obj.e2e" placeholder="可选" style="width:80px"> ms</span>
       <span>最多 <input type="number" x-model="budget.rounds"> 轮 / <input type="number" x-model="budget.minutes"> min</span>
-      <span style="font-size:11.5px;color:var(--muted-2);" title="轮数和分钟都是上限,不是目标">轮数是上限:多数 session 3-5 轮诚实收敛,提前停属正常</span>
+      <span style="font-size:11.5px;color:var(--muted-2);" title="轮数和分钟都是上限,不是目标">轮数是上限：多数 session 3-5 轮诚实收敛,提前停属正常</span>
     </div>
     <button class="ap-start" @click="start()" :disabled="running">
       <svg x-show="!running" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
@@ -1644,7 +1644,7 @@
     <div class="ap-loop">
       <div class="st"><span class="n">1</span><b>observe</b><span>读诊断</span></div>
       <span class="arr">→</span>
-      <div class="st"><span class="n">2</span><b>hypothesize</b><span>挂诊断选旋钮</span></div>
+      <div class="st"><span class="n">2</span><b>hypothesize</b><span>挂诊断选参数</span></div>
       <span class="arr">→</span>
       <div class="st"><span class="n">3</span><b>act</b><span>沙盒重启</span></div>
       <span class="arr">→</span>
@@ -1652,7 +1652,7 @@
       <span class="arr">→</span>
       <div class="st"><span class="n">5</span><b>decide</b><span>留下/回滚</span></div>
     </div>
-    <p>点开始后，Autopilot 会启动一个调优 session。Agent 在候选集中选一个 vLLM 旋钮,沙盒重启后跑同一套 bench,只有实测更好才保留,破 SLA 或收益不足就回滚。真实 runw 模式需要先配置 LLM agent;生产上线仍走人工确认上线包。</p>
+    <p>点开始后，Autopilot 会启动一个调优 session。Agent 在候选集中选一个 vLLM 参数,沙盒重启后跑同一套 bench,只有实测更好才保留,破 SLA 或收益不足就回滚。真实 runw 模式需要先配置 LLM agent;生产上线仍走人工确认上线包。</p>
     <div class="moat"><b>👁 眼睛</b>(深度诊断) + <b>✋ 手</b>(压测+serve控制) + <b>📊 记分牌</b>(基线/Δ) 同进程</div>
   </div>
 
@@ -1671,10 +1671,10 @@
         <span class="best">当前最优 <b><span x-text="fmt(best.tps)"></span> tok/s</b></span>
       </div>
 
-      <!-- LLM 兜底警示:用户以为在看 LLM 调优,实际某些轮是确定性启发式 -->
+      <!-- LLM 兜底警示：用户以为在看 LLM 调优,实际某些轮是确定性启发式 -->
       <div class="preview-note" x-show="fallbackCount > 0"
            style="border-color:#fcd34d;background:#fffbeb;color:#92400e">
-        ⚠ 本次有 <b x-text="fallbackCount"></b> 轮 LLM 调用失败,由确定性启发式兜底选择旋钮
+        ⚠ 本次有 <b x-text="fallbackCount"></b> 轮 LLM 调用失败,由确定性启发式兜底选择参数
         —— 检查 agent 配置 / 额度 / 网络(点开对应轮的「Agent 推理」看具体错误;带
         <span style="border:1px solid #fcd34d;border-radius:999px;padding:0 6px;font-size:11px">⚠ 兜底</span>
         标记的轮不是 LLM 决策)。
@@ -1689,6 +1689,7 @@
               <div class="ap-rbody">
                 <template x-if="r.diag"><div class="ap-rdiag"><b>诊断</b><span x-text="r.diag"></span></div></template>
                 <template x-if="r.hyp"><div class="ap-rhyp"><b>假设</b><span x-text="r.hyp"></span><span class="ap-changed" x-show="r.changed" x-text="r.changed"></span></div></template>
+                <template x-if="r.thinkingPreview"><div class="ap-rthink"><b>思考</b><span x-text="r.thinkingPreview + (r.thinking.length > r.thinkingPreview.length ? '…' : '')"></span></div></template>
                 <template x-if="r.cmd"><div class="ap-rcmd"><span class="pfx">$</span> <span x-text="r.cmd"></span></div></template>
               </div>
               <div class="ap-rtput">
@@ -1737,7 +1738,7 @@
               <span class="ap-changed" x-show="pending && pending.action" x-text="pending ? pending.action : ''"></span>
             </div>
             <div class="ap-rrun"><span class="sp"></span><span x-text="pending && pending.progress ? pending.progress : '状态心跳中，未改线上 serve'"></span><small x-text="pending && pending.age ? pending.age : ''"></small></div>
-            <!-- 本轮 Agent 推理:常驻(不随心跳滚动被挤走)——从全量事件里取,不受 5 条窗口限制 -->
+            <!-- 本轮 Agent 推理：常驻(不随心跳滚动被挤走)——从全量事件里取,不受 5 条窗口限制 -->
             <div class="ap-reasoning" x-show="pending && pending.reasoning" style="margin:8px 0;padding:10px 12px;background:var(--surface-2,#f8f8fb);border-radius:8px;border-left:3px solid var(--coral,#e8604c)">
               <div style="font-size:11px;font-weight:800;color:var(--muted);margin-bottom:4px">本轮 Agent 推理</div>
               <div x-show="pending.reasoning.knobLine" style="font-size:12.5px;font-weight:700;margin-bottom:3px" x-text="pending.reasoning.knobLine"></div>
@@ -1768,8 +1769,30 @@
             📋 上次调优结果<span x-show="session.started_ts"> · <span x-text="session.started_ts"></span></span>（非本次刚跑完，页面重新打开后自动带出）
           </div>
           <div class="hl">吞吐 <b><span x-text="fmt(baselineTps)"></span> → <span x-text="fmt(best.tps)"></span> tok/s（×<span x-text="(best.tps/baselineTps).toFixed(2)"></span>）</b></div>
-          <div class="summary" :class="{warn: !resultSummary.improved}" x-text="resultSummaryText"></div>
-          <div class="summary" x-show="actionSpaceSummaryText" x-text="actionSpaceSummaryText"></div>
+          <div class="summary" :class="{warn: !resultSummary.improved}">
+            <b class="summary-label">结果</b><span x-text="resultSummaryText"></span>
+          </div>
+          <div class="summary" x-show="sessionNarrativeText">
+            <b class="summary-label">为什么</b><span x-text="sessionNarrativeText"></span>
+          </div>
+          <div class="ap-ledger" x-show="knobLedger.length">
+            <b class="summary-label">逐轮账本</b>
+            <template x-for="row in knobLedger" :key="row.round">
+              <div class="ap-ledger-row">
+                <div class="ap-ledger-head">
+                  <span class="ap-ledger-round">R<span x-text="row.round"></span></span>
+                  <span class="ap-ledger-param" x-text="row.param"></span>
+                  <span class="ap-ledger-change"><span x-text="row.fromText"></span> → <span x-text="row.toText"></span></span>
+                  <span class="ap-verdict" :class="row.verdictClass" x-text="row.verdictText"></span>
+                  <span class="ap-ledger-delta" x-text="row.deltaText"></span>
+                </div>
+                <div class="ap-ledger-why" x-show="row.whyText" x-text="row.whyText"></div>
+              </div>
+            </template>
+          </div>
+          <div class="summary" x-show="actionSpaceSummaryText">
+            <b class="summary-label">候选池</b><span x-text="actionSpaceSummaryText"></span>
+          </div>
           <div class="ap-cmd"><span class="pfx">$</span> <span x-text="best.cmd"></span> <span class="copy" @click="copyCmd($event)">复制</span></div>
           <div class="honest">「×3」只在「现实但没调过」的默认基线上成立 —— 那正是大量真实部署的现状。已调过的基线则是诚实的边际收益（+5~15%），Agent 会如实报「已近最优」。</div>
           <div class="actions">

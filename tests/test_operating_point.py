@@ -1,9 +1,9 @@
-"""解析操作点单测:decode→访存受限/MFU 低,prefill→计算受限,数据不足→全 None。"""
+"""解析操作点单测：decode→访存受限/MFU 低,prefill→计算受限,数据不足→全 None。"""
 from __future__ import annotations
 
 from pping_lang.rules.operating_point import compute_operating_point
 
-# 一台小卡:0.5B 参数, bf16(2B), peak 95 TFLOPS / 0.448 TB/s → ridge ≈ 212 FLOPs/Byte
+# 一台小卡：0.5B 参数, bf16(2B), peak 95 TFLOPS / 0.448 TB/s → ridge ≈ 212 FLOPs/Byte
 PARAMS = 0.5e9
 DTYPE = 2
 PEAK_C = 95.0
@@ -61,8 +61,8 @@ def test_analytical_gives_no_mbu():
 
 
 def test_measured_path_preferred_and_includes_kv():
-    """perf_points 在时走实测:AI=flops/(read+write)(含 KV),给 MBU,source=measured。"""
-    # decode 步:flops 小、字节里 KV 读主导 → 真 AI 低(memory_bound)
+    """perf_points 在时走实测：AI=flops/(read+write)(含 KV),给 MBU,source=measured。"""
+    # decode 步：flops 小、字节里 KV 读主导 → 真 AI 低(memory_bound)
     # (flops, read_b, write_b, ts):AI = 1e9/(1e10) = 0.1
     perf = [(1e9, 1e10, 1e8, 10**9 + i * MS) for i in range(4)]
     # token 解析路若单独跑会给 AI=1.0;实测应覆盖成 0.1

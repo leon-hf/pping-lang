@@ -1,16 +1,16 @@
 """Append-only JSONL 持久化 —— 替代进程内 DuckDB 做指标/诊断落盘。
 
-为什么:插件进程内塞嵌入式分析库 + 每秒批量 INSERT,在指标洪流下和 serving 抢
-GIL/IO。改成**顺序追加 JSONL**:无查询引擎、无事务、无索引,写入近乎零争用。
+为什么：插件进程内塞嵌入式分析库 + 每秒批量 INSERT,在指标洪流下和 serving 抢
+GIL/IO。改成**顺序追加 JSONL**：无查询引擎、无事务、无索引,写入近乎零争用。
 长窗回放时按需**扫文件过滤**(不频繁,可接受全扫)。
 
 **保留 = 时间为主、磁盘兜底**:N 卷滚动,当前卷满 `volume_seconds`(时间)**或**撑爆
 `max_bytes`(大小)任一即轮转,只留最近 `keep_volumes` 卷。正常负载下拿到约
 `volume_seconds × keep_volumes` 的时间窗口;指标洪流下 `max_bytes` 提前触发轮转 →
 **时间窗口自动缩水但磁盘有界**(上界 ≈ keep_volumes × max_bytes),绝不写爆 GPU 机盘
-(和 sink 背压降采样同哲学:有界 + 代表性,不无界增长)。读取按时间序扫全部存活卷。
+(和 sink 背压降采样同哲学：有界 + 代表性,不无界增长)。读取按时间序扫全部存活卷。
 
-为什么不能纯时间:append-only 文件没法廉价地从头删旧行;而 sidecar 与 serving 同机,
+为什么不能纯时间：append-only 文件没法廉价地从头删旧行;而 sidecar 与 serving 同机,
 磁盘安全必须优先。故时间是默认意图、磁盘是硬上界,二者冲突时磁盘赢。
 """
 from __future__ import annotations
@@ -25,7 +25,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# 默认:保留 ~2h,切成 8 卷(每卷 15min);每卷大小兜底 32MB → 磁盘上界 ~256MB。
+# 默认：保留 ~2h,切成 8 卷(每卷 15min);每卷大小兜底 32MB → 磁盘上界 ~256MB。
 DEFAULT_RETENTION_S = 2 * 3600
 DEFAULT_VOLUMES = 8
 DEFAULT_VOLUME_SECONDS = DEFAULT_RETENTION_S / DEFAULT_VOLUMES  # 900s
@@ -47,7 +47,7 @@ def diag_path(store_dir: str | Path) -> Path:
 class AppendLog:
     """JSONL 追加日志,N 卷按「时间或大小先到者」轮转。写入加锁(单 flush 线程)。
 
-    卷文件:当前卷 = `path`,轮转后依次 `path.1`(最新轮转)… `path.{keep-1}`(最旧)。
+    卷文件：当前卷 = `path`,轮转后依次 `path.1`(最新轮转)… `path.{keep-1}`(最旧)。
     `volume_seconds` 用注入的 `clock`(默认 monotonic)量当前卷年龄,与记录 ts 解耦。
     """
 
@@ -187,7 +187,7 @@ class JsonlStore:
         keep_volumes: int = DEFAULT_VOLUMES,
     ) -> None:
         self._instance_id = instance_id
-        # 只读用途:复用 AppendLog.read() 的多卷时序扫描;keep_volumes 决定扫几卷。
+        # 只读用途：复用 AppendLog.read() 的多卷时序扫描;keep_volumes 决定扫几卷。
         self._mlog = AppendLog(metrics_path(store_dir), keep_volumes=keep_volumes)
         self._dlog = AppendLog(diag_path(store_dir), keep_volumes=keep_volumes)
 

@@ -2,13 +2,13 @@
 
 设计要点(§4.1–4.6):
 - **全量面 introspect + 个位数有效动作**:vLLM 0.21 ~258 flag,大半是引擎已自调好的背景
-  (§4.2 a 类),真·可调杠杆 ≈ 个位数(b 类)。本模块 curate 高杠杆旋钮 + 手工 4 标签,
+  (§4.2 a 类),真·可调杠杆 ≈ 个位数(b 类)。本模块 curate 高杠杆参数 + 手工 4 标签,
   `introspect_defaults()` 在 vllm 可导入时读当前生效默认值(`default_0_21`),否则用静态值。
-- **4 标签**(§4.4):`lever` / `helps`·`hurts`(同旋钮换 regime 从解药变毒药)/ `default_on`
-  (分类一:默认已开,提议前跳过,§4.4)/ `output_impact`(T1=none / T2=equivalence / T3=correctness)。
+- **4 标签**(§4.4):`lever` / `helps`·`hurts`(同参数换 regime 从解药变毒药)/ `default_on`
+  (分类一：默认已开,提议前跳过,§4.4)/ `output_impact`(T1=none / T2=equivalence / T3=correctness)。
 - **诊断→动作 = 标签交集 + D 余量守卫 + 约束图可行性 + 跳过已到位**(§4.4 / §4.5)。
 
-注:vllm flag 名用连字符(--max-num-seqs);config dict 的 key 用下划线(max_num_seqs)。
+注：vllm flag 名用连字符(--max-num-seqs);config dict 的 key 用下划线(max_num_seqs)。
 """
 from __future__ import annotations
 
@@ -17,12 +17,12 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-# 瓶颈字母与诊断引擎一致:A 喂不饱 / B 带宽瓶颈 / C 算力瓶颈 / D 容量瓶颈(§4.3)
+# 瓶颈字母与诊断引擎一致：A 喂不饱 / B 带宽瓶颈 / C 算力瓶颈 / D 容量瓶颈(§4.3)
 REGIMES = ("A", "B", "C", "D")
 
 # 裸字母(如事件消息/evidence_refs 里的 "B"、"B:live")没有上下文,用户看不出是什么——
 # 统一换成人话(如"带宽瓶颈"),字母本身不再出现在任何用户可见文本里
-# (2026-07-21 用户反馈:连"(B)"这种带字母的括注都别留,谁都看不出字母指代什么)。
+# (2026-07-21 用户反馈：连"(B)"这种带字母的括注都别留,谁都看不出字母指代什么)。
 BOTTLENECK_LABEL: dict[str, str] = {"A": "双低", "B": "带宽瓶颈", "C": "算力瓶颈", "D": "容量瓶颈"}
 
 
@@ -41,23 +41,23 @@ class Knob:
     primary_slo: str                # "ttft" | "tpot" | "throughput"(排序提示,非硬筛)
     output_impact: str = "none"     # none(T1) / equivalence(T2) / correctness(T3)
     default: object = None          # default_0_21;introspect 当前生效值,否则静态
-    default_on: bool = False        # 分类(一):默认已开,提议时跳过(除非诊断显式点名)
+    default_on: bool = False        # 分类(一)：默认已开,提议时跳过(除非诊断显式点名)
     lo: float = 0.0
     hi: float = 0.0
     choices: tuple = ()             # kind="choice" 的取值序(从弱到强,helpful 在尾)
     big_batch: bool = False         # 推大-batch 类 → 选前先查 D 余量(§4.4 守卫)
-    needs: tuple[str, ...] = ()     # 约束图前置:这些 flag 必须为真才可行(§4.5)
-    conflicts: tuple[str, ...] = ()  # 约束图冲突:与这些同开则不可行(§4.5)
+    needs: tuple[str, ...] = ()     # 约束图前置：这些 flag 必须为真才可行(§4.5)
+    conflicts: tuple[str, ...] = ()  # 约束图冲突：与这些同开则不可行(§4.5)
     unsupported: bool = False       # 当前钉定的 vLLM 版本硬拒非默认值 → 永不提议(烧轮)
 
 
 # === 半自动 introspect + 白名单标签表(§4.4 / §4.6)===
 #
-# 设计:人工维护「哪些 flag 是性能杠杆 + 方向标签(helps/hurts/lever)」这张白名单;
+# 设计：人工维护「哪些 flag 是性能杠杆 + 方向标签(helps/hurts/lever)」这张白名单;
 # 默认值从本地 vLLM 源码的 EngineArgs 自动读取。这样既避免把 258 个背景参数全丢给 agent,
 # 又能随 vLLM 版本更新自动校准默认值,不用每次手工改 static default。
 #
-# 读取路径优先级:
+# 读取路径优先级：
 #   1. 环境变量 PPING_VLLM_SOURCE 指向的 vLLM 源码根目录
 #   2. 固定候选 D:\GitCode\vllm
 #   3. 读不到/解析失败 → 使用白名单里的 static_default
@@ -163,7 +163,7 @@ def _introspect_engine_args(vllm_root: str | None = None) -> dict:
     return defaults
 
 
-# 白名单标签表:性能杠杆参数的元数据。
+# 白名单标签表：性能杠杆参数的元数据。
 # static_default 是 vLLM 0.21 典型值,作为源码 introspect 失败时的 fallback。
 _KNOB_REGISTRY: tuple[dict, ...] = (
     # 分类(一)——默认已开,通常别动(§4.4)
@@ -209,11 +209,11 @@ _KNOB_REGISTRY: tuple[dict, ...] = (
      "kind": "int", "lever": "腾容量(权重→CPU)", "helps": ("D",),
      "primary_slo": "tpot", "static_default": 0, "lo": 0, "hi": 128},
     {"key": "performance_mode", "flag": "--performance-mode",
-     "kind": "choice", "lever": "元旋钮(batch+cudagraph策略)", "helps": ("A", "B"),
+     "kind": "choice", "lever": "元参数(batch+cudagraph策略)", "helps": ("A", "B"),
      "hurts": ("D",), "primary_slo": "throughput", "static_default": "balanced",
      "choices": ("interactivity", "balanced", "throughput")},
     # 调度与开销类(不依赖 load_binding)
-    # 2026-07-16 dogfood 真机复现:`vllm serve --help` 里根本没有这两个 flag,提了必
+    # 2026-07-16 dogfood 真机复现：`vllm serve --help` 里根本没有这两个 flag,提了必
     # `unrecognized arguments`(V1 引擎砍掉了 multi-step 调度,§这两个是 V0 遗留)——
     # 每次被选中都是白烧一轮(候选启动崩溃→回滚),标 unsupported 让它们永不被提议。
     {"key": "num_scheduler_steps", "flag": "--num-scheduler-steps",
@@ -231,7 +231,7 @@ _KNOB_REGISTRY: tuple[dict, ...] = (
      "kind": "float", "lever": "调度等待系数", "helps": ("A",),
      "primary_slo": "throughput", "static_default": 0.0, "lo": 0.0, "hi": 2.0,
      "unsupported": True},
-    # max_seq_len_to_capture 在当前 vLLM build 同样不存在:2026-07-19 7B session
+    # max_seq_len_to_capture 在当前 vLLM build 同样不存在：2026-07-19 7B session
     # ap-20260719-153115 R4 候选打印 usage 退出(LaunchError),`vllm serve --help`
     # 实测无此 flag——白烧一轮,标 unsupported。
     {"key": "max_seq_len_to_capture", "flag": "--max-seq-len-to-capture",
@@ -304,9 +304,9 @@ _BY_KEY = {k.key: k for k in KNOBS}
 
 
 def action_space_stats() -> dict:
-    """全量旋钮面按分类计数(§4.2)——给 session 收尾"为什么只调这些参数"的总结用。
-    用户反馈(2026-07-22):每次 session 就调 2-3 个参数,看不出剩下的 ~250 个 vLLM 参数
-    是"不该调"还是"没顾上调"。三类跳过原因:default_on=vLLM 启动已自调最优,不用碰;
+    """全量参数面按分类计数(§4.2)——给 session 收尾"为什么只调这些参数"的总结用。
+    用户反馈(2026-07-22)：每次 session 就调 2-3 个参数,看不出剩下的 ~250 个 vLLM 参数
+    是"不该调"还是"没顾上调"。三类跳过原因：default_on=vLLM 启动已自调最优,不用碰;
     unsupported=当前 vLLM build 没这个 flag,提了必 LaunchError;precision=会降精度,
     按产品策略不提供。剩下的才是真正可能被提议的候选池。"""
     default_on = sum(1 for k in KNOBS if k.default_on)
@@ -325,21 +325,21 @@ def action_space_stats() -> dict:
 
 
 def knobs_helping(bn: str) -> list[str]:
-    """候选池(非 default_on/unsupported/precision)里对症给定瓶颈字母的旋钮 key——
-    含 B↔D 共生并集(§4.3,同 propose_candidates 的耦合逻辑),否则耦合旋钮(如
-    cpu_offload_gb/num_gpu_blocks_override)会被试过却不在"相关旋钮"里,总结自相矛盾。"""
+    """候选池(非 default_on/unsupported/precision)里对症给定瓶颈字母的参数 key——
+    含 B↔D 共生并集(§4.3,同 propose_candidates 的耦合逻辑),否则耦合参数(如
+    cpu_offload_gb/num_gpu_blocks_override)会被试过却不在"相关参数"里,总结自相矛盾。"""
     bns = {bn} | set(_COUPLED_REGIMES.get(bn, ()))
     return sorted(k.key for k in KNOBS
                   if not k.default_on and not k.unsupported
                   and k.output_impact == "none" and bns & set(k.helps))
 
 
-# === introspect:读 vLLM 源码 EngineArgs 默认值,填 default_0_21(§4.6.1)===
+# === introspect：读 vLLM 源码 EngineArgs 默认值,填 default_0_21(§4.6.1)===
 
 def introspect_defaults(vllm_root: str | None = None) -> dict:
     """读 vLLM 源码 EngineArgs 默认值(不导入 vllm,避免 torch 依赖)。
 
-    M0 价值:让 propose 跳过"已到位/默认已开"的旋钮,不烧空轮。
+    M0 价值：让 propose 跳过"已到位/默认已开"的参数,不烧空轮。
     如果提供了 vllm_root,优先从该路径解析;否则用模块初始化时的结果。
     """
     defaults = _introspect_engine_args(vllm_root) if vllm_root else _EA_DEFAULTS
@@ -361,10 +361,10 @@ def param_surface_size() -> int:
         return 258
 
 
-# === 取值步进:朝"利于当前 regime"的方向走一档 ===
+# === 取值步进：朝"利于当前 regime"的方向走一档 ===
 
 def _step(k: Knob, cur, regime: str):
-    """返回该旋钮在 regime 下的下一档值;到边界/无意义 → None。"""
+    """返回该参数在 regime 下的下一档值;到边界/无意义 → None。"""
     if k.kind == "choice":
         seq = list(k.choices)
         # D regime 下 performance_mode 反向(throughput 伤 D → 往 interactivity 退)
@@ -377,7 +377,7 @@ def _step(k: Knob, cur, regime: str):
     cur = float(cur if cur not in (None, 0) else k.default or k.lo)
     if k.kind == "int":
         # D:max_num_seqs / max_model_len 往下(腾容量);其余往上(提并发/加预算)。
-        # cur=0 时翻倍还是 0(cpu_offload_gb 这类 0 起点旋钮永远提不出来)——首档给最小非零步。
+        # cur=0 时翻倍还是 0(cpu_offload_gb 这类 0 起点参数永远提不出来)——首档给最小非零步。
         down = regime == "D" and k.key in ("max_num_seqs", "max_model_len")
         nxt = max(k.lo, cur // 2) if down else min(k.hi, max(cur * 2, k.lo, 1))
         nxt = int(round(nxt))
@@ -395,7 +395,7 @@ def _lever_for(k: Knob, regime: str, cur, nxt) -> str:
     return k.lever
 
 
-# === 约束图可行性(§4.5):剪掉硬冲突/缺前置的候选 ===
+# === 约束图可行性(§4.5)：剪掉硬冲突/缺前置的候选 ===
 
 def _feasible(k: Knob, config: dict) -> bool:
     for need in k.needs:                       # 前置 flag 必须为真
@@ -417,16 +417,16 @@ def propose_candidates(bottleneck: str | None, config: dict, *,
                        couple_regimes: bool = True) -> list[dict]:
     """诊断→动作交集 + D 余量守卫 + 约束图 + 跳过已到位(§4.4)。
 
-    交集:`helps ∋ regime ∧ hurts ∌ regime ∧ 值未到位 ∧ 非默认已开 ∧ 约束可行`。
-    D 余量守卫:推大-batch 类(`big_batch`)只在 KV 余量足时给(`kv_headroom > 0.15`),
+    交集：`helps ∋ regime ∧ hurts ∌ regime ∧ 值未到位 ∧ 非默认已开 ∧ 约束可行`。
+    D 余量守卫：推大-batch 类(`big_batch`)只在 KV 余量足时给(`kv_headroom > 0.15`),
     否则先治 D。质量门关时(默认)只给 T1(output_impact=none)。
     准入闸绑定守卫(load_binding):bench 窗口实测 running 峰值远低于 max_num_seqs 且
     waiting=0 时(False),准入闸没绑定——瓶颈在提供的负载,提 max_num_seqs 是空转
-    (真实教训:并发 8 的压测下 32→64 恒 tie)。None=无实测证据,保持旧行为。
-    B↔D 共生并集(§4.3,couple_regimes 开):诊断 B 时把 D 缓解类旋钮并进来——
+    (真实教训：并发 8 的压测下 32→64 恒 tie)。None=无实测证据,保持旧行为。
+    B↔D 共生并集(§4.3,couple_regimes 开)：诊断 B 时把 D 缓解类参数并进来——
     治 B 要推大 batch,推大 batch 要 KV 空间,真实 decode 负载常同时压在两档上;
     方向按 D 语义(如 max_model_len↓),D 余量守卫对并集候选同样硬约束。
-    排序:按「主影响 SLO」让对症旋钮靠前(仅排序,不硬筛);并集候选排在主 regime 之后。
+    排序：按「主影响 SLO」让对症参数靠前(仅排序,不硬筛);并集候选排在主 regime 之后。
     """
     bn = bottleneck or "A"             # 无诊断 → 按"喂不饱(双低)"探索
     cands = _regime_candidates(bn, config, kv_headroom=kv_headroom,
@@ -440,13 +440,13 @@ def propose_candidates(bottleneck: str | None, config: dict, *,
                 if all(c["knob"] != p["knob"] for p in cands):   # 主 regime 版优先
                     c["secondary_regime"] = extra
                     secondary.append(c)
-    # 排序:对症 SLO 在前(throughput 类对 A/B,ttft 类对 prefill,tpot 类对 decode)
+    # 排序：对症 SLO 在前(throughput 类对 A/B,ttft 类对 prefill,tpot 类对 decode)
     pri = {"A": "throughput", "B": "tpot", "C": "ttft", "D": "throughput"}.get(bn, "throughput")
     cands.sort(key=lambda c: 0 if c["primary_slo"] == pri else 1)
     return cands + secondary
 
 
-# B↔D 共生(§4.3):诊断命中主 regime 时,并入耦合 regime 的缓解类旋钮。
+# B↔D 共生(§4.3)：诊断命中主 regime 时,并入耦合 regime 的缓解类参数。
 _COUPLED_REGIMES: dict[str, tuple[str, ...]] = {"B": ("D",)}
 
 
@@ -460,19 +460,19 @@ def _regime_candidates(bn: str, config: dict, *, kv_headroom: float,
         if k.default_on:               # 分类(一)默认已开,跳过(除非诊断显式点名,M0 不点)
             continue
         if k.output_impact != "none" and not quality_gate:
-            continue                   # 质量门关:只 T1
+            continue                   # 质量门关：只 T1
         helps = bn in k.helps
-        d_relief = bn == "D" and k.key in ("max_num_seqs", "max_model_len")  # D:降并发/降len 缓解
+        d_relief = bn == "D" and k.key in ("max_num_seqs", "max_model_len")  # D：降并发/降len 缓解
         if not (helps or d_relief):
             continue
         if bn in k.hurts and not d_relief:
             continue                   # 会恶化当前瓶颈的不选
         if k.big_batch and kv_headroom <= 0.15:
-            continue                   # D 余量守卫:KV 快满,先治 D 再推大 batch
+            continue                   # D 余量守卫：KV 快满,先治 D 再推大 batch
         if k.key == "max_num_seqs" and load_binding is False and bn in ("A", "B"):
-            continue                   # 准入闸没绑定:提并发上限治不了"负载喂不进来"
+            continue                   # 准入闸没绑定：提并发上限治不了"负载喂不进来"
         if not _feasible(k, config):
-            continue                   # 约束图:缺前置/硬冲突
+            continue                   # 约束图：缺前置/硬冲突
         cur = config.get(k.key, k.default if k.default is not None else k.lo)
         nxt = _step(k, cur, bn)
         if nxt is None:                # 已到位 / 到边界
@@ -491,9 +491,9 @@ def _regime_candidates(bn: str, config: dict, *, kv_headroom: float,
 
 
 def _render_special(key: str, value) -> list[str] | None:
-    """个别旋钮不是「--flag 值」的朴素形状,按 vLLM 0.21 真实 CLI 形态渲染(§4.5):
+    """个别参数不是「--flag 值」的朴素形状,按 vLLM 0.21 真实 CLI 形态渲染(§4.5):
     - speculative:`--speculative-config` 收 JSON dict,裸字符串起不来;
-    - cudagraph_mode:是 CompilationConfig 字段,顶层没有 --cudagraph-mode flag,
+    - cudagraph_mode：是 CompilationConfig 字段,顶层没有 --cudagraph-mode flag,
       走 `--compilation-config` JSON(`config/compilation.py:53-103`)。
     返回 None = 走通用渲染。"""
     import json as _json
@@ -508,7 +508,7 @@ def _render_special(key: str, value) -> list[str] | None:
     return None
 
 
-# 这些旋钮的 0 表示"禁用/不覆盖",传 0 和不传等效,某些 flag 传 0 还会让 vLLM 报错
+# 这些参数的 0 表示"禁用/不覆盖",传 0 和不传等效,某些 flag 传 0 还会让 vLLM 报错
 _ZERO_DISABLED_KEYS = {
     "num_gpu_blocks_override", "num_lookahead_slots", "ngram_prompt_lookup_max",
     "long_prefill_token_threshold", "cpu_offload_gb",

@@ -152,7 +152,7 @@ def test_aggregator_kernel_table_raw_names():
     # 总 kernel = 120us;flash = 80us → 66.67%
     assert abs(by_name["flash_fwd_kernel"]["pct"] - (80.0 / 120.0 * 100)) < 1e-6
     assert by_name["rms_norm_kernel"]["in_graph_pct"] == 100.0
-    # 降序:flash 占比最大排第一
+    # 降序：flash 占比最大排第一
     assert table[0]["name"] == "flash_fwd_kernel"
 
 
@@ -211,10 +211,10 @@ def test_collector_rolls_up_on_interval():
     try:
         coll.start()
         assert coll.enabled
-        # 第一批:设定 last_rollup 基线,不 push
+        # 第一批：设定 last_rollup 基线,不 push
         src.emit([_kernel("flash_fwd_kernel", 40.0)])
         clock.advance_s(1.0)
-        # 第二批:已过 interval → roll-up
+        # 第二批：已过 interval → roll-up
         src.emit([_kernel("flash_fwd_kernel", 60.0)])
     finally:
         coll.stop()
@@ -299,7 +299,7 @@ def test_collector_skips_empty_window():
 
 
 def test_flamegraph_aggregator_builds_tree():
-    """火焰图:(Python 栈 + kernel) → 时间 累成前缀树。"""
+    """火焰图：(Python 栈 + kernel) → 时间 累成前缀树。"""
     fg = FlamegraphAggregator()
     fg.add([
         KernelEvent("kernel", "flash_fwd", 0, 40000, 0, ("step", "forward", "attn")),
@@ -351,7 +351,7 @@ def test_collector_exposes_flamegraph():
 
 
 def test_cupti_source_graph_kernels_share_stack():
-    """回归:一次 cuGraphLaunch 下的多个 kernel 共享 correlation_id,应都拿到栈。
+    """回归：一次 cuGraphLaunch 下的多个 kernel 共享 correlation_id,应都拿到栈。
     修复前用 .pop → 除第一个外全丢栈 → graph kernel(decode 大头)从火焰图消失。"""
     from pping_lang.collector.cupti import CuptiPythonSource
 
@@ -381,7 +381,7 @@ def test_cupti_source_graph_kernels_share_stack():
 
 
 def test_timeline_buffer_normalizes_and_groups_streams():
-    """时间线:保留原始 start/end,归一化到 t0,按 stream 分组。"""
+    """时间线：保留原始 start/end,归一化到 t0,按 stream 分组。"""
     tb = TimelineBuffer()
     clf = KernelClassifier()
     tb.add([
@@ -394,7 +394,7 @@ def test_timeline_buffer_normalizes_and_groups_streams():
     assert snap["span_ns"] == 450          # t0=50, max end=500
     assert set(snap["streams"]) == {3, 7}
     flash = next(e for e in snap["events"] if e["name"] == "flash_fwd")
-    assert flash["start"] == 50 and flash["dur"] == 100  # 归一化:100-50
+    assert flash["start"] == 50 and flash["dur"] == 100  # 归一化：100-50
     assert flash["cls"] == "attention" and flash["stream"] == 7
 
 
@@ -403,7 +403,7 @@ def test_timeline_buffer_empty_is_none():
 
 
 def test_timeline_chrome_trace_format():
-    """Chrome Trace 导出:ph=M 命名 track + ph=X 事件,ts/dur 微秒,归一化到 t0。"""
+    """Chrome Trace 导出：ph=M 命名 track + ph=X 事件,ts/dur 微秒,归一化到 t0。"""
     tb = TimelineBuffer()
     tb.add([KernelEvent("kernel", "flash_fwd", 1000, 1100, 0, None, 7)], KernelClassifier())
     tr = tb.chrome_trace()
@@ -481,7 +481,7 @@ def test_stall_classifier_maps_perfworks_reasons():
 
 
 def test_stall_classifier_not_selected_before_selected():
-    """顺序敏感:not_selected 含 selected 子串,必须先命中 scheduler_slack。"""
+    """顺序敏感：not_selected 含 selected 子串,必须先命中 scheduler_slack。"""
     clf = StallClassifier()
     assert clf.classify(_reason("not_selected")) == "scheduler_slack"
     assert clf.classify(_reason("selected")) == "issued"  # 已发射,非 stall

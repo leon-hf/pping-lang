@@ -1,6 +1,6 @@
-"""端到端:合成 SchedulerStats 经完整 plugin 数据流 → 派生指标落 JSONL。
+"""端到端：合成 SchedulerStats 经完整 plugin 数据流 → 派生指标落 JSONL。
 
-链路:合成 SchedulerStats → VllmStatsCollector(算派生比值)→ Sink → metrics.jsonl
+链路：合成 SchedulerStats → VllmStatsCollector(算派生比值)→ Sink → metrics.jsonl
 
 不依赖 NVML / 真 vLLM / DuckDB。验证的是 plugin.record 全链路把 cudagraph/perf 的
 **派生指标**(padding_ratio / mfu_ratio / mem_bw_util_ratio)算出来并持久化。

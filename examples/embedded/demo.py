@@ -1,6 +1,6 @@
 """端到端 demo — 不需要真 vLLM/GPU，喂合成 stats 触发 marquee 诊断规则。
 
-跑法:
+跑法：
     python examples/embedded/demo.py
 
 预期输出（约 8 秒后开始出现）：
@@ -12,7 +12,7 @@
       MFU = 5% < 20%（理论峰值的小部分都没跑到）
       -> 检查 padding ratio / batch 大小 / dtype（应为 bf16/fp16）
 
-完成后查询 DuckDB 看完整数据:
+完成后查询 DuckDB 看完整数据：
     duckdb ./demo.duckdb -c "SELECT rule_id, severity, message FROM diagnoses;"
 """
 from __future__ import annotations

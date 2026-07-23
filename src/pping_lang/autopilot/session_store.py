@@ -1,6 +1,6 @@
 """Session / Round 记录 —— UI 直播 + resume 底座(§9.4,G6)。
 
-单 session(单卡现实):内存里保活当前 session 供 `/status` 2s 轮询;同时 append JSONL
+单 session(单卡现实)：内存里保活当前 session 供 `/status` 2s 轮询;同时 append JSONL
 做审计 + resume。round 记录字段齐全(诊断/证据/动作/scorecard before|after/score/decision)。
 """
 from __future__ import annotations
@@ -66,7 +66,7 @@ class Round:
     bench_spec: dict = field(default_factory=dict)
     agent_model: str = ""
     agent_thinking: str = ""                     # LLM 思考过程(provider 支持时,截断落盘)
-    # 停机归因(仅 stop 轮):为什么停 + 判停瞬间的桌面快照(每个候选试没试过/P0 剪没剪)
+    # 停机归因(仅 stop 轮)：为什么停 + 判停瞬间的桌面快照(每个候选试没试过/P0 剪没剪)
     stop_cause: str | None = None                # agent_done|no_candidates|budget_rounds|budget_time|no_improve_k|user_stop|failed
     table_snapshot: list[dict] = field(default_factory=list)
 
@@ -209,7 +209,7 @@ class SessionStore:
                 return
             r.ts_wall = _now_iso()
             self._current.rounds.append(r)
-            # 'rec' 作记录类型判别(不能用 'kind':会被 r.to_dict() 的 Round.kind 覆盖)
+            # 'rec' 作记录类型判别(不能用 'kind'：会被 r.to_dict() 的 Round.kind 覆盖)
             self._write({"rec": "round", "session_id": self._current.session_id, **r.to_dict()})
 
     def append_event(self, phase: str, message: str, *, round: int | None = None,

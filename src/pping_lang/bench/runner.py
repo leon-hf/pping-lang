@@ -122,7 +122,7 @@ async def run_static(
 
             sample = await call_once()
 
-            if sample.error:                 # 失败退避:候选死透时防空转风暴
+            if sample.error:                 # 失败退避：候选死透时防空转风暴
                 await asyncio.sleep(0.5)
 
             if is_collect_iter:
