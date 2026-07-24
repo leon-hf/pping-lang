@@ -38,6 +38,9 @@ htmlcov/
 # Codex project-local handoff/secrets — machine-private, never committed
 .codex/
 
+# Other agent tool local config — machine-private, never committed
+.agents/
+
 # pping-lang runtime data
 *.duckdb
 *.duckdb.wal
@@ -51,6 +54,11 @@ htmlcov/
 # Personal design notes — kept on disk for reference, never committed
 _design-notes/
 _scratch/
+_autopilot-stress/
+
+# Ad-hoc root-level debug/check scripts from working sessions — never committed
+/check_*.py
+/dump_events.py
 
 # Deploy tooling for the runw GPU box — kept on disk for the deploy-runw skill,
 # never committed (carries infra topology + tailnet addressing)
