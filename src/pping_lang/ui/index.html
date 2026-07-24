@@ -1684,12 +1684,18 @@
       <div class="ap-trace-card">
         <template x-for="r in shownRounds" :key="r.round">
           <div>
-            <div class="ap-round" :class="{base: r.kind==='baseline', rev: r.decision==='reverted', open: expandedRounds.includes(r.round)}" @click="toggleRow(r.round)" title="单击展开本轮完整推理">
+            <div class="ap-round" :class="{base: r.kind==='baseline', rev: r.decision==='reverted', open: expandedRounds.includes(r.round)}" @click="toggleRow(r.round)" title="单击展开诊断快照/压测打分/判定详情">
               <div><span class="ap-rn" x-text="'R'+r.round"></span><span class="ap-chev" x-text="expandedRounds.includes(r.round)?'▾':'▸'"></span></div>
               <div class="ap-rbody">
                 <template x-if="r.diag"><div class="ap-rdiag"><b>诊断</b><span x-text="r.diag"></span></div></template>
                 <template x-if="r.hyp"><div class="ap-rhyp"><b>假设</b><span x-text="r.hyp"></span><span class="ap-changed" x-show="r.changed" x-text="r.changed"></span></div></template>
-                <template x-if="r.thinkingPreview"><div class="ap-rthink"><b>思考</b><span x-text="r.thinkingPreview + (r.thinking.length > r.thinkingPreview.length ? '…' : '')"></span></div></template>
+                <div class="ap-rev" x-show="r.evidence && r.evidence.length">
+                  <template x-for="ev in (r.evidence || [])" :key="ev"><span class="dr-chip" x-text="ev"></span></template>
+                </div>
+                <details class="ap-rthink" x-show="r.thinking" @click.stop>
+                  <summary>思考原文</summary>
+                  <div x-text="r.thinking"></div>
+                </details>
                 <template x-if="r.cmd"><div class="ap-rcmd"><span class="pfx">$</span> <span x-text="r.cmd"></span></div></template>
               </div>
               <div class="ap-rtput">
@@ -1705,9 +1711,6 @@
             </div>
             <div class="ap-detail" x-show="expandedRounds.includes(r.round)" @click.stop>
               <template x-if="r.snap"><div class="dr-sec"><div class="lab">诊断快照（Agent 看到的事实）</div><div class="val" x-text="r.snap"></div></div></template>
-              <template x-if="r.thinking"><div class="dr-sec"><div class="lab">Agent 思考过程(原始)</div><div class="val" style="white-space:pre-wrap;max-height:220px;overflow-y:auto" x-text="r.thinking"></div></div></template>
-              <template x-if="r.rationale"><div class="dr-sec"><div class="lab">Agent 推理</div><div class="val" x-text="r.rationale"></div></div></template>
-              <template x-if="r.evidence"><div class="dr-sec"><div class="lab">证据引用</div><div class="dr-chips"><template x-for="ev in r.evidence" :key="ev"><span class="dr-chip" x-text="ev"></span></template></div></div></template>
               <template x-if="r.expected"><div class="dr-sec"><div class="lab">预期效果</div><div class="val" x-text="r.expected"></div></div></template>
               <template x-if="r.scoreAfter"><div class="dr-sec"><div class="lab">压测打分</div>
                 <div class="dr-score">

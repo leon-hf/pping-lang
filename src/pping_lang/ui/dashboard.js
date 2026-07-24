@@ -2016,10 +2016,6 @@ function autopilotTab() {
         round: r.round, kind: r.kind, decision: r.decision, verdict: v.t, vcls: v.c,
         ts: r.ts_wall || '',
         thinking: r.agent_thinking || '',
-        // 思考预览(用户反馈,2026-07-23):折叠态之前完全不露思考过程的任何内容,不点开
-        // 就跟没调用过 agent 一样,容易让人误判"卡死/没在工作"。截一小段直接露在折叠行里,
-        // 全文仍靠点击展开(思考原文可能几千到几万字,不能整段常驻)。
-        thinkingPreview: (r.agent_thinking || '').replace(/\s+/g, ' ').trim().slice(0, 100),
         fallback: (r.action && r.action.llm_fallback) || null,
         diag: (dg.evidence_refs || []).join(' · '),
         hyp: r.rationale || '', rationale: r.rationale || '',

@@ -227,19 +227,27 @@ def test_autopilot_pending_round_uses_event_round_not_list_length(client):
     assert "'R'+(shownRounds.length)" not in body
 
 
-def test_autopilot_round_shows_thinking_preview_without_needing_a_click(client):
-    """用户反馈(2026-07-23):折叠态之前完全不露 agent 思考/推理的任何内容,不点开就跟
-    没调用过 agent 一样。思考过程原文可能几千到几万字,不能整段常驻列表里,但至少要露一小
-    段预览——全文仍然点击展开(expandedRounds)才看,预览本身不受这个门槛限制。"""
+def test_autopilot_finished_round_shows_evidence_and_thinking_without_row_click(client):
+    """用户反馈(2026-07-23):已结束的轮次里,证据引用和思考原文之前只有点开整行
+    (expandedRounds)才看得到,跟"进行中"那一轮(pending.reasoning,证据/原文常驻展示,
+    只有思考原文用原生 <details> 单独收起)不一致,显得已完成的轮次"什么都没做"。改成
+    跟进行中那轮同一套样式:证据 chip 常驻展示,思考原文用 <details><summary> 单独可展开
+    (不用点整行),两者都不受 expandedRounds 那个"点整行"门槛限制。"""
     html = client.get("/").text
     js = client.get("/dashboard.js").text
-    assert "thinkingPreview" in html and "thinkingPreview" in js
-    # 预览这一行不应该被 expandedRounds 折叠门槛卡住(那是给"完整推理"用的)
-    idx_preview = html.index('x-if="r.thinkingPreview"')
+    assert "ap-rev" in html and "ap-rthink" in html
+    assert "<details" in html and "思考原文" in html
+    idx_rev = html.index('class="ap-rev"')
+    idx_think = html.index('class="ap-rthink"')
     idx_gated_detail = html.index('x-show="expandedRounds.includes(r.round)"')
-    assert idx_preview < idx_gated_detail
-    preview_line = html[idx_preview:idx_gated_detail]
-    assert "expandedRounds" not in preview_line
+    assert idx_rev < idx_gated_detail and idx_think < idx_gated_detail
+    between = html[idx_rev:idx_gated_detail]
+    assert "expandedRounds" not in between
+    # .ap-detail 里旧的重复小节(Agent 推理/思考过程原始/证据引用)已经去掉,避免同一份
+    # 内容在折叠态和展开态各显示一遍
+    detail_section = html[idx_gated_detail:html.index("压测打分")]
+    assert "Agent 推理" not in detail_section
+    assert "Agent 思考过程" not in detail_section
 
 
 def test_autopilot_status_poll_failure_keeps_last_frame_briefly(client):
