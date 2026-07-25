@@ -45,9 +45,10 @@ def build_agent(cfg: dict | None):
                                   api_key=key, model=model or "kimi-for-coding", **common)
     elif key and base and model:
         primary = OpenAIAgent(base_url=base, api_key=key, model=model, **common)
+    lang = cfg.get("lang", "zh")
     if primary is None:
-        return StubAgent()
-    return ResilientAgent(primary, StubAgent(), retries=int(cfg.get("retries", 1)))
+        return StubAgent(lang=lang)
+    return ResilientAgent(primary, StubAgent(lang=lang), retries=int(cfg.get("retries", 1)))
 
 
 def build_objective(d: dict) -> ObjectiveSpec:

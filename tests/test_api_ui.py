@@ -104,8 +104,11 @@ def test_autopilot_workload_shapes_carry_e2e_sla_default(client):
 
 
 def test_autopilot_start_button_uses_execute_label(client):
+    """i18n 后 startLabel() 按语言返回完整句子(不再拼接翻译碎片),zh 分支字面量仍是
+    '执行调优';用 en ? 'Run tuning' 三元分支承接英文,不影响这条断言的原意。"""
     js = client.get("/dashboard.js").text
-    assert "return '执行调优'" in js
+    assert "'执行调优'" in js
+    assert "'Run tuning'" in js
     assert "重新调优" not in js
     assert "重新真实调优" not in js
 
@@ -183,11 +186,13 @@ def test_autopilot_result_card_lists_each_tried_knob_with_its_outcome(client):
 
 
 def test_autopilot_budget_is_max_rounds_not_fixed_six(client):
+    """i18n 后"最多 N 轮"从字面 markup 搬进 I18N 字典的 ap.maxPrefix/ap.evaluatedOf key
+    (英文分支同一套占位符插值),HTML 侧改成 t() 调用,不再是裸中文字面量。"""
     body = client.get("/").text + client.get("/dashboard.js").text
     assert "budget: { rounds: 30, minutes: 120 }" in body
     assert "Number(this.budget.rounds) || 30" in body
-    assert "最多 <input" in body
-    assert "已评估" in body and "最多 <span x-text=\"budget.rounds\"></span> 轮" in body
+    assert "'ap.maxPrefix'" in body
+    assert "'ap.evaluatedOf': '已评估 {n} / 最多 {m} 轮'" in body
 
 
 def test_autopilot_agent_presets_include_kimi(client):
@@ -236,7 +241,9 @@ def test_autopilot_finished_round_shows_evidence_and_thinking_without_row_click(
     html = client.get("/").text
     js = client.get("/dashboard.js").text
     assert "ap-rev" in html and "ap-rthink" in html
-    assert "<details" in html and "思考原文" in html
+    # i18n 后"思考原文"字面量搬进 I18N 的 ap.thinkingRaw key,<summary> 改用 t() 调用
+    assert "<details" in html and "t('ap.thinkingRaw')" in html
+    assert "'ap.thinkingRaw': '思考原文'" in js
     idx_rev = html.index('class="ap-rev"')
     idx_think = html.index('class="ap-rthink"')
     idx_gated_detail = html.index('x-show="expandedRounds.includes(r.round)"')
@@ -244,10 +251,10 @@ def test_autopilot_finished_round_shows_evidence_and_thinking_without_row_click(
     between = html[idx_rev:idx_gated_detail]
     assert "expandedRounds" not in between
     # .ap-detail 里旧的重复小节(Agent 推理/思考过程原始/证据引用)已经去掉,避免同一份
-    # 内容在折叠态和展开态各显示一遍
-    detail_section = html[idx_gated_detail:html.index("压测打分")]
-    assert "Agent 推理" not in detail_section
-    assert "Agent 思考过程" not in detail_section
+    # 内容在折叠态和展开态各显示一遍(i18n 后对应 t('ap.reasoningLabel')/t('ap.thinkingProcessLabel'))
+    detail_section = html[idx_gated_detail:html.index("t('ap.benchScoreLabel')")]
+    assert "t('ap.reasoningLabel')" not in detail_section
+    assert "t('ap.thinkingProcessLabel')" not in detail_section
 
 
 def test_autopilot_status_poll_failure_keeps_last_frame_briefly(client):
@@ -321,7 +328,12 @@ def test_ui_assets_split_and_under_budget():
     # 回滚原因拼成人话,不然用户看完只有一个吞吐比值,看不出"为什么")过了 155KB → 抬到 160KB。
     # 结果卡再加 actionSpaceSummaryText(用户反馈,2026-07-22：说清楚为什么只调 2-3 个
     # 参数,剩下的是"不该调"还是"没顾上调")过了 160KB → 抬到 165KB。
-    assert js < 165_000, f"dashboard.js is {js} bytes, exceeds 165KB"
+    # Autopilot tab 整体补全中英双语(2026-07-25):此前整个 tab 是裸中文 markup,一个 t()
+    # 都不走(有意为之,怕拼句拼出中英混杂病句)——改成给完整句子按语言各写一份:新增
+    # ~70 个 ap.* i18n key(中英各一份)+ VERDICT/STOP_LABELS/BOTTLENECK_LABEL 双语字典 +
+    # resultSummaryText/sessionNarrativeText/knobLedger/actionSpaceSummaryText 等叙事函数
+    # 各自补英文分支(非拼接翻译碎片,是完整句子模板)。一次性体积跳变,过了 165KB → 抬到 200KB。
+    assert js < 200_000, f"dashboard.js is {js} bytes, exceeds 200KB"
 
 
 def test_css_and_js_served(client):

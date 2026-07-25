@@ -16,6 +16,8 @@ const I18N = {
     'cfg.kv': 'KV 压力阈值', 'cfg.min_running': '空载守卫：在跑请求下限',
     'cfg.stall_mem': '内核访存 throttle 阈值', 'cfg.stall_memdep': '内核访存延迟阈值', 'cfg.stall_math': '内核算力管线饱和阈值',
     'slo.form': '业务形态', 'slo.thresholds': '瓶颈阈值', 'slo.pass': '达标', 'slo.fail': '超标',
+    'shape.chat': '对话', 'shape.rag': 'RAG 问答', 'shape.agent': 'Agent', 'shape.reasoning': '长推理',
+    'shape.code': '代码补全', 'shape.custom': '自定义', 'ap.customLoadNote': '全手动(沿用旧默认)',
     'slo.benchHint': '如需验证调参收益,可在压测台对比 A/B。', 'slo.benchBtn': '前往压测 →',
     'rules.staleHint': '当前无触发 · 显示最近一次命中',
     'rules.clickExpand': '点击展开详情 + 证据',
@@ -30,6 +32,74 @@ const I18N = {
     'rules.layersTitle': '检测层 · L1–L5 含义', 'rules.layersHint': '每个瓶颈由跨测量层的多条独立检测手段交叉印证 —— 层间越独立,越不易同时失效(优雅降级)',
     'rules.toAutopilotHint': '想据此自动调优?交给 Autopilot 在沙盒里迭代调参、压测验证(预览)。', 'rules.toAutopilotBtn': '交给 Autopilot →',
     'regime.A': '双低', 'regime.B': '带宽瓶颈', 'regime.C': '算力瓶颈', 'regime.D': '容量瓶颈', 'regime.N': '症状/其它',
+    'ap.realMode': '真实模式：Autopilot 会在 runw host 侧停主 serve 腾卡 → 起候选 vLLM 沙盒 → 跑 bench → kept/reverted → 恢复主 serve。若 host bridge 未连接,开始按钮会报错而不是偷偷跑模拟。',
+    'ap.localMode': '本地/dev 模式：当前没有 host bridge,开始后走 SimSandbox 验证闭环;在 runw dashboard 地址访问时才会启动真实 DockerSandbox 调优。',
+    'ap.runningNote1': '调优进行中：主 serve 已让位给候选沙盒,<b>本页(:8765)此刻打不开新标签,请勿刷新</b>。本页直播直连 host bridge,不受影响;备用直播页：',
+    'ap.runningNote2': '。调优结束或点「停止」后主 serve 与本页自动恢复。',
+    'ap.agentTitle': 'Agent（调优决策 LLM）', 'ap.notConfigured': '未配置',
+    'ap.presetLabel': '预设', 'ap.presetLocal': '本地 (Ollama / vLLM)', 'ap.presetCustom': '自定义',
+    'ap.testConnection': '测试连接', 'ap.advanced': '高级',
+    'ap.agentNote': 'OpenRouter / OpenAI / DeepSeek / Moonshot 走 <b style="color:var(--coral-strong)">OpenAI 兼容</b>端点；Kimi Coding 走 Kimi Coding Messages API。真实调优必须配置 LLM agent；StubAgent 只用于本地 SimSandbox/dev tests,不能驱动真实 GPU 调优。Key 仅本会话用于调 agent，<b>不入诊断热路径、不随轨迹存盘</b>；生产建议走环境变量注入。注意：<b>别用被压测的那个 vLLM 模型当 agent</b>（它在被压、可能太小）。',
+    'ap.guidanceLabel': '额外指引（追加到系统 prompt 之后，塞业务约束 / 偏好）',
+    'ap.guidancePlaceholder': '如：本集群 gpu-util 不超 0.85；优先 chunked-prefill 而非提并发；延迟敏感业务，TTFT 优先…',
+    'ap.timeoutS': '超时 (s)', 'ap.retries': '重试',
+    'ap.actionScope': '动作范围 · vLLM 全量 − 身份(~7) − 硬件收窄 − 降精度类',
+    'ap.denyModel': 'model / host / port（身份,~7）', 'ap.denyParallel': 'tensor / pipeline-parallel（按卡数收窄）',
+    'ap.denyQuant': 'quantization（会降精度,不提供）', 'ap.denyKvDtype': 'kv-cache-dtype（会降精度,不提供）',
+    'ap.actionScopeNote': '这 ~250 个里大半 vLLM 启动时已自调到最优（KV block 数 / attention backend / 兼容门）；agent 实际只动 <b style="color:var(--coral-strong)">max-num-seqs / max-num-batched-tokens / gpu-util / performance_mode</b> 这一小撮 + 诊断点名的对症参数。安全不靠黑名单,靠 launch-catch + 一次性容器兜底 + 降精度参数永不提供。',
+    'ap.showPromptBtn': '查看核心 prompt 合约（只读 · 不可改）', 'ap.hidePromptBtn': '收起核心 prompt 合约',
+    'ap.lockedPrompt': `你是一个 LLM-serving 性能工程师(核心合约,不可改):
+① 每轮只改 1 个参数,且只能从「动作范围」里选;
+② 必须接受压测判决——不得声称压测没证实的收益;
+③ 必须把改动挂在本轮诊断证据上(evidence_refs);
+④ 必须按 StructuredOutput schema 输出 {action|done, rationale, evidence_refs};
+⑤ 目标：不破 SLA 前提下最大化主指标;已近最优则 done:true。
+———
+每轮的 user message 由 runner 自动拼(用户不填):
+目标 / 预算 / 当前配置 / 蒸馏诊断 / 历史 / 动作范围。
+你的「额外指引」会追加在以上合约之后。`,
+    'ap.shapeLabel': '形态', 'ap.maxPrefix': '最多', 'ap.roundsUnit': '轮',
+    'ap.roundsCapTitle': '轮数和分钟都是上限,不是目标',
+    'ap.roundsCapText': '轮数是上限：多数 session 3-5 轮诚实收敛,提前停属正常',
+    'ap.stopBtn': '停止调优', 'ap.stopping': '停止中…',
+    'ap.step.observe': '读诊断', 'ap.step.hypothesize': '挂诊断选参数', 'ap.step.act': '沙盒重启',
+    'ap.step.measure': '压测打分', 'ap.step.decide': '留下/回滚',
+    'ap.idleDesc': '点开始后，Autopilot 会启动一个调优 session。Agent 在候选集中选一个 vLLM 参数,沙盒重启后跑同一套 bench,只有实测更好才保留,破 SLA 或收益不足就回滚。真实 runw 模式需要先配置 LLM agent;生产上线仍走人工确认上线包。',
+    'ap.moat': '<b>👁 眼睛</b>(深度诊断) + <b>✋ 手</b>(压测+serve控制) + <b>📊 记分牌</b>(基线/Δ) 同进程',
+    'ap.evaluatedOf': '已评估 {n} / 最多 {m} 轮', 'ap.currentBest': '当前最优',
+    'ap.fallbackWarnPre': '⚠ 本次有',
+    'ap.fallbackWarnMid': '轮 LLM 调用失败,由确定性启发式兜底选择参数 —— 检查 agent 配置 / 额度 / 网络(点开对应轮的「Agent 推理」看具体错误;带',
+    'ap.fallbackWarnEnd': '标记的轮不是 LLM 决策)。', 'ap.fallbackBadge': '⚠ 兜底',
+    'ap.fallbackTitle': 'LLM 调用失败({err}),本轮由确定性启发式兜底 —— 检查 agent 配置/额度/网络',
+    'ap.expandTitle': '单击展开诊断快照/压测打分/判定详情',
+    'ap.diagLabel': '诊断', 'ap.hypLabel': '假设', 'ap.thinkingRaw': '思考原文',
+    'ap.snapLabel': '诊断快照（Agent 看到的事实）', 'ap.expectedLabel': '预期效果',
+    'ap.benchScoreLabel': '压测打分', 'ap.metricLabel': '指标', 'ap.decideLabel': '判定',
+    'ap.runningLabel': '运行中', 'ap.heartbeatDefault': '状态心跳中，未改线上 serve',
+    'ap.roundReasoning': '本轮 Agent 推理',
+    'ap.lastResultPrefix': '📋 上次调优结果', 'ap.lastResultSuffix': '（非本次刚跑完，页面重新打开后自动带出）',
+    'ap.throughputLabel': '吞吐', 'ap.throughputValue': '{a} → {b} tok/s（×{x}）',
+    'ap.resultLabel': '结果', 'ap.whyLabel': '为什么', 'ap.ledgerLabel': '逐轮账本',
+    'ap.candidatePoolLabel': '候选池',
+    'ap.honestNote': '「×3」只在「现实但没调过」的默认基线上成立 —— 那正是大量真实部署的现状。已调过的基线则是诚实的边际收益（+5~15%），Agent 会如实报「已近最优」。',
+    'ap.viewFullTrace': '查看完整推理轨迹', 'ap.viewPromotePkg': '查看上线包（人工确认）',
+    'ap.promoteTitle': '上线包', 'ap.promoteNote': 'Autopilot 已生成可审阅命令，但没有修改生产。上线仍需要人工确认、流量切换和健康检查。',
+    'ap.prodCmd': '生产命令', 'ap.rollbackCmd': '回滚命令', 'ap.configDiff': '配置 diff',
+    'ap.riskNote': '风险提示', 'ap.manualChecklist': '人工确认清单', 'ap.scopeOfApply': '适用边界',
+    'ap.fullTraceTitle': '完整推理轨迹', 'ap.reasoningLabel': 'Agent 推理', 'ap.evidenceLabel': '证据引用',
+    'ap.thisRoundCmd': '本轮命令', 'ap.thinkingProcessLabel': 'Agent 思考过程(原始)',
+    'ap.copyMarkdown': '复制 Markdown', 'ap.downloadJson': '下载 JSON',
+    'ap.needFields': '需填 Base URL / API Key / Model', 'ap.connecting': '连接中…',
+    'ap.connectionOk': '✓ 连接可用', 'ap.connectionFailed': '连接失败： ',
+    'ap.needAgentConfig': '真实调优需要先配置 LLM agent', 'ap.sessionAlreadyRunning': '已有 session 在跑',
+    'ap.startingRealTuning': '启动真实调优', 'ap.creatingSession': '正在创建 session 并准备基线压测',
+    'ap.bridgeNotConnected': 'host bridge 未连接', 'ap.startFailed': '启动失败',
+    'ap.stoppingAndRestoring': '正在停止调优并恢复 serve…', 'ap.terminatingSandbox': '正在终止候选沙盒并恢复主 serve',
+    'ap.stopRequestedNoKeep': '请求停止中，未保留当前候选',
+    'ap.stoppedRestoring': '已停止，正在恢复状态…', 'ap.noRunningSession': '没有正在运行的调优',
+    'ap.stopFailed': '停止失败： ', 'ap.statusRefreshRetry': '状态刷新重试中，保留上一帧',
+    'ap.bridgeUnreachable': 'host bridge 状态不可达', 'ap.statusUnreachable': 'status 不可达',
+    'ap.copied': '✓ 已复制',
     'common.close': '关闭', 'common.copy': '复制',
     'live.tier1': '用户感知指标', 'live.tier1hint': '最近 60 秒 · 每 2s 刷新', 'live.tier2': '效率与诊断',
     'kpi.ttft': 'TTFT 平均', 'kpi.ttft.sub': '首 token 延迟', 'kpi.reqs': '请求',
@@ -364,6 +434,15 @@ const I18N = {
     'rule.B.name': '带宽瓶颈(逼近显存带宽上限)', 'rule.B.hypothesis': '访存受限：decode 每步重新读取权重与 KV,带宽为上限。NVML HBM 控制器占用 / 内核 memory_throttle(访存管线饱和)/ memory_dependency(等待访存)交叉印证。(注：perf 实测 MBU 在小模型上因 L2 复用 >1,故不作为阈值。)', 'rule.B.suggestion': '投机解码(关注接受率,避免转为计算受限)/ KV 量化(FP8)/ 升级至更高带宽 GPU。',
     'rule.C.name': '算力瓶颈(算力饱和)', 'rule.C.hypothesis': '计算受限：FLOPs 饱和,算力为上限(长 prompt prefill 的固有特征)。实测 MFU 逼近上限 / 内核 math_pipe(FMA/ALU/Tensor 计算管线饱和)交叉印证。', 'rule.C.suggestion': '更换更快的 attention backend(0.21 按硬件自动选择,可用 --attention-backend 覆盖)/ 权重量化(FP8/FP4)/ 升级算力更强的 GPU。',
     'rule.D.name': '容量瓶颈(KV 耗尽并触发抢占)', 'rule.D.hypothesis': '显存无法容纳 KV → 并发受限 → 触发抢占。V1 抢占为纯重算(丢弃 KV、从头 re-prefill),一旦发生,decode 吞吐急剧下降。', 'rule.D.suggestion': 'KV 量化(FP8)/ 降低 max-model-len / KV offload / 降低 max-num-seqs。',
+    'rule.A.detector.roofline': '算力/带宽双低(MFU 低 + HBM 控制器空闲)',
+    'rule.A.detector.kernel_slack': '内核 scheduler_slack(warp 就绪未发射)',
+    'rule.B.detector.hbm_busy': 'HBM 控制器占用(NVML mem-util)',
+    'rule.B.detector.kernel_throttle': '内核访存管线 throttle(LSU 饱和)',
+    'rule.B.detector.kernel_memdep': '内核访存延迟(long_scoreboard 等待访存)',
+    'rule.C.detector.measured_mfu': '实测 MFU 逼近上限',
+    'rule.C.detector.kernel_mathpipe': '内核算力管线饱和(FMA/ALU/Tensor)',
+    'rule.D.detector.kv_pressure': 'KV 池接近耗尽',
+    'rule.D.detector.preemption': '已发生抢占',
     'decode.vllmFusedRms': 'vLLM 自定义 · fused add + RMSNorm', 'decode.vllmRms': 'vLLM 自定义 · RMSNorm',
     'decode.vllmRope': 'vLLM 自定义 · RoPE', 'decode.vllmSilu': 'vLLM 自定义 · SiLU/激活',
     'decode.vllmCuda': 'vLLM 自定义 CUDA kernel', 'decode.flashinferSample': 'FlashInfer · 采样 kernel',
@@ -386,6 +465,8 @@ const I18N = {
     'cfg.kv': 'KV pressure threshold', 'cfg.min_running': 'Idle guard: min running reqs',
     'cfg.stall_mem': 'Kernel memory-throttle threshold', 'cfg.stall_memdep': 'Kernel memory-dependency threshold', 'cfg.stall_math': 'Kernel math-pipe threshold',
     'slo.form': 'Workload form', 'slo.thresholds': 'Bottleneck thresholds', 'slo.pass': 'Met', 'slo.fail': 'Breached',
+    'shape.chat': 'Chat', 'shape.rag': 'RAG Q&A', 'shape.agent': 'Agent', 'shape.reasoning': 'Long reasoning',
+    'shape.code': 'Code completion', 'shape.custom': 'Custom', 'ap.customLoadNote': 'Fully manual (keeps old defaults)',
     'slo.benchHint': 'To verify a tuning gain, compare A/B on the bench.', 'slo.benchBtn': 'Go to bench →',
     'rules.staleHint': 'None active — showing the latest hit',
     'rules.clickExpand': 'Click to expand details + evidence',
@@ -400,6 +481,74 @@ const I18N = {
     'rules.layersTitle': 'Measurement layers · what L1–L5 mean', 'rules.layersHint': 'Each bottleneck triangulated by independent methods across layers — more independent = less likely to fail together (graceful degradation)',
     'rules.toAutopilotHint': 'Auto-tune from these bottlenecks? Hand off to Autopilot for sandboxed iterative tuning, bench-verified (preview).', 'rules.toAutopilotBtn': 'Hand off to Autopilot →',
     'regime.A': 'Under-utilized', 'regime.B': 'Bandwidth bottleneck', 'regime.C': 'Compute bottleneck', 'regime.D': 'Capacity bottleneck', 'regime.N': 'Symptom/other',
+    'ap.realMode': 'Real mode: Autopilot stops the primary serve on the runw host to free the GPU → boots a candidate vLLM sandbox → runs the bench → kept/reverted → restores the primary serve. If no host bridge is connected, the start button errors instead of silently falling back to a simulation.',
+    'ap.localMode': "Local/dev mode: no host bridge is connected, so starting runs SimSandbox to exercise the loop; visiting from the runw dashboard address is what triggers a real DockerSandbox tuning run.",
+    'ap.runningNote1': 'Tuning in progress: the primary serve has handed off to the candidate sandbox — <b>this page (:8765) can\'t open new tabs right now; please don\'t refresh</b>. This page streams directly from the host bridge and is unaffected; backup live page:',
+    'ap.runningNote2': '. The primary serve and this page recover automatically once tuning ends or you click "Stop".',
+    'ap.agentTitle': 'Agent (tuning-decision LLM)', 'ap.notConfigured': 'Not configured',
+    'ap.presetLabel': 'Preset', 'ap.presetLocal': 'Local (Ollama / vLLM)', 'ap.presetCustom': 'Custom',
+    'ap.testConnection': 'Test connection', 'ap.advanced': 'Advanced',
+    'ap.agentNote': 'OpenRouter / OpenAI / DeepSeek / Moonshot use an <b style="color:var(--coral-strong)">OpenAI-compatible</b> endpoint; Kimi Coding uses the Kimi Coding Messages API. Real tuning requires an LLM agent to be configured; StubAgent is for local SimSandbox/dev tests only and can\'t drive real GPU tuning. The key is used only within this session to call the agent, <b>never enters the diagnosis hot path or gets persisted with the trace</b>; production deployments should inject it via environment variables. Note: <b>don\'t use the vLLM model under test as the agent</b> (it\'s under load and may be too small).',
+    'ap.guidanceLabel': 'Extra guidance (appended after the system prompt — business constraints / preferences)',
+    'ap.guidancePlaceholder': 'e.g. keep gpu-util under 0.85 on this cluster; prefer chunked-prefill over raising concurrency; latency-sensitive workload, prioritize TTFT…',
+    'ap.timeoutS': 'Timeout (s)', 'ap.retries': 'Retries',
+    'ap.actionScope': 'Action scope · full vLLM surface − identity (~7) − hardware-narrowed − precision-lowering',
+    'ap.denyModel': 'model / host / port (identity, ~7)', 'ap.denyParallel': 'tensor / pipeline-parallel (narrowed by GPU count)',
+    'ap.denyQuant': 'quantization (lowers precision, not offered)', 'ap.denyKvDtype': 'kv-cache-dtype (lowers precision, not offered)',
+    'ap.actionScopeNote': 'Most of these ~250 flags are already self-tuned to optimal by vLLM at startup (KV block count / attention backend / compatibility gates); the agent effectively only moves <b style="color:var(--coral-strong)">max-num-seqs / max-num-batched-tokens / gpu-util / performance_mode</b> and whatever the diagnosis calls out. Safety doesn\'t rely on a blocklist — it relies on launch-catch + disposable containers + never offering precision-lowering params.',
+    'ap.showPromptBtn': 'View core prompt contract (read-only · fixed)', 'ap.hidePromptBtn': 'Hide core prompt contract',
+    'ap.lockedPrompt': `You are an LLM-serving performance engineer (core contract, cannot be changed):
+① Change exactly 1 parameter per round, chosen only from the "action scope";
+② You must accept the bench verdict — never claim a gain the bench hasn't confirmed;
+③ You must anchor every change to this round's diagnosis evidence (evidence_refs);
+④ You must output the StructuredOutput schema: {action|done, rationale, evidence_refs};
+⑤ Goal: maximize the primary metric without breaking SLA; if already near-optimal, output done:true.
+———
+Each round's user message is assembled automatically by the runner (you don't fill it in):
+objective / budget / current config / distilled diagnosis / history / action scope.
+Your "extra guidance" is appended after this contract.`,
+    'ap.shapeLabel': 'Shape', 'ap.maxPrefix': 'Up to', 'ap.roundsUnit': 'rounds',
+    'ap.roundsCapTitle': 'Rounds and minutes are caps, not targets',
+    'ap.roundsCapText': 'Round count is a cap: most sessions honestly converge in 3-5 rounds; stopping early is normal',
+    'ap.stopBtn': 'Stop tuning', 'ap.stopping': 'Stopping…',
+    'ap.step.observe': 'read diagnosis', 'ap.step.hypothesize': 'pick a param from the diagnosis', 'ap.step.act': 'restart sandbox',
+    'ap.step.measure': 'bench + score', 'ap.step.decide': 'keep/revert',
+    'ap.idleDesc': "Click start and Autopilot launches a tuning session. The agent picks one vLLM parameter from the candidate set, the sandbox restarts, and the same bench runs again — a change is kept only if it measurably improves things; breaking SLA or a gain within noise reverts it. Real runw mode requires an LLM agent to be configured first; production rollout still goes through manual confirmation of the promote package.",
+    'ap.moat': '<b>👁 Eyes</b> (deep diagnosis) + <b>✋ Hands</b> (bench + serve control) + <b>📊 Scorecard</b> (baseline/Δ) — all in one process',
+    'ap.evaluatedOf': 'Evaluated {n} / up to {m} rounds', 'ap.currentBest': 'Current best',
+    'ap.fallbackWarnPre': '⚠ This session had',
+    'ap.fallbackWarnMid': 'round(s) where the LLM call failed and a deterministic heuristic picked the parameter instead — check agent config / quota / network (open that round\'s "Agent reasoning" for the specific error; rounds marked',
+    'ap.fallbackWarnEnd': 'were not LLM decisions).', 'ap.fallbackBadge': '⚠ fallback',
+    'ap.fallbackTitle': 'LLM call failed ({err}); this round fell back to a deterministic heuristic — check agent config/quota/network',
+    'ap.expandTitle': 'Click to expand diagnosis snapshot / bench score / decision detail',
+    'ap.diagLabel': 'Diagnosis', 'ap.hypLabel': 'Hypothesis', 'ap.thinkingRaw': 'Raw thinking',
+    'ap.snapLabel': 'Diagnosis snapshot (what the agent saw)', 'ap.expectedLabel': 'Expected effect',
+    'ap.benchScoreLabel': 'Bench score', 'ap.metricLabel': 'Metric', 'ap.decideLabel': 'Decision',
+    'ap.runningLabel': 'Running', 'ap.heartbeatDefault': 'Status heartbeat — production serve untouched',
+    'ap.roundReasoning': "This round's agent reasoning",
+    'ap.lastResultPrefix': '📋 Last tuning result', 'ap.lastResultSuffix': "(not just finished — restored automatically when the page reopens)",
+    'ap.throughputLabel': 'Throughput', 'ap.throughputValue': '{a} → {b} tok/s (×{x})',
+    'ap.resultLabel': 'Result', 'ap.whyLabel': 'Why', 'ap.ledgerLabel': 'Round-by-round ledger',
+    'ap.candidatePoolLabel': 'Candidate pool',
+    'ap.honestNote': '"×3" only holds against a "realistic but never-tuned" default baseline — which is exactly the state of most real deployments. Against an already-tuned baseline, the honest gain is marginal (+5-15%), and the agent will report "already near-optimal" when that\'s the case.',
+    'ap.viewFullTrace': 'View full reasoning trace', 'ap.viewPromotePkg': 'View promote package (manual confirmation)',
+    'ap.promoteTitle': 'Promote package', 'ap.promoteNote': 'Autopilot has generated a reviewable command but has not modified production. Rollout still requires manual confirmation, traffic cutover, and health checks.',
+    'ap.prodCmd': 'Production command', 'ap.rollbackCmd': 'Rollback command', 'ap.configDiff': 'Config diff',
+    'ap.riskNote': 'Risk notes', 'ap.manualChecklist': 'Manual confirmation checklist', 'ap.scopeOfApply': 'Scope of applicability',
+    'ap.fullTraceTitle': 'Full reasoning trace', 'ap.reasoningLabel': 'Agent reasoning', 'ap.evidenceLabel': 'Evidence refs',
+    'ap.thisRoundCmd': "This round's command", 'ap.thinkingProcessLabel': 'Agent thinking process (raw)',
+    'ap.copyMarkdown': 'Copy Markdown', 'ap.downloadJson': 'Download JSON',
+    'ap.needFields': 'Fill in Base URL / API Key / Model', 'ap.connecting': 'Connecting…',
+    'ap.connectionOk': '✓ Connection OK', 'ap.connectionFailed': 'Connection failed: ',
+    'ap.needAgentConfig': 'Real tuning requires an LLM agent to be configured first', 'ap.sessionAlreadyRunning': 'A session is already running',
+    'ap.startingRealTuning': 'Starting real tuning', 'ap.creatingSession': 'Creating session and preparing baseline bench',
+    'ap.bridgeNotConnected': 'host bridge not connected', 'ap.startFailed': 'Failed to start',
+    'ap.stoppingAndRestoring': 'Stopping tuning and restoring serve…', 'ap.terminatingSandbox': 'Terminating candidate sandbox and restoring primary serve',
+    'ap.stopRequestedNoKeep': 'Stop requested — current candidate will not be kept',
+    'ap.stoppedRestoring': '✓ Stopped, restoring state…', 'ap.noRunningSession': 'No tuning session running',
+    'ap.stopFailed': 'Failed to stop: ', 'ap.statusRefreshRetry': 'Retrying status refresh, keeping last frame',
+    'ap.bridgeUnreachable': 'host bridge unreachable', 'ap.statusUnreachable': 'status unreachable',
+    'ap.copied': '✓ Copied',
     'common.close': 'Close', 'common.copy': 'Copy',
     'live.tier1': 'User-facing metrics', 'live.tier1hint': 'Last 60s · refreshed every 2s', 'live.tier2': 'Efficiency & diagnostics',
     'kpi.ttft': 'TTFT avg', 'kpi.ttft.sub': 'first-token latency', 'kpi.reqs': 'reqs',
@@ -734,6 +883,15 @@ const I18N = {
     'rule.B.name': 'Bandwidth bottleneck (hugging the HBM bandwidth roof)', 'rule.B.hypothesis': 'Memory-bound: each decode step re-reads weights + KV; bandwidth is the ceiling. Confirmed by NVML HBM-controller busy / kernel memory_throttle (memory pipe saturated) / memory_dependency (waiting on memory loads). (Note: perf measured-MBU exceeds 1 on small models due to L2 reuse, so it is not used as a threshold.)', 'rule.B.suggestion': 'Speculative decoding (watch acceptance rate, avoid compute backlash) / KV quantization (FP8) / move to a higher-bandwidth GPU.',
     'rule.C.name': 'Compute bottleneck (compute saturated)', 'rule.C.hypothesis': 'Compute-bound: FLOPs saturated, compute is the ceiling (intrinsic to long-prompt prefill). Confirmed by measured MFU at the roof / kernel math_pipe (FMA/ALU/Tensor compute pipe saturated).', 'rule.C.suggestion': 'Switch to a faster attention backend (auto-selected by hardware on 0.21; try --attention-backend to override) / weight quantization (FP8/FP4) / upgrade the compute GPU.',
     'rule.D.name': 'Capacity bottleneck (KV overflows and preempts)', 'rule.D.hypothesis': 'VRAM can’t hold the KV → concurrency stalls → preemption. V1 preemption is pure recompute (KV dropped, re-prefilled from scratch); once it hits, decode throughput collapses off a cliff.', 'rule.D.suggestion': 'KV quantization (FP8) / lower max-model-len / KV offload / lower max-num-seqs.',
+    'rule.A.detector.roofline': 'Compute/bandwidth both idle (low MFU + HBM controller idle)',
+    'rule.A.detector.kernel_slack': 'Kernel scheduler_slack (warps ready but not issued)',
+    'rule.B.detector.hbm_busy': 'HBM controller busy (NVML mem-util)',
+    'rule.B.detector.kernel_throttle': 'Kernel memory-pipe throttle (LSU saturated)',
+    'rule.B.detector.kernel_memdep': 'Kernel memory latency (long_scoreboard waiting on memory)',
+    'rule.C.detector.measured_mfu': 'Measured MFU near the roof',
+    'rule.C.detector.kernel_mathpipe': 'Kernel compute-pipe saturated (FMA/ALU/Tensor)',
+    'rule.D.detector.kv_pressure': 'KV pool near exhaustion',
+    'rule.D.detector.preemption': 'Preemption has occurred',
     'decode.vllmFusedRms': 'vLLM custom · fused add + RMSNorm', 'decode.vllmRms': 'vLLM custom · RMSNorm',
     'decode.vllmRope': 'vLLM custom · RoPE', 'decode.vllmSilu': 'vLLM custom · SiLU/activation',
     'decode.vllmCuda': 'vLLM custom CUDA kernel', 'decode.flashinferSample': 'FlashInfer · sampling kernel',
@@ -898,6 +1056,10 @@ function _aggRooflinePoints(raw) {
 // 把 /api/roofline 数据填进一个 roofline 图(点 + 两条 roof)
 function _applyRooflineData(chart, data) {
   if (!chart) return;
+  // 图例关着(legend:false),这两个 label 只在 tooltip 显示;懒建的图表只在建图那刻求值一次
+  // t(),切语言后不会自动重算——每次刷新时顺手重赋值,让 tooltip 也跟着语言走。
+  chart.data.datasets[0].label = t('chart.currentSamples');
+  chart.data.datasets[4].label = t('chart.measuredScaling');
   const agg = _aggRooflinePoints((data.points || []).map(p => ({ x: p.ai, y: p.throughput_tflops })));
   // A：簇语义标签 —— 步数最多的簇 = decode 主体(decode 步数远多于 prefill);
   // 其余里 x 明显更大的标 prefill
@@ -1021,6 +1183,7 @@ function _createMiniLatencyChart(canvasId, color) {
 
 function _updateMiniLatencyChart(chart, buckets) {
   if (!chart) return;
+  chart.data.datasets[1].label = t('common.avg');   // 同上,legend 关着、只在 tooltip 显示,每次刷新重取当前语言
   chart.data.labels = buckets.map(b => Math.round(b.t) + 's');
   chart.data.datasets[0].data = buckets.map(b => b.p99);
   chart.data.datasets[1].data = buckets.map(b => b.avg != null ? b.avg : b.p50);
@@ -1378,6 +1541,9 @@ function rulesTab() {
     ruleName(rule_id) { const r = this._rule(rule_id); return this.ruleI18n(rule_id, 'name', r ? r.name : rule_id); },
     ruleHyp(r) { return this.ruleI18n(r.id, 'hypothesis', r.hypothesis || ''); },   // 内置目录：规则的根因推断
     ruleSug(r) { return this.ruleI18n(r.id, 'suggestion', r.suggestion || ''); },   // 内置目录：规则的处方
+    // 检测手段名(同 ruleI18n 机制,key = rule.{id}.detector.{det.key});/api/diagnosis_rules
+    // 没有 ?lang=,det.name 恒为后端中文,靠这层客户端译文表接住(同 rule name/hypothesis/suggestion)。
+    detName(rule_id, det) { return this.ruleI18n(rule_id, 'detector.' + det.key, det.name); },
     // 该瓶颈当前是否命中(diagnoses 来自父 dashboard 作用域,模板里传进来)→ 命中的诊断对象 或 null
     firedFor(id, diags) { return (diags || []).find(d => d.rule_id === id) || null; },
     // ── 诊断密集表：展开 + 检测手段(detector)──
@@ -1385,11 +1551,13 @@ function rulesTab() {
     diagRegime(rule_id) { const k = BOTTLENECK.includes(rule_id) ? rule_id : 'N'; return { k, label: t('regime.' + k) }; },
     fmtVal(v) { if (typeof v !== 'number') return String(v); return Number.isInteger(v) ? String(v) : (Math.abs(v) < 1 ? v.toFixed(3) : v.toFixed(1)); },
     _op(v, op, t) { switch (op) { case '>': return v > t; case '>=': return v >= t; case '<': return v < t; case '<=': return v <= t; case '==': return v === t; case '!=': return v !== t; } return false; },
-    // 一条手段的条件串(checks 的 AND)
+    // 一条手段的条件串(checks 的 AND);metric/op/threshold 本身语言无关,只需翻译连接词。
+    // det.name(手段人话名)走 detName() 的 ruleI18n 译文表,不在这里处理。
     detCond(det) {
+      const and = _uiLang() === 'en' ? '  and  ' : '  且  ';
       return (det.checks || []).map(c =>
         `${c.aggregation}(${c.metric.replace(/^vllm\./, '').replace(/^kernel\.stall\./, 'stall.')}) ${c.op} ${c.threshold}`
-      ).join('  且  ');
+      ).join(and);
     },
     // 该手段当前是否命中：从命中诊断的 context 复算(每个 check 都有数据且过阈值)。diag = firedFor() 的返回
     detFired(det, diag) {
@@ -1487,13 +1655,21 @@ function sloPanel() {
 
 // Autopilot tab：轮询 /api/autopilot/status 展示诊断驱动的真实/模拟调优会话。
 function autopilotTab() {
-  const VERDICT = {
+  // 中英双语字典 + lang-aware 取值函数(2026-07 修:曾经整个 tab 硬编码中文,理由是
+  // 用 t('regime.'+bn) 拼句会拼出"本次持续诊断到Bandwidth bottleneck"这种中英混杂病句;
+  // 正解不是放弃 i18n,是按语言给完整句子模板(而非拼接翻译碎片)——见下方各 narrative 函数。
+  const VERDICT_ZH = {
     baseline: { t: '基线', c: 'base' }, kept: { t: '✓ 保留', c: 'kept' },
     reverted: { t: '↩ 回滚', c: 'rev' }, tie: { t: '≈ 持平', c: 'tie' }, done: { t: '■ 完成', c: 'stop' },
   };
+  const VERDICT_EN = {
+    baseline: { t: 'Baseline', c: 'base' }, kept: { t: '✓ Kept', c: 'kept' },
+    reverted: { t: '↩ Reverted', c: 'rev' }, tie: { t: '≈ Tie', c: 'tie' }, done: { t: '■ Done', c: 'stop' },
+  };
+  const VERDICT = () => (_uiLang() === 'en' ? VERDICT_EN : VERDICT_ZH);
   // 停机归因 → 人话(用户反馈：session 跑完没说明白"为什么",光看轮次/判定看不出
   // 全局原因——同 stop_cause 枚举,见 runner.py append_stop 的 cause 取值)。
-  const STOP_LABELS = {
+  const STOP_LABELS_ZH = {
     agent_done: 'Agent 判断已接近最优,主动收尾',
     no_candidates: '已无对症参数可试(诊断到的瓶颈没有安全参数能缓解,或负载/配置已到边界)',
     budget_rounds: '达到最大轮数上限',
@@ -1502,23 +1678,34 @@ function autopilotTab() {
     user_stop: '用户手动停止',
     failed: '会话出错终止',
   };
-  // 瓶颈字母 → 人话(同后端 action_space.BOTTLENECK_LABEL)。这里不走 t(),因为整个
-  // Autopilot tab 本就是中文硬编码(WORKLOAD_SHAPES/VERDICT/STOP_LABELS 都不走 i18n)——
-  // 用 t('regime.'+bn) 会在英文界面下拼出"本次持续诊断到Bandwidth bottleneck"这种
-  // 中英混杂的病句,不如跟本 tab 其余文案保持一致,统一硬编码中文。
-  const BOTTLENECK_LABEL = { A: '双低', B: '带宽瓶颈', C: '算力瓶颈', D: '容量瓶颈' };
+  const STOP_LABELS_EN = {
+    agent_done: 'Agent judged it near-optimal and stopped on its own',
+    no_candidates: 'No on-target parameters left to try (the diagnosed bottleneck has no safe parameter that helps, or load/config is already at its edge)',
+    budget_rounds: 'Reached the maximum round budget',
+    budget_time: 'Reached the time budget (planned rounds not yet finished)',
+    no_improve_k: 'No real improvement for several rounds in a row — judged converged',
+    user_stop: 'Stopped manually by the user',
+    failed: 'Session aborted on error',
+  };
+  const STOP_LABELS = () => (_uiLang() === 'en' ? STOP_LABELS_EN : STOP_LABELS_ZH);
+  // 瓶颈字母 → 人话(同后端 action_space.BOTTLENECK_LABEL)。
+  const BOTTLENECK_LABEL_ZH = { A: '双低', B: '带宽瓶颈', C: '算力瓶颈', D: '容量瓶颈' };
+  const BOTTLENECK_LABEL_EN = { A: 'Under-utilized', B: 'Bandwidth bottleneck', C: 'Compute bottleneck', D: 'Capacity bottleneck' };
+  const BOTTLENECK_LABEL = () => (_uiLang() === 'en' ? BOTTLENECK_LABEL_EN : BOTTLENECK_LABEL_ZH);
+  const bottleneckOther = () => (_uiLang() === 'en' ? 'Symptom/other' : '症状/其它');
   // 业务形态 WorkloadSpec(M1)：形态是唯一主维度——自带 bench 负载与默认 SLA(数值同后端
   // autopilot/workload.py)。"目标"(吞吐优先/延迟优先/性价比)UI 已去掉,调优统一"不破
   // SLA 前提下最大化吞吐"(业界惯例;objective.py 后端仍支持 target,只是 UI 不再暴露选择,
   // 免得用户在"形态"和"目标"两个维度间双重决策——ap-20260719-004104 那次泛形态+泛目标
-  // 组合在轻载下 load_limited 交白卷,正是这种维度纠缠的产物)。
+  // 组合在轻载下 load_limited 交白卷,正是这种维度纠缠的产物)。load 是负载参数简写(p/o/c),
+  // 本身就是数字+缩写,语言无关;仅 custom 的负载描述是自然语言,走 i18n key。
   const WORKLOAD_SHAPES = {
     chat:      { sla: [1000, 50, 3000],  load: 'p500/o128 · c64' },
     rag:       { sla: [3000, 50, 8000],  load: 'p4000/o256 · c16' },
     agent:     { sla: [1000, 50, 15000], load: 'p2000/o512 · c32' },
     reasoning: { sla: [1000, 30, 90000], load: 'p1000/o4096 · c16' },
     code:      { sla: [100, 20, 2000],   load: 'p300/o128 · c16' },
-    custom:    { sla: null,              load: '全手动(沿用旧默认)' },
+    custom:    { sla: null,              load: null },
   };
   return {
     // target 固定 throughput(不破 SLA 前提下最大化吞吐,业界惯例);UI 不再暴露"目标"选择,
@@ -1533,17 +1720,7 @@ function autopilotTab() {
     advOpen: false,
     showPrompt: false,
     adv: { guidance: '', temperature: 0.4, timeout_s: 240, retries: 2 },
-    LOCKED_PROMPT:
-`你是一个 LLM-serving 性能工程师(核心合约,不可改):
-① 每轮只改 1 个参数,且只能从「动作范围」里选;
-② 必须接受压测判决——不得声称压测没证实的收益;
-③ 必须把改动挂在本轮诊断证据上(evidence_refs);
-④ 必须按 StructuredOutput schema 输出 {action|done, rationale, evidence_refs};
-⑤ 目标：不破 SLA 前提下最大化主指标;已近最优则 done:true。
-———
-每轮的 user message 由 runner 自动拼(用户不填):
-目标 / 预算 / 当前配置 / 蒸馏诊断 / 历史 / 动作范围。
-你的「额外指引」会追加在以上合约之后。`,
+    lockedPrompt() { return t('ap.lockedPrompt'); },
     PRESETS: {
       openrouter:  { provider: '', base_url: 'https://openrouter.ai/api/v1', model: 'anthropic/claude-opus-4' },
       openai:      { provider: '', base_url: 'https://api.openai.com/v1',    model: 'gpt-4o' },
@@ -1564,12 +1741,12 @@ function autopilotTab() {
     },
     async testAgent() {
       if (!this.agent.base_url || !this.agent.api_key || !this.agent.model) {
-        this.agentTest = '需填 Base URL / API Key / Model';
+        this.agentTest = t('ap.needFields');
         setTimeout(() => this.agentTest = '', 2600);
         return;
       }
       this.agentTesting = true;
-      this.agentTest = '连接中…';
+      this.agentTest = t('ap.connecting');
       const body = {
         agent: Object.assign({}, this.agent, {
           temperature: this.adv.temperature,
@@ -1583,9 +1760,9 @@ function autopilotTab() {
           body: JSON.stringify(body),
         });
         const out = await r.json();
-        this.agentTest = out.ok ? '✓ 连接可用' : ('连接失败： ' + (out.error || `HTTP ${r.status}`)).slice(0, 80);
+        this.agentTest = out.ok ? t('ap.connectionOk') : (t('ap.connectionFailed') + (out.error || `HTTP ${r.status}`)).slice(0, 80);
       } catch (e) {
-        this.agentTest = '连接失败： ' + String(e).slice(0, 70);
+        this.agentTest = t('ap.connectionFailed') + String(e).slice(0, 70);
       } finally {
         this.agentTesting = false;
         setTimeout(() => this.agentTest = '', 4500);
@@ -1643,21 +1820,40 @@ function autopilotTab() {
     },
     get resultSummaryText() {
       const s = this.resultSummary;
+      const en = _uiLang() === 'en';
       const parts = [];
       if (s.improved) {
-        parts.push(`找到 ${s.keptCount} 个更优配置并保留,已收敛到当前最优。`);
+        parts.push(en
+          ? `Found ${s.keptCount} better configuration(s) and kept them; converged to the current best.`
+          : `找到 ${s.keptCount} 个更优配置并保留,已收敛到当前最优。`);
       } else if (s.triedCount === 0) {
-        parts.push('本次没跑出任何候选(基线之后即停止)。');
+        parts.push(en
+          ? 'No candidates were tried this session (stopped right after the baseline).'
+          : '本次没跑出任何候选(基线之后即停止)。');
       } else if (s.baselineViolatesSla) {
-        parts.push(`基线本身就没达标(超出 ${s.baselineViolatedMetrics.join('/')} SLA),后续 ${s.triedCount} `
-          + `个候选也都没能拉回 SLA 内,因此全部回滚——更像是 SLA 阈值对当前硬件/模型偏紧,而不是参数没用。`);
+        parts.push(en
+          ? `The baseline itself didn't meet SLA (exceeded ${s.baselineViolatedMetrics.join('/')} SLA); `
+            + `none of the ${s.triedCount} candidates that followed could pull it back within SLA either, so all were `
+            + `reverted — this looks more like the SLA thresholds being too tight for this hardware/model than the `
+            + `parameters being useless.`
+          : `基线本身就没达标(超出 ${s.baselineViolatedMetrics.join('/')} SLA),后续 ${s.triedCount} `
+            + `个候选也都没能拉回 SLA 内,因此全部回滚——更像是 SLA 阈值对当前硬件/模型偏紧,而不是参数没用。`);
       } else if (s.revertedSlaCount > 0 && s.revertedWorseCount === 0 && s.tieCount === 0) {
-        parts.push(`试了 ${s.triedCount} 个候选,全部因破坏 SLA 被回滚,吞吐没能在达标前提下比较。`);
+        parts.push(en
+          ? `Tried ${s.triedCount} candidate(s), all reverted for breaking SLA — throughput couldn't be compared `
+            + `while staying within SLA.`
+          : `试了 ${s.triedCount} 个候选,全部因破坏 SLA 被回滚,吞吐没能在达标前提下比较。`);
       } else if (s.tieCount === s.triedCount && s.triedCount > 0) {
-        parts.push(`试了 ${s.triedCount} 个候选,吞吐变化都在噪声范围内(判定持平)——已接近当前配置能做到的上限。`);
+        parts.push(en
+          ? `Tried ${s.triedCount} candidate(s); throughput changes were all within noise (judged as ties) — `
+            + `already close to what the current configuration can do.`
+          : `试了 ${s.triedCount} 个候选,吞吐变化都在噪声范围内(判定持平)——已接近当前配置能做到的上限。`);
       } else {
-        parts.push(`试了 ${s.triedCount} 个候选：${s.revertedWorseCount} 个实测更差被回滚,`
-          + `${s.tieCount} 个持平,${s.revertedSlaCount} 个破 SLA。`);
+        parts.push(en
+          ? `Tried ${s.triedCount} candidate(s): ${s.revertedWorseCount} measured worse and reverted, `
+            + `${s.tieCount} tied, ${s.revertedSlaCount} broke SLA.`
+          : `试了 ${s.triedCount} 个候选：${s.revertedWorseCount} 个实测更差被回滚,`
+            + `${s.tieCount} 个持平,${s.revertedSlaCount} 个破 SLA。`);
       }
       return parts.join(' ');
     },
@@ -1667,6 +1863,7 @@ function autopilotTab() {
     // (逐轮细节由 knobLedger 承担)。
     get sessionNarrativeText() {
       const rounds = (this.session && this.session.rounds) || [];
+      const en = _uiLang() === 'en';
       const timeline = [];
       let lastBn = null;
       rounds.forEach(r => {
@@ -1674,13 +1871,22 @@ function autopilotTab() {
         if (bn && bn !== lastBn) { timeline.push({ round: r.round, bn }); lastBn = bn; }
       });
       if (!timeline.length) return '';
-      const label = bn => BOTTLENECK_LABEL[bn] || '症状/其它';
+      const label = bn => BOTTLENECK_LABEL()[bn] || bottleneckOther();
+      const stopLabels = STOP_LABELS();
       const parts = [];
       if (timeline.length === 1) {
-        parts.push(`本次从头到尾都诊断为${label(timeline[0].bn)},所以每轮候选都从这个瓶颈对症的参数池里选。`);
+        parts.push(en
+          ? `This session was diagnosed as ${label(timeline[0].bn)} throughout, so every round's candidates came `
+            + `from the parameter pool for that bottleneck.`
+          : `本次从头到尾都诊断为${label(timeline[0].bn)},所以每轮候选都从这个瓶颈对症的参数池里选。`);
       } else {
-        const switches = timeline.slice(1).map(t => `第 ${t.round} 轮起转为${label(t.bn)}`).join('、');
-        parts.push(`本次先诊断为${label(timeline[0].bn)},${switches},参数池跟着瓶颈变化切换过对症目标。`);
+        const switches = en
+          ? timeline.slice(1).map(t => `switched to ${label(t.bn)} from round ${t.round}`).join(', ')
+          : timeline.slice(1).map(t => `第 ${t.round} 轮起转为${label(t.bn)}`).join('、');
+        parts.push(en
+          ? `This session was first diagnosed as ${label(timeline[0].bn)}, then ${switches}; the parameter pool `
+            + `switched targets along with the bottleneck.`
+          : `本次先诊断为${label(timeline[0].bn)},${switches},参数池跟着瓶颈变化切换过对症目标。`);
       }
       const stopRound = [...rounds].reverse().find(r => r.kind === 'stop');
       const cause = stopRound && stopRound.stop_cause;
@@ -1688,14 +1894,23 @@ function autopilotTab() {
         const aas = (this.session && this.session.action_space_summary) || {};
         const untried = (aas.relevant_knobs || []).filter(k => !(aas.tried_knobs || []).includes(k));
         const budgetExhausted = cause === 'budget_rounds' || cause === 'budget_time';
+        const causeLabel = stopLabels[cause] || cause;
         if (budgetExhausted && untried.length) {
-          parts.push(`最终第 ${stopRound.round} 轮${STOP_LABELS[cause] || cause},还有 ${untried.length} `
-            + `个对症参数没轮到试(具体见下方候选池)。`);
+          parts.push(en
+            ? `Eventually stopped at round ${stopRound.round} — ${causeLabel}; ${untried.length} on-target `
+              + `parameter(s) never got a turn (see the candidate pool below).`
+            : `最终第 ${stopRound.round} 轮${causeLabel},还有 ${untried.length} `
+              + `个对症参数没轮到试(具体见下方候选池)。`);
         } else if (cause === 'no_candidates') {
-          parts.push(`第 ${stopRound.round} 轮已经没有对${label(lastBn)}安全对症的参数可试,`
-            + `判定到了当前配置能做的上限。`);
+          parts.push(en
+            ? `By round ${stopRound.round} there were no more safe, on-target parameters left to try for `
+              + `${label(lastBn)} — judged as the ceiling of what the current configuration can do.`
+            : `第 ${stopRound.round} 轮已经没有对${label(lastBn)}安全对症的参数可试,`
+              + `判定到了当前配置能做的上限。`);
         } else {
-          parts.push(`最终第 ${stopRound.round} 轮${STOP_LABELS[cause] || cause}。`);
+          parts.push(en
+            ? `Eventually stopped at round ${stopRound.round} — ${causeLabel}.`
+            : `最终第 ${stopRound.round} 轮${causeLabel}。`);
         }
       }
       return parts.join(' ');
@@ -1706,15 +1921,18 @@ function autopilotTab() {
     // 的瓶颈标签——每轮必有、够简短,也跟上面"为什么"小节的因果链呼应,不是另起一套解释。
     get knobLedger() {
       const rounds = (this.session && this.session.rounds) || [];
-      const fmtVal = v => (v == null) ? '—' : (typeof v === 'boolean' ? (v ? '开' : '关') : String(v));
+      const en = _uiLang() === 'en';
+      const fmtVal = v => (v == null) ? '—' : (typeof v === 'boolean' ? (v ? (en ? 'on' : '开') : (en ? 'off' : '关')) : String(v));
+      const verdict = VERDICT();
+      const label = bn => BOTTLENECK_LABEL()[bn] || bottleneckOther();
       return rounds.filter(r => r.kind === 'candidate' && r.action && r.action.knob).map(r => {
-        const v = VERDICT[r.decision] || { t: r.decision || '', c: '' };
+        const v = verdict[r.decision] || { t: r.decision || '', c: '' };
         const d = r.delta_pct;
         const bn = r.diagnosis && r.diagnosis.bottleneck;
         return {
           round: r.round, param: r.action.knob,
           fromText: fmtVal(r.action.from), toText: fmtVal(r.action.to),
-          whyText: bn ? `为了缓解${BOTTLENECK_LABEL[bn] || '症状/其它'}` : '',
+          whyText: bn ? (en ? `To ease ${label(bn)}` : `为了缓解${label(bn)}`) : '',
           verdictText: v.t, verdictClass: v.c,
           deltaText: (d == null || !isFinite(d)) ? '' : `${d > 0 ? '+' : ''}${d.toFixed(1)}%`,
         };
@@ -1726,20 +1944,38 @@ function autopilotTab() {
     get actionSpaceSummaryText() {
       const s = (this.session && this.session.action_space_summary) || {};
       if (!s.total) return '';
+      const en = _uiLang() === 'en';
+      const label = bn => BOTTLENECK_LABEL()[bn] || bottleneckOther();
       const parts = [];
-      parts.push(`可调范围：全部 ${s.total} 个 vLLM 参数里,${s.default_on_count} 个已是引擎启动时自调的`
-        + `最优默认值、${s.unsupported_count} 个当前 vLLM 版本不支持、${s.precision_excluded_count} `
-        + `个会降精度按策略不提供,剩下 ${s.considerable_count} 个才是真正的候选池。`);
-      const seen = (s.bottlenecks_seen || []).map(bn => BOTTLENECK_LABEL[bn] || '症状/其它').join('/');
+      parts.push(en
+        ? `Tunable scope: of all ${s.total} vLLM parameters, ${s.default_on_count} are already self-tuned to `
+          + `their optimal default at engine startup, ${s.unsupported_count} aren't supported by the current `
+          + `vLLM version, and ${s.precision_excluded_count} would lower precision so they're withheld by policy `
+          + `— leaving ${s.considerable_count} as the real candidate pool.`
+        : `可调范围：全部 ${s.total} 个 vLLM 参数里,${s.default_on_count} 个已是引擎启动时自调的`
+          + `最优默认值、${s.unsupported_count} 个当前 vLLM 版本不支持、${s.precision_excluded_count} `
+          + `个会降精度按策略不提供,剩下 ${s.considerable_count} 个才是真正的候选池。`);
+      const seen = (s.bottlenecks_seen || []).map(label).join('/');
       if (seen) {
         const rel = s.relevant_knobs || [], tried = s.tried_knobs || [];
         const untried = rel.filter(k => !tried.includes(k));
-        parts.push(`本次持续诊断到${seen},候选池里对症的有 ${rel.length} 个`
-          + (rel.length ? `(${rel.join(' / ')})` : '') + `,实际试了 ${tried.length} 个(结果见上方逐轮账本)`
-          + (untried.length
-            ? `,还剩 ${untried.length} 个对症但没轮到(${untried.join(' / ')},多因轮数/时间预算先耗尽)。`
-            : '——对症的都试过了。')
-          + `候选池里其余参数因为跟这次的瓶颈不对症,没有被提议。`);
+        if (en) {
+          parts.push(`This session was consistently diagnosed with ${seen}; the candidate pool has ${rel.length} `
+            + `on-target parameter(s)` + (rel.length ? ` (${rel.join(' / ')})` : '')
+            + `, and ${tried.length} were actually tried (see the round-by-round ledger above)`
+            + (untried.length
+              ? `; ${untried.length} on-target parameter(s) never got a turn (${untried.join(' / ')}, mostly `
+                + `because the round/time budget ran out first).`
+              : ' — every on-target one was tried.')
+            + ` The rest of the candidate pool wasn't proposed because it doesn't target this session's bottleneck.`);
+        } else {
+          parts.push(`本次持续诊断到${seen},候选池里对症的有 ${rel.length} 个`
+            + (rel.length ? `(${rel.join(' / ')})` : '') + `,实际试了 ${tried.length} 个(结果见上方逐轮账本)`
+            + (untried.length
+              ? `,还剩 ${untried.length} 个对症但没轮到(${untried.join(' / ')},多因轮数/时间预算先耗尽)。`
+              : '——对症的都试过了。')
+            + `候选池里其余参数因为跟这次的瓶颈不对症,没有被提议。`);
+        }
       }
       return parts.join(' ');
     },
@@ -1752,7 +1988,9 @@ function autopilotTab() {
       if (ts.length < 2 || !total) return '';
       const perMin = (ts[ts.length - 1] - ts[0]) / (ts.length - 1) / 60000;
       const left = Math.max(0, total - done);
-      return left ? `预计剩余 ≤${Math.max(1, Math.round(perMin * left))} min` : '收尾中';
+      if (!left) return _uiLang() === 'en' ? 'Finishing up…' : '收尾中';
+      const mins = Math.max(1, Math.round(perMin * left));
+      return _uiLang() === 'en' ? `≤${mins} min remaining (est.)` : `预计剩余 ≤${mins} min`;
     },
     get promote() { return (this.session && this.session.promote_package) || null; },
     get promoteDiff() { return (this.promote && this.promote.diff && this.promote.diff.changes) || []; },
@@ -1766,9 +2004,10 @@ function autopilotTab() {
     apiUrl(path) { return `${this.bridgeBase()}${path}`; },
     hasBridge() { return !!this.bridgeBase(); },
     startLabel() {
+      const en = _uiLang() === 'en';
       const real = this.hasBridge();
-      if (this.running) return real ? '真实调优中…' : '调优中…';
-      return '执行调优';
+      if (this.running) return real ? (en ? 'Tuning (real)…' : '真实调优中…') : (en ? 'Tuning…' : '调优中…');
+      return en ? 'Run tuning' : '执行调优';
     },
     applyWorkload() {
       // 形态是唯一主维度：直接套用形态 SLA(之后仍可手改);custom 不动任何字段(全手动透传)。
@@ -1781,16 +2020,31 @@ function autopilotTab() {
     },
     workloadHint() {
       const s = WORKLOAD_SHAPES[this.obj.workload];
-      return s ? `负载 ${s.load}` : '';
+      if (!s) return '';
+      const load = s.load == null ? t('ap.customLoadNote') : s.load;
+      return _uiLang() === 'en' ? `Load ${load}` : `负载 ${load}`;
     },
     stateLabel() {
       if (!this.session) return '';
-      if (this.session.state === 'failed') return '失败';
-      if (this.session.state === 'running') return this.hasBridge() ? '真实调优中' : '调优进行中';
-      return '已完成';
+      const en = _uiLang() === 'en';
+      if (this.session.state === 'failed') return en ? 'Failed' : '失败';
+      if (this.session.state === 'running') {
+        return this.hasBridge() ? (en ? 'Tuning (real)' : '真实调优中') : (en ? 'Tuning in progress' : '调优进行中');
+      }
+      return en ? 'Done' : '已完成';
     },
     _phaseLabel(phase) {
-      return {
+      const en = _uiLang() === 'en';
+      return (en ? {
+        baseline: 'Baseline',
+        observe: 'Reading diagnosis',
+        propose: 'Waiting on agent decision',
+        apply: 'Starting candidate sandbox',
+        benchmark: 'Benchmarking',
+        decide: 'Scoring the gain',
+        restore: 'Restoring best',
+        finalize: 'Finalizing',
+      } : {
         baseline: '建立基线',
         observe: '读取诊断',
         propose: '等待 Agent 决策',
@@ -1799,20 +2053,32 @@ function autopilotTab() {
         decide: '判定收益',
         restore: '恢复 best',
         finalize: '收尾恢复',
-      }[phase] || '运行中';
+      })[phase] || (en ? 'Running' : '运行中');
     },
     // propose 阶段挤了 6 种不同的事(P0 剪枝/候选检索/思考/决策/网络重试/收敛判断),
     // 共用"等待 Agent 决策"一个标签会看花——按消息前缀拆细,其余阶段维持原标签。
+    // 注:后端 runner.py 的 ev.message 本身恒为中文(事件日志未做 lang 分支,是已知的
+    // 后续待办);这里只翻译匹配后"展示给用户看"的短标签,匹配条件仍按后端中文原文比对。
     _eventLabel(ev) {
       const msg = ev.message || '';
+      const en = _uiLang() === 'en';
       if (ev.phase === 'propose') {
-        if (msg.startsWith('P0 预测剪枝')) return 'P0 剪枝';
-        if (msg.startsWith('诊断命中')) return '候选检索';
-        if (msg.startsWith('agent 思考：')) return 'Agent 思考';
-        if (msg.startsWith('agent 决策：')) return 'Agent 决策';
-        if (msg.startsWith('agent 调用失败')) return '网络重试';
-        if (msg.includes('LLM 调用失败')) return 'LLM 兜底';
-        if (msg.includes('没有对症候选') || msg.includes('近最优')) return '收敛判断';
+        // 匹配串是后端 runner.py/agent.py 事件文案的前缀/子串——那边现在按 session lang
+        // 双语(self._msg(zh, en)),两种都要认。"agent 思考："/"agent 决策：" 前缀本身
+        // 保持中文不变(内部协议标记,从不直接展示给用户,见 runner.py 对应注释)。
+        if (msg.startsWith('P0 预测剪枝') || msg.startsWith('P0 predictive pruning'))
+          return en ? 'P0 pruning' : 'P0 剪枝';
+        if (msg.startsWith('诊断命中') || msg.startsWith('Diagnosed '))
+          return en ? 'Candidate lookup' : '候选检索';
+        if (msg.startsWith('agent 思考：')) return en ? 'Agent thinking' : 'Agent 思考';
+        if (msg.startsWith('agent 决策：')) return en ? 'Agent decision' : 'Agent 决策';
+        if (msg.startsWith('agent 调用失败') || msg.startsWith('agent call failed'))
+          return en ? 'Retrying' : '网络重试';
+        if (msg.includes('LLM 调用失败') || msg.includes('LLM call failed'))
+          return en ? 'LLM fallback' : 'LLM 兜底';
+        if (msg.includes('没有对症候选') || msg.includes('近最优')
+            || msg.includes('No on-target candidates') || msg.includes('near-optimal'))
+          return en ? 'Convergence check' : '收敛判断';
       }
       return this._phaseLabel(ev.phase);
     },
@@ -1822,6 +2088,8 @@ function autopilotTab() {
     },
     _eventAge(ev) {
       const s = Math.max(0, Math.round((Date.now() - this._eventTime(ev)) / 1000));
+      const en = _uiLang() === 'en';
+      if (en) return s < 90 ? `${s}s ago` : `${Math.round(s / 60)}min ago`;
       return s < 90 ? `${s}s 前` : `${Math.round(s / 60)}min 前`;
     },
     _benchProgress(ev) {
@@ -1865,7 +2133,7 @@ function autopilotTab() {
       const events = allEvents.slice(-5);
       const ev = events[events.length - 1] || null;
       if (!ev) {
-        return { phase: 'baseline', round: 0, title: '启动真实调优', hyp: '正在创建 session 并准备基线压测', events: [], progress: '' };
+        return { phase: 'baseline', round: 0, title: t('ap.startingRealTuning'), hyp: t('ap.creatingSession'), events: [], progress: '' };
       }
       const completedRounds = (s.rounds || []).map(r => Number(r.round)).filter(Number.isFinite);
       const maxCompletedRound = completedRounds.length ? Math.max(...completedRounds) : -1;
@@ -1876,7 +2144,9 @@ function autopilotTab() {
       const evidence = (detail.evidence_refs || []).slice(0, 3).join(' · ');
       // agent 思考/决策事件的完整内容已经在下面的常驻推理框里显示;这里再放一遍
       // ev.message(服务端为滚动流截断过的版本)只会造出"截断预览 + 完整重复"的观感。
-      const isReasoningEvent = /^agent (决策|思考):/.test(ev.message || '');
+      // 注:后端 f-string 用的是全角冒号"："(U+FF1A),不是半角":"——这条正则曾经写成
+      // 半角,导致这个判断从未真正命中(遗留 bug,顺手修)。
+      const isReasoningEvent = /^agent (决策|思考)：/.test(ev.message || '');
       let hyp = isReasoningEvent ? '' : (ev.message || this._phaseLabel(ev.phase));
       if (hyp && evidence) hyp += ` · ${evidence}`;
       const curRound = Number.isFinite(evRound) ? evRound : maxCompletedRound + 1;
@@ -1898,7 +2168,7 @@ function autopilotTab() {
 
     async start() {
       if (this.hasBridge() && (!this.agent.api_key || !this.agent.base_url || !this.agent.model)) {
-        this.agentTest = '真实调优需要先配置 LLM agent';
+        this.agentTest = t('ap.needAgentConfig');
         this.agentOpen = true;
         setTimeout(() => this.agentTest = '', 3500);
         return;
@@ -1920,34 +2190,34 @@ function autopilotTab() {
       };
       try {
         const r = await fetch(this.apiUrl('/api/autopilot/start'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-        if (r.status === 409) { this.agentTest = '已有 session 在跑'; setTimeout(() => this.agentTest = '', 2500); return; }
+        if (r.status === 409) { this.agentTest = t('ap.sessionAlreadyRunning'); setTimeout(() => this.agentTest = '', 2500); return; }
         if (!r.ok) { throw new Error(`HTTP ${r.status}`); }
         const out = await r.json().catch(() => ({}));
         this.running = true; this.stopping = false; this.shownRounds = []; this.expandedRounds = [];
         this.activeSessionId = out.session_id || '';
         this.session = { session_id: this.activeSessionId, state: 'running', rounds: [], events: [] };
-        this.pending = { phase: 'baseline', title: '启动真实调优', hyp: '正在创建 session 并准备基线压测', events: [], progress: '' };
+        this.pending = { phase: 'baseline', title: t('ap.startingRealTuning'), hyp: t('ap.creatingSession'), events: [], progress: '' };
         this._startPoll();
-      } catch (e) { this.agentTest = this.bridgeBase() ? 'host bridge 未连接' : '启动失败'; setTimeout(() => this.agentTest = '', 3500); }
+      } catch (e) { this.agentTest = this.bridgeBase() ? t('ap.bridgeNotConnected') : t('ap.startFailed'); setTimeout(() => this.agentTest = '', 3500); }
     },
     async stop() {
       if (!this.running || this.stopping) return;
       this.stopping = true;
-      this.agentTest = '正在停止调优并恢复 serve…';
+      this.agentTest = t('ap.stoppingAndRestoring');
       this.pending = Object.assign({}, this.pending || {}, {
         phase: 'restore',
-        title: '停止调优',
-        hyp: '正在终止候选沙盒并恢复主 serve',
-        progress: '请求停止中，未保留当前候选',
+        title: t('ap.stopBtn'),
+        hyp: t('ap.terminatingSandbox'),
+        progress: t('ap.stopRequestedNoKeep'),
       });
       try {
         const r = await fetch(this.apiUrl('/api/autopilot/stop'), { method: 'POST' });
         const out = await r.json().catch(() => ({}));
         if (!r.ok) throw new Error(out.error || `HTTP ${r.status}`);
-        this.agentTest = out.stopped ? '已停止，正在恢复状态…' : '没有正在运行的调优';
+        this.agentTest = out.stopped ? t('ap.stoppedRestoring') : t('ap.noRunningSession');
         await this._sync();
       } catch (e) {
-        this.agentTest = '停止失败： ' + String(e.message || e).slice(0, 70);
+        this.agentTest = t('ap.stopFailed') + String(e.message || e).slice(0, 70);
       } finally {
         setTimeout(() => { this.agentTest = ''; }, 3500);
       }
@@ -1965,13 +2235,13 @@ function autopilotTab() {
         if (seq !== this._syncSeq) return;           // 期间已有更新的请求,这次报错作废
         if (this.running) {
           this.pollFailures += 1;
-          if (this.pending) this.pending.progress = '状态刷新重试中，保留上一帧';
+          if (this.pending) this.pending.progress = t('ap.statusRefreshRetry');
           if (this.pollFailures < 3) return;
           this.running = false;
           this.stopping = false;
           this.pending = null;
           this.session = Object.assign({}, this.session || {}, { state: 'failed', error: 'status fetch failed' });
-          this.agentTest = this.hasBridge() ? 'host bridge 状态不可达' : 'status 不可达';
+          this.agentTest = this.hasBridge() ? t('ap.bridgeUnreachable') : t('ap.statusUnreachable');
           setTimeout(() => this.agentTest = '', 3500);
         }
         return;
@@ -2008,7 +2278,8 @@ function autopilotTab() {
     },
 
     _map(r) {
-      const v = VERDICT[r.decision] || VERDICT.kept;
+      const verdict = VERDICT();
+      const v = verdict[r.decision] || verdict.kept;
       const sa = r.scorecard_after, sb = r.scorecard_before;
       const sc = (m) => m ? { tps: Math.round(m.output_tps), ttft: Math.round(m.ttft_p99_ms), tpot: Math.round(m.tpot_p99_ms) } : null;
       const dg = r.diagnosis || {};
@@ -2030,12 +2301,27 @@ function autopilotTab() {
       };
     },
     _decideLogic(r) {
+      const en = _uiLang() === 'en';
       const a = this.fmt(r.objective_score_after), b = this.fmt(r.objective_score_before);
-      if (r.decision === 'baseline') return '设为初始 best(基准线,后续候选都跟它 + best-so-far 比)';
-      if (r.decision === 'kept') return `objective_score ${a} 超 best ${b} 的噪声边界 且 sla_ok → 保留,设为新 best`;
-      if (r.decision === 'reverted') return '候选 score 不可接受(破 SLA / 起不来 / 高错误率)→ 回滚,保留 best';
-      if (r.decision === 'tie') return `收益在噪声边界内(${a} vs best ${b})→ 记平,不替换 best`;
-      if (r.decision === 'done') return r.rationale || 'agent done:true → 收尾回 best';
+      if (r.decision === 'baseline') {
+        return en ? 'Set as initial best (baseline; every later candidate compares against it + best-so-far)'
+                   : '设为初始 best(基准线,后续候选都跟它 + best-so-far 比)';
+      }
+      if (r.decision === 'kept') {
+        return en ? `objective_score ${a} exceeds best ${b}'s noise margin and sla_ok → kept, set as new best`
+                   : `objective_score ${a} 超 best ${b} 的噪声边界 且 sla_ok → 保留,设为新 best`;
+      }
+      if (r.decision === 'reverted') {
+        return en ? 'Candidate score unacceptable (broke SLA / failed to start / high error rate) → reverted, best kept'
+                   : '候选 score 不可接受(破 SLA / 起不来 / 高错误率)→ 回滚,保留 best';
+      }
+      if (r.decision === 'tie') {
+        return en ? `Gain within the noise margin (${a} vs best ${b}) → recorded as a tie, best unchanged`
+                   : `收益在噪声边界内(${a} vs best ${b})→ 记平,不替换 best`;
+      }
+      if (r.decision === 'done') {
+        return r.rationale || (en ? 'agent done:true → finalize back to best' : 'agent done:true → 收尾回 best');
+      }
       return '';
     },
 
@@ -2044,28 +2330,29 @@ function autopilotTab() {
       try { navigator.clipboard.writeText(text); } catch (_) {}
       if (e && e.target) {
         const old = label || e.target.textContent;
-        e.target.textContent = '✓ 已复制';
+        e.target.textContent = t('ap.copied');
         setTimeout(() => { e.target.textContent = old; }, 1800);
       }
     },
-    copyCmd(e) { this.copyText(this.best.cmd, e, '复制'); },
+    copyCmd(e) { this.copyText(this.best.cmd, e, t('common.copy')); },
     toggleRow(n) { const i = this.expandedRounds.indexOf(n); if (i >= 0) this.expandedRounds.splice(i, 1); else this.expandedRounds.push(n); },
     dlt(r, f) { return r.scoreBefore ? (r.scoreAfter[f] - r.scoreBefore[f]) : 0; },
     traceMarkdown() {
-      let md = '# Autopilot 推理轨迹\n\n';
+      const en = _uiLang() === 'en';
+      let md = en ? '# Autopilot Reasoning Trace\n\n' : '# Autopilot 推理轨迹\n\n';
       this.shownRounds.forEach(r => {
         md += `## R${r.round} — ${r.verdict}\n`;
-        if (r.snap) md += `- 诊断快照： ${r.snap}\n`;
-        if (r.rationale) md += `- Agent 推理： ${r.rationale}\n`;
-        if (r.evidence && r.evidence.length) md += `- 证据引用： ${r.evidence.join(', ')}\n`;
-        if (r.cmd) md += `- 本轮命令： \`${r.cmd}\`\n`;
-        if (r.scoreAfter) md += `- 压测： output_tps ${r.scoreBefore ? r.scoreBefore.tps + '→' : ''}${r.scoreAfter.tps}\n`;
-        if (r.decideLogic) md += `- 判定： ${r.decideLogic}\n`;
+        if (r.snap) md += en ? `- Diagnosis snapshot: ${r.snap}\n` : `- 诊断快照： ${r.snap}\n`;
+        if (r.rationale) md += en ? `- Agent reasoning: ${r.rationale}\n` : `- Agent 推理： ${r.rationale}\n`;
+        if (r.evidence && r.evidence.length) md += en ? `- Evidence refs: ${r.evidence.join(', ')}\n` : `- 证据引用： ${r.evidence.join(', ')}\n`;
+        if (r.cmd) md += en ? `- This round's command: \`${r.cmd}\`\n` : `- 本轮命令： \`${r.cmd}\`\n`;
+        if (r.scoreAfter) md += `${en ? '- Bench' : '- 压测'}： output_tps ${r.scoreBefore ? r.scoreBefore.tps + '→' : ''}${r.scoreAfter.tps}\n`;
+        if (r.decideLogic) md += en ? `- Decision: ${r.decideLogic}\n` : `- 判定： ${r.decideLogic}\n`;
         md += '\n';
       });
       return md;
     },
-    copyTrace(e) { try { navigator.clipboard.writeText(this.traceMarkdown()); } catch (_) {}; e.target.textContent = '✓ 已复制'; setTimeout(() => e.target.textContent = '复制 Markdown', 2000); },
+    copyTrace(e) { try { navigator.clipboard.writeText(this.traceMarkdown()); } catch (_) {}; e.target.textContent = t('ap.copied'); setTimeout(() => e.target.textContent = t('ap.copyMarkdown'), 2000); },
     downloadTrace() {
       const blob = new Blob([JSON.stringify(this.shownRounds, null, 2)], { type: 'application/json' });
       const a = document.createElement('a');
@@ -2129,7 +2416,7 @@ function dashboard() {
     diagnosesStale: false,   // true = 当前无触发,面板显示的是最近一次命中(history 回退)
     benchRunning: 0,
     showStartupInfo: false,
-    cmdlineCopyLabel: t('ui.copy'),
+    cmdlineCopyLabel: '',   // 空 = 交给 x-text 的 `|| t('common.copy')` 回退实时取当前语言,别在 init 时把值冻住
 
     fmt(v, digits) {
       if (v == null || isNaN(v)) return '—';
@@ -2658,7 +2945,7 @@ function dashboard() {
       } catch (e) {
         this.cmdlineCopyLabel = t('ui.copyFailed');
       }
-      setTimeout(() => { this.cmdlineCopyLabel = t('ui.copy'); }, 1800);
+      setTimeout(() => { this.cmdlineCopyLabel = ''; }, 1800);
     },
 
     async refresh() {

@@ -283,26 +283,44 @@ class StubAgent:
 
     model = "stub-agent"
 
+    def __init__(self, lang: str = "zh") -> None:
+        # 同 _HTTPAgent.lang:StubAgent 既是"无 key 时的独立 agent",也是 ResilientAgent
+        # 的失败兜底——两条路径的 rationale/reason 都该跟着 session 语言走,不能恒中文
+        # (真机复现：真 LLM 调用失败兜回 StubAgent 那一轮,rationale 突然切回中文)。
+        self.lang = lang if lang == "en" else "zh"
+
+    def _msg(self, zh: str, en: str) -> str:
+        return en if self.lang == "en" else zh
+
     def propose(self, ctx: AgentContext) -> AgentDecision:
         if ctx.recovery_mode:
             return self._propose_recovery(ctx)
         tried = {t["hash"] for t in ctx.tried_configs
                  if t.get("decision") in ("reverted", "tie")}
         bn = ctx.diagnosis.get("bottleneck")
-        ev = list(ctx.diagnosis.get("evidence_refs", [])) or ([bottleneck_label(bn)] if bn else [])
+        label = bottleneck_label(bn, self.lang)
+        ev = list(ctx.diagnosis.get("evidence_refs", [])) or ([label] if bn else [])
         for c in ctx.candidates:
             if config_hash(c["config"]) in tried:
                 continue
+            lever = c.get("lever") or self._msg("对症提升", "targeted improvement")
             return AgentDecision(
                 done=False, knob=c["knob"], config=c["config"], from_val=c["from"],
                 to_val=c["to"], flag=c["flag"],
-                rationale=(f"命中{bottleneck_label(bn) if bn else '双低'}:{c['knob']} {c['from']}→{c['to']} "
-                           f"({c.get('lever', '对症提升')},不伤当前瓶颈)。"),
-                expected_effect="主指标↑,不破 SLA", evidence_refs=ev,
-                guardrail_notes="范围内;launch-catch 兜底",
+                rationale=self._msg(
+                    f"命中{label if bn else '双低'}:{c['knob']} {c['from']}→{c['to']} "
+                    f"({lever},不伤当前瓶颈)。",
+                    f"Matched {label if bn else 'Under-utilized'}: {c['knob']} {c['from']}→{c['to']} "
+                    f"({lever}, doesn't hurt the current bottleneck)."),
+                expected_effect=self._msg("主指标↑,不破 SLA", "primary metric ↑, without breaking SLA"),
+                evidence_refs=ev,
+                guardrail_notes=self._msg("范围内;launch-catch 兜底", "within range; launch-catch backstop"),
                 candidate_meta={"p0": c.get("p0"), "p2": c.get("p2")})
-        return AgentDecision(done=True, reason="已无对症候选 / 收益耗尽 → 判定近最优,停。",
-                             rationale="已无对症候选", evidence_refs=ev)
+        return AgentDecision(done=True, reason=self._msg(
+            "已无对症候选 / 收益耗尽 → 判定近最优,停。",
+            "No on-target candidates left / gains exhausted → judged near-optimal, stopping."),
+                             rationale=self._msg("已无对症候选", "No on-target candidates left"),
+                             evidence_refs=ev)
 
     def _propose_recovery(self, ctx: AgentContext) -> AgentDecision:
         fc = ctx.failure_context or {}
@@ -319,11 +337,14 @@ class StubAgent:
             if action not in tried:
                 return AgentDecision(
                     recovery_action=action,
-                    rationale=f"stub recovery：失败日志含 {err[:80]!r},优先尝试 {action}",
-                    expected_effect="修复基线启动/压测失败,获得首个有效 scorecard")
+                    rationale=self._msg(f"stub recovery：失败日志含 {err[:80]!r},优先尝试 {action}",
+                                        f"stub recovery: failure log contains {err[:80]!r}, trying {action} first"),
+                    expected_effect=self._msg("修复基线启动/压测失败,获得首个有效 scorecard",
+                                              "fix the baseline launch/bench failure and get a first valid scorecard"))
         return AgentDecision(recovery_action="abort",
-                             rationale="stub recovery：已耗尽修复动作,无法自愈",
-                             expected_effect="结束 session")
+                             rationale=self._msg("stub recovery：已耗尽修复动作,无法自愈",
+                                                 "stub recovery: exhausted all fix actions, unable to self-heal"),
+                             expected_effect=self._msg("结束 session", "end the session"))
 
 
 class _HTTPAgent:
@@ -455,8 +476,12 @@ class _HTTPAgent:
             except Exception as e:  # noqa: BLE001 — SSL RST/超时/截断/非 JSON
                 last = e
                 if attempt < self.NET_RETRIES:
-                    self._report(f"agent 调用失败({type(e).__name__}),"
-                                 f"第 {attempt + 2}/{self.NET_RETRIES + 1} 次尝试…")
+                    if self.lang == "en":
+                        self._report(f"agent call failed ({type(e).__name__}), "
+                                     f"attempt {attempt + 2}/{self.NET_RETRIES + 1}…")
+                    else:
+                        self._report(f"agent 调用失败({type(e).__name__}),"
+                                     f"第 {attempt + 2}/{self.NET_RETRIES + 1} 次尝试…")
                     backoff = min(4.0, 0.5 * (2 ** attempt))
                     slept = 0.0
                     while slept < backoff:
@@ -594,6 +619,7 @@ class ResilientAgent:
         self._fallback = fallback
         self._retries = max(0, int(retries))
         self.model = getattr(primary, "model", getattr(fallback, "model", ""))
+        self.lang = getattr(primary, "lang", getattr(fallback, "lang", "zh"))
 
     def set_progress(self, cb) -> None:
         if hasattr(self._primary, "set_progress"):

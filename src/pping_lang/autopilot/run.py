@@ -187,7 +187,8 @@ def main(argv: list[str] | None = None) -> int:
         gpus=args.gpus, container=args.candidate_name, serve_cmd=tuple(args.serve_cmd.split()),
         entrypoint=args.entrypoint, cmd_template=args.cmd_template,
         env=env, volumes=tuple(args.volume), cap_add=tuple(args.cap_add),
-        ready_timeout_s=args.ready_timeout, bench_spec=bench_spec, dash_port=args.dash_port)
+        ready_timeout_s=args.ready_timeout, bench_spec=bench_spec, dash_port=args.dash_port,
+        lang=agent_lang)
 
     serve = args.serve_container
     serve_was_up = bool(serve) and _serve_running(serve)

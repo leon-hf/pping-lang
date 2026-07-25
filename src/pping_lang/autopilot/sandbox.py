@@ -154,7 +154,9 @@ class DockerSandbox:
                  volumes: tuple[str, ...] = (), cap_add: tuple[str, ...] = (),
                  ready_timeout_s: float = READY_TIMEOUT_S, poll_s: float = 3.0,
                  host: str = "127.0.0.1", bench_spec: dict | None = None,
-                 dash_port: int | None = None, dash_internal: int = 8765) -> None:
+                 dash_port: int | None = None, dash_internal: int = 8765,
+                 lang: str = "zh") -> None:
+        self._lang = lang if lang == "en" else "zh"   # 进度心跳文案语言,同 session 的 agent.lang
         self._model, self._image, self._port = model, image, int(port)
         self._internal = int(internal_port)
         self._gpus, self._container = gpus, container
@@ -319,9 +321,12 @@ class DockerSandbox:
             tail = [*ep, self._image, *self._serve_cmd, self._model, *flags, *self._extra]
         run = self._docker(*head, *tail)
         if run.returncode != 0:
-            raise LaunchError(f"docker run 失败：{(run.stderr or run.stdout).strip()}")
+            err = (run.stderr or run.stdout).strip()
+            raise LaunchError(f"docker run failed: {err}" if self._lang == "en" else f"docker run 失败：{err}")
         self._cfg = dict(config)
-        self._report("候选容器已启动,等待 vLLM API 就绪(模型加载 + 显存分配)…")
+        self._report("Candidate container started, waiting for the vLLM API to become ready "
+                     "(model load + memory allocation)…" if self._lang == "en" else
+                     "候选容器已启动,等待 vLLM API 就绪(模型加载 + 显存分配)…")
         self._wait_ready()
 
     def _http_ok(self, url: str, timeout: float) -> bool:
@@ -373,29 +378,38 @@ class DockerSandbox:
         last_report = start
         # 阶段1:API server 起来(/v1/models 200)
         url = f"http://{self._host}:{self._port}/v1/models"
+        en = self._lang == "en"
         while not self._http_ok(url, timeout=4):
             if not self._alive():                        # 容器退出 = 起不来/OOM
                 logs = self._logs_tail()
                 self.teardown()
+                if en:
+                    raise LaunchError(f"Candidate container exited (failed to start / OOM). Log tail:\n{logs}")
                 raise LaunchError(f"候选容器退出(起不来/OOM)。日志尾：\n{logs}")
             now = time.monotonic()
             if now >= deadline:
                 logs = self._logs_tail()
                 self.teardown()
+                if en:
+                    raise LaunchError(f"Candidate API ready-timeout ({self._ready_timeout:.0f}s). Log tail:\n{logs}")
                 raise LaunchError(f"候选 API 就绪超时({self._ready_timeout:.0f}s)。日志尾：\n{logs}")
             if now - last_report >= 15:                  # 心跳：长静默窗内 UI 不能死着
                 stage = self._logs_tail_interesting()     # 过滤噪声,只留有信息量的进度行
-                self._report(f"等待 vLLM API 就绪 {int(now - start)}s / {self._ready_timeout:.0f}s"
-                             + (f" · {stage}" if stage else " …"))
+                prefix = (f"Waiting for the vLLM API to become ready {int(now - start)}s / {self._ready_timeout:.0f}s"
+                          if en else f"等待 vLLM API 就绪 {int(now - start)}s / {self._ready_timeout:.0f}s")
+                self._report(prefix + (f" · {stage}" if stage else " …"))
                 last_report = now
             time.sleep(self._poll)
         kv_line = self._find_log_line("KV cache size")   # 引擎实测 KV 池,D regime 的关键底数
         if kv_line:
-            self._report(f"引擎就绪：{_clean_log_line(kv_line)[-110:]}")
+            tail = _clean_log_line(kv_line)[-110:]
+            self._report(f"Engine ready: {tail}" if en else f"引擎就绪：{tail}")
         # 阶段2：真推理探针 —— 确认推理可用 + 跑完首个 JIT(冷引擎首请求慢,否则 bench 0 样本)。
         # 重试式：Blackwell 首推理时长高方差(实测 26s ~ >180s,JIT/cudagraph 竞争),单发长超时
         # 会被一次卡死请求挂满;短超时 + 重试,新连接往往立即成功。
-        self._report(f"API 已就绪({int(time.monotonic() - start)}s),推理探针 + kernel JIT 预热中…")
+        elapsed0 = int(time.monotonic() - start)
+        self._report(f"API ready ({elapsed0}s), warming up inference probe + kernel JIT…" if en else
+                     f"API 已就绪({elapsed0}s),推理探针 + kernel JIT 预热中…")
         warm_deadline = time.monotonic() + min(self._ready_timeout, 180.0)
         attempt = 0
         while True:
@@ -405,10 +419,14 @@ class DockerSandbox:
             if time.monotonic() >= warm_deadline:
                 logs = self._logs_tail()
                 self.teardown()
+                if en:
+                    raise LaunchError(f"Candidate inference probe failed (JIT/inference stuck, "
+                                      f"{attempt} attempts). Log tail:\n{logs}")
                 raise LaunchError(f"候选推理探针失败(JIT/推理卡死,{attempt} 次尝试)。日志尾：\n{logs}")
-            self._report(f"推理探针第 {attempt} 次未通过,重试(JIT 预热可能仍在进行)…")
+            self._report(f"Inference probe attempt {attempt} failed, retrying (JIT warmup may still be "
+                         "in progress)…" if en else f"推理探针第 {attempt} 次未通过,重试(JIT 预热可能仍在进行)…")
             time.sleep(2.0)
-        self._report("候选就绪,进入压测")
+        self._report("Candidate ready, starting bench" if en else "候选就绪,进入压测")
 
     def read_diagnosis(self) -> dict | None:
         """读候选自己的 /api/diagnoses(同一诊断引擎),取最严重的一条 → bottleneck A/B/C/D。
@@ -492,11 +510,14 @@ class DockerSandbox:
 
     def _bench_progress(self, p: dict) -> None:
         """run_static 的运行中快照 → 直播事件：看着分数长出来。"""
-        msg = f"压测 {p['elapsed_s']}s：完成 {p['ok']} req · 瞬时 {p['tps']:g} tok/s"
+        if self._lang == "en":
+            msg = f"bench {p['elapsed_s']}s: {p['ok']} req done · {p['tps']:g} tok/s instantaneous"
+        else:
+            msg = f"压测 {p['elapsed_s']}s：完成 {p['ok']} req · 瞬时 {p['tps']:g} tok/s"
         if p.get("ttft_p50_ms") is not None:
             msg += f" · TTFT p50 {p['ttft_p50_ms']:g}ms"
         if p.get("errors"):
-            msg += f" · ⚠ 错误 {p['errors']}"
+            msg += f" · ⚠ {'errors' if self._lang == 'en' else '错误'} {p['errors']}"
         self._report(msg)
 
     def live_stats_line(self) -> str | None:

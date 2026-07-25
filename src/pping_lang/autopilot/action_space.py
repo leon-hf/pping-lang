@@ -24,10 +24,15 @@ REGIMES = ("A", "B", "C", "D")
 # 统一换成人话(如"带宽瓶颈"),字母本身不再出现在任何用户可见文本里
 # (2026-07-21 用户反馈：连"(B)"这种带字母的括注都别留,谁都看不出字母指代什么)。
 BOTTLENECK_LABEL: dict[str, str] = {"A": "双低", "B": "带宽瓶颈", "C": "算力瓶颈", "D": "容量瓶颈"}
+BOTTLENECK_LABEL_EN: dict[str, str] = {
+    "A": "Under-utilized", "B": "Bandwidth bottleneck", "C": "Compute bottleneck", "D": "Capacity bottleneck",
+}
 
 
-def bottleneck_label(bn: str | None) -> str:
-    return BOTTLENECK_LABEL.get(bn, "症状/其它")
+def bottleneck_label(bn: str | None, lang: str = "zh") -> str:
+    table = BOTTLENECK_LABEL_EN if lang == "en" else BOTTLENECK_LABEL
+    fallback = "Symptom/other" if lang == "en" else "症状/其它"
+    return table.get(bn, fallback)
 
 
 @dataclass(frozen=True)

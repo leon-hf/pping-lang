@@ -26,8 +26,6 @@
       <span class="meta-sep"></span>
       <span>engine <span x-text="health.engine_index ?? '—'"></span></span>
       <span class="meta-sep"></span>
-      <span><span x-text="health.rules?.num ?? 0"></span> rules</span>
-      <span class="meta-sep"></span>
       <span style="color: var(--muted-2);" x-text="`v${health.version || ''}`"></span>
       <span class="meta-sep"></span>
       <div class="lang-toggle" :title="t('lang.label')">
@@ -1160,7 +1158,7 @@
               <span><span class="hit-badge" :class="firedFor(r.id, diagnoses) ? 'hit' : 'miss'" x-text="firedFor(r.id, diagnoses) ? t('rules.hitN', {n: hitCount(r, diagnoses), m: r.detectors.length}) : t('rules.miss')"></span></span>
               <span class="detchips">
                 <template x-for="det in r.detectors" :key="det.key">
-                  <span class="layer" :class="[det.layer, detFired(det, firedFor(r.id, diagnoses)) ? 'lit' : '']" x-text="det.layer" :title="det.name"></span>
+                  <span class="layer" :class="[det.layer, detFired(det, firedFor(r.id, diagnoses)) ? 'lit' : '']" x-text="det.layer" :title="detName(r.id, det)"></span>
                 </template>
               </span>
               <span class="dchev">▶</span>
@@ -1173,7 +1171,7 @@
                   <template x-for="det in r.detectors" :key="det.key">
                     <div class="detrow" :class="{lit: detFired(det, firedFor(r.id, diagnoses))}">
                       <span class="layer" :class="det.layer" x-text="det.layer" :title="t('layer.'+det.layer)"></span>
-                      <span class="detname" x-text="det.name"></span>
+                      <span class="detname" x-text="detName(r.id, det)"></span>
                       <span class="detcond" x-text="detCond(det)"></span>
                       <span class="detmark" x-show="detFired(det, firedFor(r.id, diagnoses))" x-text="'✓ ' + (detValue(det, firedFor(r.id, diagnoses)) || '')"></span>
                     </div>
@@ -1343,12 +1341,12 @@
             <div class="slo-shape-row">
               <span class="cfg-lbl" x-text="t('slo.form')"></span>
               <select x-model="form.sloShape" @change="onSloShapeChange()">
-                <option value="chat">对话</option>
-                <option value="rag">RAG 问答</option>
-                <option value="agent">Agent</option>
-                <option value="reasoning">长推理</option>
-                <option value="code">代码补全</option>
-                <option value="custom">自定义</option>
+                <option value="chat" x-text="t('shape.chat')"></option>
+                <option value="rag" x-text="t('shape.rag')"></option>
+                <option value="agent" x-text="t('shape.agent')"></option>
+                <option value="reasoning" x-text="t('shape.reasoning')"></option>
+                <option value="code" x-text="t('shape.code')"></option>
+                <option value="custom" x-text="t('shape.custom')"></option>
               </select>
               <span class="hint-inline" x-text="t('bench.sloShapeHint')"></span>
             </div>
@@ -1539,72 +1537,70 @@
     <div x-show="tab === 'autopilot'" x-data="autopilotTab()" x-init="init()">
       <div class="ap-wrap">
         <div class="preview-note">
-          <span x-show="hasBridge()">真实模式：Autopilot 会在 runw host 侧停主 serve 腾卡 → 起候选 vLLM 沙盒 → 跑 bench → kept/reverted → 恢复主 serve。若 host bridge 未连接,开始按钮会报错而不是偷偷跑模拟。</span>
-          <span x-show="!hasBridge()">本地/dev 模式：当前没有 host bridge,开始后走 SimSandbox 验证闭环;在 runw dashboard 地址访问时才会启动真实 DockerSandbox 调优。</span>
+          <span x-show="hasBridge()" x-text="t('ap.realMode')"></span>
+          <span x-show="!hasBridge()" x-text="t('ap.localMode')"></span>
         </div>
 
         <!-- 调优期间主 serve(含本页)会下线：直播由 host 侧 bridge 直连,刷新本页会打不开 -->
         <div class="preview-note" x-show="running && hasBridge()"
              style="border-color:#fcd34d;background:#fffbeb;color:#92400e">
-          调优进行中：主 serve 已让位给候选沙盒,<b>本页(:8765)此刻打不开新标签,请勿刷新</b>。
-          本页直播直连 host bridge,不受影响;备用直播页：
-          <a :href="apiUrl('/')" target="_blank" style="color:#92400e;text-decoration:underline" x-text="apiUrl('/')"></a>。
-          调优结束或点「停止」后主 serve 与本页自动恢复。
+          <span x-html="t('ap.runningNote1')"></span>
+          <a :href="apiUrl('/')" target="_blank" style="color:#92400e;text-decoration:underline" x-text="apiUrl('/')"></a><span x-text="t('ap.runningNote2')"></span>
         </div>
 
   <!-- Agent(LLM) 配置：自由填任意 OpenAI 兼容端点 -->
   <div class="ap-agent">
     <div class="ap-agent-head" @click="agentOpen=!agentOpen">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-      <b>Agent（调优决策 LLM）</b>
-      <span class="cur" x-text="agent.model || '未配置'"></span>
+      <b x-text="t('ap.agentTitle')"></b>
+      <span class="cur" x-text="agent.model || t('ap.notConfigured')"></span>
       <span class="chev" x-text="agentOpen ? '▲' : '▼'"></span>
     </div>
     <div class="ap-agent-form" x-show="agentOpen">
-      <div class="ap-field"><label>预设</label>
+      <div class="ap-field"><label x-text="t('ap.presetLabel')"></label>
         <select x-model="preset" @change="applyPreset()">
           <option value="openrouter">OpenRouter</option>
           <option value="openai">OpenAI</option>
           <option value="deepseek">DeepSeek</option>
           <option value="kimi_coding">Kimi Coding</option>
           <option value="kimi">Kimi / Moonshot</option>
-          <option value="local">本地 (Ollama / vLLM)</option>
-          <option value="custom">自定义</option>
+          <option value="local" x-text="t('ap.presetLocal')"></option>
+          <option value="custom" x-text="t('ap.presetCustom')"></option>
         </select>
       </div>
       <div class="ap-field url"><label>Base URL</label><input x-model="agent.base_url" placeholder="https://.../v1"></div>
       <div class="ap-field key"><label>API Key</label><input type="password" x-model="agent.api_key" placeholder="sk-..."></div>
       <div class="ap-field model"><label>Model</label><input x-model="agent.model" placeholder="anthropic/claude-opus-4"></div>
       <div style="display:flex;align-items:flex-end;gap:6px">
-        <button class="ap-test" @click="testAgent()" :disabled="agentTesting" x-text="agentTest || '测试连接'"></button>
-        <div class="ap-adv-toggle" @click="advOpen=!advOpen"><span class="c" x-text="advOpen?'▾':'▸'"></span> 高级</div>
+        <button class="ap-test" @click="testAgent()" :disabled="agentTesting" x-text="agentTest || t('ap.testConnection')"></button>
+        <div class="ap-adv-toggle" @click="advOpen=!advOpen"><span class="c" x-text="advOpen?'▾':'▸'"></span> <span x-text="t('ap.advanced')"></span></div>
       </div>
-      <div class="ap-agent-note">OpenRouter / OpenAI / DeepSeek / Moonshot 走 <b style="color:var(--coral-strong)">OpenAI 兼容</b>端点；Kimi Coding 走 Kimi Coding Messages API。真实调优必须配置 LLM agent；StubAgent 只用于本地 SimSandbox/dev tests,不能驱动真实 GPU 调优。Key 仅本会话用于调 agent，<b>不入诊断热路径、不随轨迹存盘</b>；生产建议走环境变量注入。注意：<b>别用被压测的那个 vLLM 模型当 agent</b>（它在被压、可能太小）。</div>
+      <div class="ap-agent-note" x-html="t('ap.agentNote')"></div>
 
       <!-- 高级：agent 行为（展开区） -->
       <div class="ap-adv" x-show="advOpen">
         <div class="ap-field guide">
-          <label>额外指引（追加到系统 prompt 之后，塞业务约束 / 偏好）</label>
-          <textarea x-model="adv.guidance" placeholder="如：本集群 gpu-util 不超 0.85；优先 chunked-prefill 而非提并发；延迟敏感业务，TTFT 优先…"></textarea>
+          <label x-text="t('ap.guidanceLabel')"></label>
+          <textarea x-model="adv.guidance" :placeholder="t('ap.guidancePlaceholder')"></textarea>
         </div>
         <div class="ap-field num"><label>temperature</label><input type="number" step="0.1" min="0" max="2" x-model="adv.temperature"></div>
-        <div class="ap-field num"><label>超时 (s)</label><input type="number" x-model="adv.timeout_s"></div>
-        <div class="ap-field num"><label>重试</label><input type="number" x-model="adv.retries"></div>
+        <div class="ap-field num"><label x-text="t('ap.timeoutS')"></label><input type="number" x-model="adv.timeout_s"></div>
+        <div class="ap-field num"><label x-text="t('ap.retries')"></label><input type="number" x-model="adv.retries"></div>
 
         <div class="ap-scope">
-          <label>动作范围 · vLLM 全量 − 身份(~7) − 硬件收窄 − 降精度类</label>
+          <label x-text="t('ap.actionScope')"></label>
           <div class="ap-deny">
-            <span class="dl">model / host / port（身份,~7）</span>
-            <span class="dl">tensor / pipeline-parallel（按卡数收窄）</span>
-            <span class="dl q">quantization（会降精度,不提供）</span>
-            <span class="dl q">kv-cache-dtype（会降精度,不提供）</span>
+            <span class="dl" x-text="t('ap.denyModel')"></span>
+            <span class="dl" x-text="t('ap.denyParallel')"></span>
+            <span class="dl q" x-text="t('ap.denyQuant')"></span>
+            <span class="dl q" x-text="t('ap.denyKvDtype')"></span>
           </div>
-          <div class="ap-agent-note" style="margin-top:0">这 ~250 个里大半 vLLM 启动时已自调到最优（KV block 数 / attention backend / 兼容门）；agent 实际只动 <b style="color:var(--coral-strong)">max-num-seqs / max-num-batched-tokens / gpu-util / performance_mode</b> 这一小撮 + 诊断点名的对症参数。安全不靠黑名单,靠 launch-catch + 一次性容器兜底 + 降精度参数永不提供。</div>
+          <div class="ap-agent-note" style="margin-top:0" x-html="t('ap.actionScopeNote')"></div>
         </div>
 
         <div style="flex-basis:100%">
-          <button class="ap-linkbtn" @click="showPrompt=!showPrompt" x-text="showPrompt ? '收起核心 prompt 合约' : '查看核心 prompt 合约（只读 · 不可改）'"></button>
-          <div class="ap-prompt-view" x-show="showPrompt" x-text="LOCKED_PROMPT"></div>
+          <button class="ap-linkbtn" @click="showPrompt=!showPrompt" x-text="showPrompt ? t('ap.hidePromptBtn') : t('ap.showPromptBtn')"></button>
+          <div class="ap-prompt-view" x-show="showPrompt" x-text="lockedPrompt()"></div>
         </div>
       </div>
     </div>
@@ -1614,19 +1610,19 @@
        调优目标固定为"不破 SLA 前提下最大化吞吐"(业界惯例),不再单独选 -->
   <div class="ap-bar">
     <div class="ap-goal">
-      <b>形态</b>
+      <b x-text="t('ap.shapeLabel')"></b>
       <select x-model="obj.workload" @change="applyWorkload()">
-        <option value="chat">对话</option>
-        <option value="rag">RAG 问答</option>
-        <option value="agent">Agent</option>
-        <option value="reasoning">长推理</option>
-        <option value="code">代码补全</option>
-        <option value="custom">自定义</option>
+        <option value="chat" x-text="t('shape.chat')"></option>
+        <option value="rag" x-text="t('shape.rag')"></option>
+        <option value="agent" x-text="t('shape.agent')"></option>
+        <option value="reasoning" x-text="t('shape.reasoning')"></option>
+        <option value="code" x-text="t('shape.code')"></option>
+        <option value="custom" x-text="t('shape.custom')"></option>
       </select>
-      <span style="font-size:11.5px;color:var(--muted-2);" x-text="workloadHint()" title="形态自带 bench 负载参数与默认 SLA;SLA 仍可手改"></span>
-      <span>SLA · TTFT p99 ≤ <input type="number" x-model="obj.ttft"> ms · TPOT p99 ≤ <input type="number" x-model="obj.tpot"> ms · E2E p99 ≤ <input type="number" x-model="obj.e2e" placeholder="可选" style="width:80px"> ms</span>
-      <span>最多 <input type="number" x-model="budget.rounds"> 轮 / <input type="number" x-model="budget.minutes"> min</span>
-      <span style="font-size:11.5px;color:var(--muted-2);" title="轮数和分钟都是上限,不是目标">轮数是上限：多数 session 3-5 轮诚实收敛,提前停属正常</span>
+      <span style="font-size:11.5px;color:var(--muted-2);" x-text="workloadHint()" :title="t('bench.sloShapeHint')"></span>
+      <span>SLA · TTFT p99 ≤ <input type="number" x-model="obj.ttft"> ms · TPOT p99 ≤ <input type="number" x-model="obj.tpot"> ms · E2E p99 ≤ <input type="number" x-model="obj.e2e" :placeholder="t('bench.sloOptional')" style="width:80px"> ms</span>
+      <span><span x-text="t('ap.maxPrefix')"></span> <input type="number" x-model="budget.rounds"> <span x-text="t('ap.roundsUnit')"></span> / <input type="number" x-model="budget.minutes"> min</span>
+      <span style="font-size:11.5px;color:var(--muted-2);" :title="t('ap.roundsCapTitle')" x-text="t('ap.roundsCapText')"></span>
     </div>
     <button class="ap-start" @click="start()" :disabled="running">
       <svg x-show="!running" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
@@ -1635,25 +1631,25 @@
     </button>
     <button class="ap-stop" x-show="running" @click="stop()" :disabled="stopping">
       <svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 7h10v10H7z"/></svg>
-      <span x-text="stopping ? '停止中…' : '停止调优'"></span>
+      <span x-text="stopping ? t('ap.stopping') : t('ap.stopBtn')"></span>
     </button>
   </div>
 
   <!-- 空态 -->
   <div class="ap-idle" x-show="!session">
     <div class="ap-loop">
-      <div class="st"><span class="n">1</span><b>observe</b><span>读诊断</span></div>
+      <div class="st"><span class="n">1</span><b>observe</b><span x-text="t('ap.step.observe')"></span></div>
       <span class="arr">→</span>
-      <div class="st"><span class="n">2</span><b>hypothesize</b><span>挂诊断选参数</span></div>
+      <div class="st"><span class="n">2</span><b>hypothesize</b><span x-text="t('ap.step.hypothesize')"></span></div>
       <span class="arr">→</span>
-      <div class="st"><span class="n">3</span><b>act</b><span>沙盒重启</span></div>
+      <div class="st"><span class="n">3</span><b>act</b><span x-text="t('ap.step.act')"></span></div>
       <span class="arr">→</span>
-      <div class="st"><span class="n">4</span><b>measure</b><span>压测打分</span></div>
+      <div class="st"><span class="n">4</span><b>measure</b><span x-text="t('ap.step.measure')"></span></div>
       <span class="arr">→</span>
-      <div class="st"><span class="n">5</span><b>decide</b><span>留下/回滚</span></div>
+      <div class="st"><span class="n">5</span><b>decide</b><span x-text="t('ap.step.decide')"></span></div>
     </div>
-    <p>点开始后，Autopilot 会启动一个调优 session。Agent 在候选集中选一个 vLLM 参数,沙盒重启后跑同一套 bench,只有实测更好才保留,破 SLA 或收益不足就回滚。真实 runw 模式需要先配置 LLM agent;生产上线仍走人工确认上线包。</p>
-    <div class="moat"><b>👁 眼睛</b>(深度诊断) + <b>✋ 手</b>(压测+serve控制) + <b>📊 记分牌</b>(基线/Δ) 同进程</div>
+    <p x-text="t('ap.idleDesc')"></p>
+    <div class="moat" x-html="t('ap.moat')"></div>
   </div>
 
   <!-- session -->
@@ -1665,35 +1661,34 @@
           <span class="pulse" x-show="session.state==='running'"></span>
           <span x-text="stateLabel()"></span>
         </span>
-        <span class="round-n">已评估 <span x-text="shownRounds.length-1 < 0 ? 0 : Math.max(0, shownRounds.length-1)"></span> / 最多 <span x-text="budget.rounds"></span> 轮</span>
+        <span class="round-n" x-text="t('ap.evaluatedOf', {n: shownRounds.length-1 < 0 ? 0 : Math.max(0, shownRounds.length-1), m: budget.rounds})"></span>
         <span class="round-n" x-show="etaText" x-text="etaText"></span>
         <div class="ap-prog"><i :style="`width:${Math.min(100, (Math.max(0,shownRounds.length-1)/budget.rounds)*100)}%`"></i></div>
-        <span class="best">当前最优 <b><span x-text="fmt(best.tps)"></span> tok/s</b></span>
+        <span class="best"><span x-text="t('ap.currentBest')"></span> <b><span x-text="fmt(best.tps)"></span> tok/s</b></span>
       </div>
 
       <!-- LLM 兜底警示：用户以为在看 LLM 调优,实际某些轮是确定性启发式 -->
       <div class="preview-note" x-show="fallbackCount > 0"
            style="border-color:#fcd34d;background:#fffbeb;color:#92400e">
-        ⚠ 本次有 <b x-text="fallbackCount"></b> 轮 LLM 调用失败,由确定性启发式兜底选择参数
-        —— 检查 agent 配置 / 额度 / 网络(点开对应轮的「Agent 推理」看具体错误;带
-        <span style="border:1px solid #fcd34d;border-radius:999px;padding:0 6px;font-size:11px">⚠ 兜底</span>
-        标记的轮不是 LLM 决策)。
+        <span x-text="t('ap.fallbackWarnPre')"></span> <b x-text="fallbackCount"></b> <span x-text="t('ap.fallbackWarnMid')"></span>
+        <span style="border:1px solid #fcd34d;border-radius:999px;padding:0 6px;font-size:11px" x-text="t('ap.fallbackBadge')"></span>
+        <span x-text="t('ap.fallbackWarnEnd')"></span>
       </div>
 
       <!-- 轨迹 -->
       <div class="ap-trace-card">
         <template x-for="r in shownRounds" :key="r.round">
           <div>
-            <div class="ap-round" :class="{base: r.kind==='baseline', rev: r.decision==='reverted', open: expandedRounds.includes(r.round)}" @click="toggleRow(r.round)" title="单击展开诊断快照/压测打分/判定详情">
+            <div class="ap-round" :class="{base: r.kind==='baseline', rev: r.decision==='reverted', open: expandedRounds.includes(r.round)}" @click="toggleRow(r.round)" :title="t('ap.expandTitle')">
               <div><span class="ap-rn" x-text="'R'+r.round"></span><span class="ap-chev" x-text="expandedRounds.includes(r.round)?'▾':'▸'"></span></div>
               <div class="ap-rbody">
-                <template x-if="r.diag"><div class="ap-rdiag"><b>诊断</b><span x-text="r.diag"></span></div></template>
-                <template x-if="r.hyp"><div class="ap-rhyp"><b>假设</b><span x-text="r.hyp"></span><span class="ap-changed" x-show="r.changed" x-text="r.changed"></span></div></template>
+                <template x-if="r.diag"><div class="ap-rdiag"><b x-text="t('ap.diagLabel')"></b><span x-text="r.diag"></span></div></template>
+                <template x-if="r.hyp"><div class="ap-rhyp"><b x-text="t('ap.hypLabel')"></b><span x-text="r.hyp"></span><span class="ap-changed" x-show="r.changed" x-text="r.changed"></span></div></template>
                 <div class="ap-rev" x-show="r.evidence && r.evidence.length">
                   <template x-for="ev in (r.evidence || [])" :key="ev"><span class="dr-chip" x-text="ev"></span></template>
                 </div>
                 <details class="ap-rthink" x-show="r.thinking" @click.stop>
-                  <summary>思考原文</summary>
+                  <summary x-text="t('ap.thinkingRaw')"></summary>
                   <div x-text="r.thinking"></div>
                 </details>
                 <template x-if="r.cmd"><div class="ap-rcmd"><span class="pfx">$</span> <span x-text="r.cmd"></span></div></template>
@@ -1706,15 +1701,15 @@
               <div class="ap-verdict" :class="r.vcls">
                 <span x-text="r.verdict"></span>
                 <span class="ap-fb" x-show="r.fallback"
-                      :title="'LLM 调用失败(' + r.fallback + '),本轮由确定性启发式兜底 —— 检查 agent 配置/额度/网络'">⚠ 兜底</span>
+                      :title="t('ap.fallbackTitle', {err: r.fallback})" x-text="t('ap.fallbackBadge')"></span>
               </div>
             </div>
             <div class="ap-detail" x-show="expandedRounds.includes(r.round)" @click.stop>
-              <template x-if="r.snap"><div class="dr-sec"><div class="lab">诊断快照（Agent 看到的事实）</div><div class="val" x-text="r.snap"></div></div></template>
-              <template x-if="r.expected"><div class="dr-sec"><div class="lab">预期效果</div><div class="val" x-text="r.expected"></div></div></template>
-              <template x-if="r.scoreAfter"><div class="dr-sec"><div class="lab">压测打分</div>
+              <template x-if="r.snap"><div class="dr-sec"><div class="lab" x-text="t('ap.snapLabel')"></div><div class="val" x-text="r.snap"></div></div></template>
+              <template x-if="r.expected"><div class="dr-sec"><div class="lab" x-text="t('ap.expectedLabel')"></div><div class="val" x-text="r.expected"></div></div></template>
+              <template x-if="r.scoreAfter"><div class="dr-sec"><div class="lab" x-text="t('ap.benchScoreLabel')"></div>
                 <div class="dr-score">
-                  <span class="h">指标</span><span class="h">before</span><span class="h">after</span><span class="h">Δ</span>
+                  <span class="h" x-text="t('ap.metricLabel')"></span><span class="h">before</span><span class="h">after</span><span class="h">Δ</span>
                   <span>output_tps</span>
                   <span class="m" x-text="r.scoreBefore ? fmt(r.scoreBefore.tps) : '—'"></span>
                   <span x-text="fmt(r.scoreAfter.tps)"></span>
@@ -1728,7 +1723,7 @@
                   <span x-text="r.scoreAfter.tpot+'ms'"></span>
                   <span class="m" x-text="r.scoreBefore ? ((dlt(r,'tpot')>=0?'+':'')+dlt(r,'tpot')+'ms') : '—'"></span>
                 </div></div></template>
-              <template x-if="r.decideLogic"><div class="dr-sec"><div class="lab">判定</div><div class="dr-decide" :class="{rev: r.decision==='reverted'}" x-text="r.decideLogic"></div></div></template>
+              <template x-if="r.decideLogic"><div class="dr-sec"><div class="lab" x-text="t('ap.decideLabel')"></div><div class="dr-decide" :class="{rev: r.decision==='reverted'}" x-text="r.decideLogic"></div></div></template>
             </div>
           </div>
         </template>
@@ -1737,20 +1732,20 @@
           <div><span class="ap-rn" x-text="'R'+(pending && pending.round != null ? pending.round : shownRounds.length)"></span></div>
           <div class="ap-rbody">
             <div class="ap-rhyp" x-show="pending && pending.hyp">
-              <b x-text="pending ? pending.title : '运行中'"></b><span x-text="pending ? pending.hyp : ''"></span>
+              <b x-text="pending ? pending.title : t('ap.runningLabel')"></b><span x-text="pending ? pending.hyp : ''"></span>
               <span class="ap-changed" x-show="pending && pending.action" x-text="pending ? pending.action : ''"></span>
             </div>
-            <div class="ap-rrun"><span class="sp"></span><span x-text="pending && pending.progress ? pending.progress : '状态心跳中，未改线上 serve'"></span><small x-text="pending && pending.age ? pending.age : ''"></small></div>
+            <div class="ap-rrun"><span class="sp"></span><span x-text="pending && pending.progress ? pending.progress : t('ap.heartbeatDefault')"></span><small x-text="pending && pending.age ? pending.age : ''"></small></div>
             <!-- 本轮 Agent 推理：常驻(不随心跳滚动被挤走)——从全量事件里取,不受 5 条窗口限制 -->
             <div class="ap-reasoning" x-show="pending && pending.reasoning" style="margin:8px 0;padding:10px 12px;background:var(--surface-2,#f8f8fb);border-radius:8px;border-left:3px solid var(--coral,#e8604c)">
-              <div style="font-size:11px;font-weight:800;color:var(--muted);margin-bottom:4px">本轮 Agent 推理</div>
+              <div style="font-size:11px;font-weight:800;color:var(--muted);margin-bottom:4px" x-text="t('ap.roundReasoning')"></div>
               <div x-show="pending.reasoning.knobLine" style="font-size:12.5px;font-weight:700;margin-bottom:3px" x-text="pending.reasoning.knobLine"></div>
               <div x-show="pending.reasoning.rationale" style="font-size:12px;line-height:1.55" x-text="pending.reasoning.rationale"></div>
               <div x-show="pending.reasoning.evidence && pending.reasoning.evidence.length" style="margin-top:5px;display:flex;gap:5px;flex-wrap:wrap">
                 <template x-for="ev in (pending.reasoning.evidence || [])" :key="ev"><span class="dr-chip" x-text="ev"></span></template>
               </div>
               <details x-show="pending.reasoning.thinking" style="margin-top:5px">
-                <summary style="font-size:11px;color:var(--muted);cursor:pointer">思考原文</summary>
+                <summary style="font-size:11px;color:var(--muted);cursor:pointer" x-text="t('ap.thinkingRaw')"></summary>
                 <div style="font-size:11px;color:var(--muted);white-space:pre-wrap;max-height:140px;overflow-y:auto;margin-top:4px" x-text="pending.reasoning.thinking"></div>
               </details>
             </div>
@@ -1769,17 +1764,17 @@
       <template x-if="session.state==='done'">
         <div class="ap-result">
           <div class="coldnote" x-show="session.coldLoaded" style="font-size:12px;color:var(--muted-2,#8a8a99);margin-bottom:8px">
-            📋 上次调优结果<span x-show="session.started_ts"> · <span x-text="session.started_ts"></span></span>（非本次刚跑完，页面重新打开后自动带出）
+            <span x-text="t('ap.lastResultPrefix')"></span><span x-show="session.started_ts"> · <span x-text="session.started_ts"></span></span><span x-text="t('ap.lastResultSuffix')"></span>
           </div>
-          <div class="hl">吞吐 <b><span x-text="fmt(baselineTps)"></span> → <span x-text="fmt(best.tps)"></span> tok/s（×<span x-text="(best.tps/baselineTps).toFixed(2)"></span>）</b></div>
+          <div class="hl"><span x-text="t('ap.throughputLabel')"></span> <b x-text="t('ap.throughputValue', {a: fmt(baselineTps), b: fmt(best.tps), x: (best.tps/baselineTps).toFixed(2)})"></b></div>
           <div class="summary" :class="{warn: !resultSummary.improved}">
-            <b class="summary-label">结果</b><span x-text="resultSummaryText"></span>
+            <b class="summary-label" x-text="t('ap.resultLabel')"></b><span x-text="resultSummaryText"></span>
           </div>
           <div class="summary" x-show="sessionNarrativeText">
-            <b class="summary-label">为什么</b><span x-text="sessionNarrativeText"></span>
+            <b class="summary-label" x-text="t('ap.whyLabel')"></b><span x-text="sessionNarrativeText"></span>
           </div>
           <div class="ap-ledger" x-show="knobLedger.length">
-            <b class="summary-label">逐轮账本</b>
+            <b class="summary-label" x-text="t('ap.ledgerLabel')"></b>
             <template x-for="row in knobLedger" :key="row.round">
               <div class="ap-ledger-row">
                 <div class="ap-ledger-head">
@@ -1794,13 +1789,13 @@
             </template>
           </div>
           <div class="summary" x-show="actionSpaceSummaryText">
-            <b class="summary-label">候选池</b><span x-text="actionSpaceSummaryText"></span>
+            <b class="summary-label" x-text="t('ap.candidatePoolLabel')"></b><span x-text="actionSpaceSummaryText"></span>
           </div>
-          <div class="ap-cmd"><span class="pfx">$</span> <span x-text="best.cmd"></span> <span class="copy" @click="copyCmd($event)">复制</span></div>
-          <div class="honest">「×3」只在「现实但没调过」的默认基线上成立 —— 那正是大量真实部署的现状。已调过的基线则是诚实的边际收益（+5~15%），Agent 会如实报「已近最优」。</div>
+          <div class="ap-cmd"><span class="pfx">$</span> <span x-text="best.cmd"></span> <span class="copy" @click="copyCmd($event)" x-text="t('common.copy')"></span></div>
+          <div class="honest" x-text="t('ap.honestNote')"></div>
           <div class="actions">
-            <button @click="drawerOpen=true">查看完整推理轨迹</button>
-            <button class="promote" @click="promoteOpen=true" :disabled="!promote">查看上线包（人工确认）</button>
+            <button @click="drawerOpen=true" x-text="t('ap.viewFullTrace')"></button>
+            <button class="promote" @click="promoteOpen=true" :disabled="!promote" x-text="t('ap.viewPromotePkg')"></button>
           </div>
         </div>
       </template>
@@ -1812,32 +1807,31 @@
     <div class="modal-backdrop" @click.self="promoteOpen=false" @keydown.escape.window="promoteOpen=false">
       <div class="modal ap-promote-modal" role="dialog" aria-modal="true">
         <div class="modal-head">
-          <h2>上线包 · <span x-text="promote.state"></span></h2>
-          <button class="modal-close" @click="promoteOpen=false" aria-label="关闭">×</button>
+          <h2><span x-text="t('ap.promoteTitle')"></span> · <span x-text="promote.state"></span></h2>
+          <button class="modal-close" @click="promoteOpen=false" :aria-label="t('common.close')">×</button>
         </div>
         <div class="modal-body">
-          <div class="ap-promote-note">
-            Autopilot 已生成可审阅命令，但没有修改生产。上线仍需要人工确认、流量切换和健康检查。
+          <div class="ap-promote-note" x-text="t('ap.promoteNote')">
           </div>
 
           <div class="modal-section">
             <div class="section-head-row">
-              <h3>生产命令</h3>
-              <button class="copy-btn" @click="copyText(promote.production_command, $event, '复制')">复制</button>
+              <h3 x-text="t('ap.prodCmd')"></h3>
+              <button class="copy-btn" @click="copyText(promote.production_command, $event, t('common.copy'))" x-text="t('common.copy')"></button>
             </div>
             <pre class="cmdline" x-text="promote.production_command || '—'"></pre>
           </div>
 
           <div class="modal-section">
             <div class="section-head-row">
-              <h3>回滚命令</h3>
-              <button class="copy-btn" @click="copyText(promote.rollback_command, $event, '复制')">复制</button>
+              <h3 x-text="t('ap.rollbackCmd')"></h3>
+              <button class="copy-btn" @click="copyText(promote.rollback_command, $event, t('common.copy'))" x-text="t('common.copy')"></button>
             </div>
             <pre class="cmdline" x-text="promote.rollback_command || '—'"></pre>
           </div>
 
           <div class="modal-section" x-show="promoteDiff.length">
-            <h3>配置 diff</h3>
+            <h3 x-text="t('ap.configDiff')"></h3>
             <div class="ap-promote-diff">
               <template x-for="c in promoteDiff" :key="c.key">
                 <div class="ap-promote-change">
@@ -1850,21 +1844,21 @@
           </div>
 
           <div class="modal-section">
-            <h3>风险提示</h3>
+            <h3 x-text="t('ap.riskNote')"></h3>
             <ul class="ap-promote-list">
               <template x-for="r in promoteRisks" :key="r"><li x-text="r"></li></template>
             </ul>
           </div>
 
           <div class="modal-section">
-            <h3>人工确认清单</h3>
+            <h3 x-text="t('ap.manualChecklist')"></h3>
             <ol class="ap-promote-list">
               <template x-for="item in promoteChecklist" :key="item"><li x-text="item"></li></template>
             </ol>
           </div>
 
           <div class="modal-section" x-show="promote.applies_to">
-            <h3>适用边界</h3>
+            <h3 x-text="t('ap.scopeOfApply')"></h3>
             <pre class="cmdline" x-text="JSON.stringify(promote.applies_to, null, 2)"></pre>
           </div>
         </div>
@@ -1879,8 +1873,8 @@
       <div class="ap-drawer" @click.stop>
         <div class="ap-drawer-head">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3 8-8"/><path d="M21 12a9 9 0 1 1-6.2-8.5"/></svg>
-          <h3>完整推理轨迹</h3>
-          <span class="sid" x-text="'ap-2026-06-23-001 · ' + agent.model"></span>
+          <h3 x-text="t('ap.fullTraceTitle')"></h3>
+          <span class="sid" x-text="(session.session_id || '') + ' · ' + agent.model"></span>
           <span class="x" @click="drawerOpen=false">✕</span>
         </div>
         <div class="ap-drawer-body">
@@ -1891,15 +1885,15 @@
                 <span class="ap-verdict" :class="r.vcls" x-text="r.verdict"></span>
                 <span class="dr-tps" x-show="r.tps" x-text="fmt(r.tps)+' tok/s'"></span>
               </div>
-              <template x-if="r.snap"><div class="dr-sec"><div class="lab">诊断快照（Agent 看到的事实）</div><div class="val" x-text="r.snap"></div></div></template>
-              <template x-if="r.thinking"><div class="dr-sec"><div class="lab">Agent 思考过程(原始)</div><div class="val" style="white-space:pre-wrap;max-height:220px;overflow-y:auto" x-text="r.thinking"></div></div></template>
-              <template x-if="r.rationale"><div class="dr-sec"><div class="lab">Agent 推理</div><div class="val" x-text="r.rationale"></div></div></template>
-              <template x-if="r.evidence"><div class="dr-sec"><div class="lab">证据引用</div><div class="dr-chips"><template x-for="ev in r.evidence" :key="ev"><span class="dr-chip" x-text="ev"></span></template></div></div></template>
-              <template x-if="r.expected"><div class="dr-sec"><div class="lab">预期效果</div><div class="val" x-text="r.expected"></div></div></template>
-              <template x-if="r.cmd"><div class="dr-sec"><div class="lab">本轮命令</div><div class="dr-cmd" x-text="r.cmd"></div></div></template>
-              <template x-if="r.scoreAfter"><div class="dr-sec"><div class="lab">压测打分</div>
+              <template x-if="r.snap"><div class="dr-sec"><div class="lab" x-text="t('ap.snapLabel')"></div><div class="val" x-text="r.snap"></div></div></template>
+              <template x-if="r.thinking"><div class="dr-sec"><div class="lab" x-text="t('ap.thinkingProcessLabel')"></div><div class="val" style="white-space:pre-wrap;max-height:220px;overflow-y:auto" x-text="r.thinking"></div></div></template>
+              <template x-if="r.rationale"><div class="dr-sec"><div class="lab" x-text="t('ap.reasoningLabel')"></div><div class="val" x-text="r.rationale"></div></div></template>
+              <template x-if="r.evidence"><div class="dr-sec"><div class="lab" x-text="t('ap.evidenceLabel')"></div><div class="dr-chips"><template x-for="ev in r.evidence" :key="ev"><span class="dr-chip" x-text="ev"></span></template></div></div></template>
+              <template x-if="r.expected"><div class="dr-sec"><div class="lab" x-text="t('ap.expectedLabel')"></div><div class="val" x-text="r.expected"></div></div></template>
+              <template x-if="r.cmd"><div class="dr-sec"><div class="lab" x-text="t('ap.thisRoundCmd')"></div><div class="dr-cmd" x-text="r.cmd"></div></div></template>
+              <template x-if="r.scoreAfter"><div class="dr-sec"><div class="lab" x-text="t('ap.benchScoreLabel')"></div>
                 <div class="dr-score">
-                  <span class="h">指标</span><span class="h">before</span><span class="h">after</span><span class="h">Δ</span>
+                  <span class="h" x-text="t('ap.metricLabel')"></span><span class="h">before</span><span class="h">after</span><span class="h">Δ</span>
                   <span>output_tps</span>
                   <span class="m" x-text="r.scoreBefore ? fmt(r.scoreBefore.tps) : '—'"></span>
                   <span x-text="fmt(r.scoreAfter.tps)"></span>
@@ -1913,13 +1907,13 @@
                   <span x-text="r.scoreAfter.tpot+'ms'"></span>
                   <span class="m" x-text="r.scoreBefore ? ((dlt(r,'tpot')>=0?'+':'')+dlt(r,'tpot')+'ms') : '—'"></span>
                 </div></div></template>
-              <template x-if="r.decideLogic"><div class="dr-sec"><div class="lab">判定</div><div class="dr-decide" x-text="r.decideLogic"></div></div></template>
+              <template x-if="r.decideLogic"><div class="dr-sec"><div class="lab" x-text="t('ap.decideLabel')"></div><div class="dr-decide" x-text="r.decideLogic"></div></div></template>
             </div>
           </template>
         </div>
         <div class="ap-drawer-foot">
-          <button class="ap-test" @click="copyTrace($event)">复制 Markdown</button>
-          <button class="ap-test" @click="downloadTrace()">下载 JSON</button>
+          <button class="ap-test" @click="copyTrace($event)" x-text="t('ap.copyMarkdown')"></button>
+          <button class="ap-test" @click="downloadTrace()" x-text="t('ap.downloadJson')"></button>
         </div>
       </div>
     </div>
