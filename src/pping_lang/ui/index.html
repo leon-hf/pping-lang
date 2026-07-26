@@ -1334,43 +1334,27 @@
             <span x-text="t('bench.timeout')"></span>
             <input type="number" step="any" x-model.number="form.timeout_s" min="1">
           </label>
-          <div class="full slo-section">
-            <div class="slo-head">
-              <span class="slo-label" x-text="t('bench.sloConstraint')"></span>
-            </div>
-            <div class="slo-shape-row">
-              <span class="cfg-lbl" x-text="t('slo.form')"></span>
-              <select x-model="form.sloShape" @change="onSloShapeChange()">
-                <option value="chat" x-text="t('shape.chat')"></option>
-                <option value="rag" x-text="t('shape.rag')"></option>
-                <option value="agent" x-text="t('shape.agent')"></option>
-                <option value="reasoning" x-text="t('shape.reasoning')"></option>
-                <option value="code" x-text="t('shape.code')"></option>
-                <option value="custom" x-text="t('shape.custom')"></option>
-              </select>
-              <span class="hint-inline" x-text="t('bench.sloShapeHint')"></span>
-            </div>
-            <div class="slo-fixed-rows">
-              <div class="slo-fixed-row">
-                <span class="slo-fixed-name">TTFT p99 ≤</span>
-                <input type="number" step="any" x-model.number="form.sloTtft" :placeholder="t('bench.sloOptional')">
-                <span class="slo-fixed-unit">ms</span>
-              </div>
-              <div class="slo-fixed-row">
-                <span class="slo-fixed-name">TPOT p99 ≤</span>
-                <input type="number" step="any" x-model.number="form.sloTpot" :placeholder="t('bench.sloOptional')">
-                <span class="slo-fixed-unit">ms</span>
-              </div>
-              <div class="slo-fixed-row">
-                <span class="slo-fixed-name">E2E p99 ≤</span>
-                <input type="number" step="any" x-model.number="form.sloE2e" :placeholder="t('bench.sloOptional')">
-                <span class="slo-fixed-unit">ms</span>
-              </div>
-            </div>
-            <div class="slo-preview">
-              <span class="slo-preview-label" x-text="t('bench.sloPreviewLabel')"></span>
-              <code x-text="buildSloSpec() || t('bench.sloPreviewEmpty')"></code>
-            </div>
+          <div class="full slo-section" :title="t('bench.sloPreviewLabel') + ' ' + (buildSloSpec() || t('bench.sloPreviewEmpty'))">
+            <span class="slo-label" x-text="t('bench.sloConstraint')"></span>
+            <span class="cfg-lbl" x-text="t('slo.form')"></span>
+            <select x-model="form.sloShape" @change="onSloShapeChange()">
+              <option value="chat" x-text="t('shape.chat')"></option>
+              <option value="rag" x-text="t('shape.rag')"></option>
+              <option value="agent" x-text="t('shape.agent')"></option>
+              <option value="reasoning" x-text="t('shape.reasoning')"></option>
+              <option value="code" x-text="t('shape.code')"></option>
+              <option value="custom" x-text="t('shape.custom')"></option>
+            </select>
+            <span class="slo-fixed-name">TTFT p99 ≤</span>
+            <input type="number" step="any" x-model.number="form.sloTtft" :placeholder="t('bench.sloOptional')">
+            <span class="slo-fixed-unit">ms</span>
+            <span class="slo-fixed-name">TPOT p99 ≤</span>
+            <input type="number" step="any" x-model.number="form.sloTpot" :placeholder="t('bench.sloOptional')">
+            <span class="slo-fixed-unit">ms</span>
+            <span class="slo-fixed-name">E2E p99 ≤</span>
+            <input type="number" step="any" x-model.number="form.sloE2e" :placeholder="t('bench.sloOptional')">
+            <span class="slo-fixed-unit">ms</span>
+            <span class="hint-inline" x-text="t('bench.sloShapeHint')"></span>
           </div>
         </div>
         <div class="form-actions">
