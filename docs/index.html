@@ -450,7 +450,7 @@ footer{border-top:1px solid var(--border);padding:48px 0 60px;margin-top:40px}
   <div class="wrap">
     <a href="#top" class="brand">
       <span class="brand-mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></span>
-      <span class="name">pping-lang</span><span class="ver">v0.1.0a1</span>
+      <span class="name">pping-lang</span><span class="ver">v0.1.0a2</span>
     </a>
     <nav class="links">
       <a href="#problem" data-i18n="nav.why">为什么</a>
@@ -486,10 +486,10 @@ footer{border-top:1px solid var(--border);padding:48px 0 60px;margin-top:40px}
       旗舰能力 <b>Autopilot</b> 更进一步：不止诊断，还在沙盒里自动把 vLLM 调到最优；runw 真机已跑出 986 → 6,094 tok/s（×6.18）的验证轨迹。
     </p>
     <div class="badges">
-      <span class="badge">PyPI <b>v0.1.0a1</b></span>
+      <span class="badge">PyPI <b>v0.1.0a2</b></span>
       <span class="badge">Python <b>3.10–3.12</b></span>
       <span class="badge">License <b>Apache 2.0</b></span>
-      <span class="badge ok">Tests <b data-i18n="hero.tests">514 通过</b></span>
+      <span class="badge ok">Tests <b data-i18n="hero.tests">612 通过</b></span>
     </div>
     <div class="cta">
       <span class="install"><span class="pfx">$</span> pip install pping-lang <span class="copy" data-i18n="hero.copy" onclick="navigator.clipboard?.writeText('pip install pping-lang');this.textContent='✓'">复制</span></span>
@@ -606,7 +606,6 @@ footer{border-top:1px solid var(--border);padding:48px 0 60px;margin-top:40px}
       <div class="demo-tabs">
         <button class="active" data-tab="live" data-i18n="tab.live">实时</button>
         <button data-tab="kernel">Kernel <span class="tab-badge cupti">CUPTI</span></button>
-        <button data-tab="rules"><span data-i18n="tab.rules">规则</span> <span class="tab-badge">13</span></button>
         <button data-tab="bench"><span data-i18n="tab.bench">压测</span> <span class="tab-badge">SLO ✓</span></button>
       </div>
 
@@ -742,19 +741,6 @@ footer{border-top:1px solid var(--border);padding:48px 0 60px;margin-top:40px}
         </div>
       </div>
 
-      <!-- ===== RULES TAB ===== -->
-      <div class="tab-pane" data-pane="rules">
-        <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin-bottom:18px">
-          <div style="font-size:13px;color:var(--muted)" data-i18n="rules.summary">生效中 <b style="color:var(--text-strong)">13</b> 条策展规则 · 阈值集中在一份 <span class="mono" style="font-size:12px">SLA 配置</span>，仪表盘里改完即热加载，不重启 vLLM。</div>
-          <div style="margin-left:auto;display:flex;gap:7px">
-            <span class="chip"><span class="k">workload</span><span class="v">custom</span></span>
-            <span class="chip"><span class="k">SLA TTFT p99</span><span class="v">2000 ms</span></span>
-            <span class="chip"><span class="k">SLA TPOT p99</span><span class="v">50 ms</span></span>
-          </div>
-        </div>
-        <div class="diag-list" id="rules-list"></div>
-      </div>
-
       <!-- ===== BENCH TAB ===== -->
       <div class="tab-pane" data-pane="bench">
         <div style="font-size:13px;color:var(--muted);margin-bottom:18px" data-i18n="bench.desc">
@@ -803,9 +789,9 @@ footer{border-top:1px solid var(--border);padding:48px 0 60px;margin-top:40px}
 <section id="autopilot">
   <div class="wrap">
     <div class="sec-head">
-      <div class="sec-tag" style="display:flex;align-items:center;gap:10px"><span data-i18n="ap.tag">旗舰方向</span><span class="ap-badge" data-i18n="ap.badge">runw 真机已验证 · M0</span></div>
+      <div class="sec-tag" style="display:flex;align-items:center;gap:10px"><span data-i18n="ap.tag">旗舰方向</span><span class="ap-badge" data-i18n="ap.badge">runw 真机已验证 · M0 · 流式 Agent · 中英双语</span></div>
       <h2 class="sec" data-i18n="ap.h2">Autopilot —— 诊断驱动的自主调优</h2>
-      <p class="sec-sub" data-i18n="ap.sub">一条命令起 pping-lang → 点「自动调优」→ Agent 在<b>沙盒</b>里迭代「诊断 → 改一个参数 → 压测 → Δ → 留下 / 回滚」→ 给出<b>实测验证过</b>的最优配置 + 全程推理。把 LLM 变成一个会看证据、自己动手、用压测打分的 LLM-serving 性能工程师。</p>
+      <p class="sec-sub" data-i18n="ap.sub">一条命令起 pping-lang → 点「自动调优」→ Agent 在<b>沙盒</b>里迭代「诊断 → 改一个参数 → 压测 → Δ → 留下 / 回滚」→ 给出<b>实测验证过</b>的最优配置 + 全程推理。把 LLM 变成一个会看证据、自己动手、用压测打分的 LLM-serving 性能工程师。Agent 调用走真流式（不是等一整段再显示），session 结束给结构化摘要（因果链说明 + 逐轮账本），支持中英双语、随时可中断；6 种业务负载形态（对话/RAG/Agent/长推理/代码/自定义）一键给出匹配的压测负载与 SLA 默认值。</p>
     </div>
 
     <div class="ap-grid">
@@ -986,8 +972,8 @@ footer{border-top:1px solid var(--border);padding:48px 0 60px;margin-top:40px}
         <div><h3 data-i18n="feat.1.h">实时 KPI + Roofline</h3><p data-i18n="feat.1.p">12 项 KPI（TTFT/TPOT/吞吐/KV/队列/MFU/利用率/显存/Prefix/Padding/抢占），Roofline 散点带自动结论卡，TTFT/TPOT/E2E 多统计量时序。每项 hover 看公式与解读。</p></div></div>
       <div class="feature"><div class="fi" style="background:var(--teal-soft);color:var(--teal)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17l6-6-6-6"/><path d="M12 19h8"/></svg></div>
         <div><h3 data-i18n="feat.2.h">Kernel 级 PC Sampling（Nsight 级）</h3><p data-i18n="feat.2.p"><b>Nsight Compute 级的证据，常驻采集：</b>每个 GPU kernel 的时间占比 + 算子分类 + 主导 stall。Triton kernel 直定位到 <code>.py</code> 源码行；闭源库给 SASS 热点 + kernel 名解码；闭源 GEMM 也能归因到调它的 <code>nn.Linear</code>。</p></div></div>
-      <div class="feature"><div class="fi" style="background:var(--amber-soft);color:var(--amber)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></div>
-        <div><h3 data-i18n="feat.3.h">事实规则诊断引擎</h3><p data-i18n="feat.3.p">13 条策展规则，「事实 + 署名推断 + 处方」三段式。阈值集中在一份 SLA 配置，仪表盘热加载，不重启 vLLM；可增删自定义规则，与策展规则同一引擎评估。</p></div></div>
+      <div class="feature"><div class="fi" style="background:var(--amber-soft);color:var(--amber)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10"/><path d="M3.51 15a9 9 0 0 0 14.85 3.36L23 14"/></svg></div>
+        <div><h3 data-i18n="feat.3.h">Autopilot 自主调优</h3><p data-i18n="feat.3.p">诊断驱动的自动调参：沙盒里迭代「诊断 → 改参数 → 压测 → 留下 / 回滚」；流式 Agent 调用 + 结构化 session 摘要，支持中英双语，随时可中断。</p></div></div>
       <div class="feature"><div class="fi" style="background:var(--green-soft);color:var(--green)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9z"/></svg></div>
         <div><h3 data-i18n="feat.4.h">内置压测器</h3><p data-i18n="feat.4.p">仪表盘直接发起 OpenAI 协议静态压测，配置 endpoint / 并发 / 时长 / prompt 来源，输出 client-side TTFT/TPOT/E2E 分布与 SLO 校验。三个内置数据集：短问答 / 长文档 / 代码。</p></div></div>
     </div>
@@ -1057,10 +1043,10 @@ footer{border-top:1px solid var(--border);padding:48px 0 60px;margin-top:40px}
         <table class="ctbl">
           <thead><tr><th data-i18n="compat.gen">代际</th><th data-i18n="compat.dev">设备</th></tr></thead>
           <tbody>
-            <tr><td><b>Blackwell</b></td><td class="mono" style="font-size:12px">B200 · B100</td></tr>
+            <tr><td><b>Blackwell</b></td><td class="mono" style="font-size:12px">B200 · B100 · RTX 5060 Ti</td></tr>
             <tr><td><b>Hopper</b></td><td class="mono" style="font-size:12px">H200 · H100 SXM/PCIe/NVL · A100</td></tr>
             <tr><td><b data-i18n="compat.ada.dc">Ada 数据中心</b></td><td class="mono" style="font-size:12px">L40S · L40 · L4</td></tr>
-            <tr><td><b data-i18n="compat.ada.desk">Ada 桌面/移动</b></td><td class="mono" style="font-size:12px">RTX 4090 … 4060 · 5060 Ti</td></tr>
+            <tr><td><b data-i18n="compat.ada.desk">Ada 桌面/移动</b></td><td class="mono" style="font-size:12px">RTX 4090 … 4060</td></tr>
             <tr><td><b data-i18n="compat.old">旧代</b></td><td class="mono" style="font-size:12px">A30 · A10G · A10 · V100 · T4 · RTX 3090</td></tr>
           </tbody>
         </table>
@@ -1087,7 +1073,7 @@ footer{border-top:1px solid var(--border);padding:48px 0 60px;margin-top:40px}
           <span class="badge-now" data-i18n="road.ap.m0tag">已验证</span>
           <div class="rv">M0</div><div class="rmode" data-i18n="road.ap.m0mode">M0</div>
           <h3 data-i18n="road.ap.m0h">沙盒 + 受守卫参数 + LLM loop</h3>
-          <p data-i18n="road.ap.m0p">吞吐-under-SLA 目标 + Autopilot UI，runw 真机跑出 986 → 6,094 tok/s（×6.18）。不碰源码、不碰生产，promote 永远人工确认。</p>
+          <p data-i18n="road.ap.m0p">吞吐-under-SLA 目标 + Autopilot UI，runw 真机跑出 986 → 6,094 tok/s（×6.18）。不碰源码、不碰生产，promote 永远人工确认。近期新增：流式 Agent 调用、结构化 session 摘要、6 种业务负载形态、中英双语、随时可中断。</p>
         </div>
         <div class="rcard">
           <div class="rv">M1 / M2</div><div class="rmode" data-i18n="road.ap.m1mode">多目标 / 源码级建议</div>
@@ -1182,48 +1168,6 @@ const LATENCY = {
   tpot_p50:[4.93,4.93,4.88,4.88,4.86,4.87,4.90,4.91,4.90],
   tpot_p99:[5.28,5.00,5.05,4.97,4.91,4.91,5.04,5.03,5.02]
 };
-const RULES = [
-  {id:"regime-classify",sev:"info",
-    zh:{name:"算术强度 vs 脊点（Roofline 定位）",kind:"分类",check:"派生：AI vs 脊点",hyp:"AI < 脊点 → 访存受限；否则计算受限。memory-bound 且 SM util 高时：util 虚高是物理极限，非优化空间。",rx:null},
-    en:{name:"Arithmetic intensity vs ridge point (Roofline)",kind:"classifier",check:"derived: AI vs ridge point",hyp:"AI < ridge → memory-bound; else compute-bound. When memory-bound with high SM util, the util is a physical ceiling, not headroom.",rx:null}},
-  {id:"S1",sev:"warning",pre:null,
-    zh:{name:"TTFT p99 超 SLA",kind:"症状",check:"vllm.req.ttft_ms · p99 > sla_ttft_p99_ms（2000ms / 60s）",hyp:"首 Token 慢（相对该业务 SLA）。",rx:null},
-    en:{name:"TTFT p99 over SLA",kind:"symptom",check:"vllm.req.ttft_ms · p99 > sla_ttft_p99_ms (2000ms / 60s)",hyp:"Slow first token (relative to this workload's SLA).",rx:null}},
-  {id:"S2",sev:"warning",pre:null,
-    zh:{name:"TPOT p99 超 SLA",kind:"症状",check:"vllm.req.tpot_ms · p99 > sla_tpot_p99_ms（50ms / 60s）",hyp:"出字慢（相对该业务 SLA）。",rx:null},
-    en:{name:"TPOT p99 over SLA",kind:"symptom",check:"vllm.req.tpot_ms · p99 > sla_tpot_p99_ms (50ms / 60s)",hyp:"Slow inter-token output (relative to this workload's SLA).",rx:null}},
-  {id:"S4",sev:"warning",pre:null,
-    zh:{name:"KV 用量高或发生抢占",kind:"症状",check:"kv_cache_usage ≥ 0.9（avg/10s） 或 preempted_reqs > 0",hyp:"显存吃紧 / 已在抢占。",rx:null},
-    en:{name:"High KV usage or preemption",kind:"symptom",check:"kv_cache_usage ≥ 0.9 (avg/10s) OR preempted_reqs > 0",hyp:"Memory pressure / already preempting.",rx:null}},
-  {id:"S5",sev:"warning",pre:null,
-    zh:{name:"TTFT p99/p50 偏大",kind:"症状",check:"ttft_ms · p99/p50 > tail_ratio（5 / 60s）",hyp:"首 Token 时延尾部发散（多数快、少数奇慢）。",rx:null},
-    en:{name:"TTFT p99/p50 tail spread",kind:"symptom",check:"ttft_ms · p99/p50 > tail_ratio (5 / 60s)",hyp:"First-token latency tail diverges (most fast, a few oddly slow).",rx:null}},
-  {id:"D1a",sev:"info",pre:"S1,S5",
-    zh:{name:"平均 prompt 偏长",kind:"事实",check:"prompt_tokens · avg > 2048（60s）",hyp:"长输入 → prefill 重 / 长请求占 token budget，即便分块预填充也会拖尾。",rx:"PD 分离 / 优先级调度 / 调 max_num_batched_tokens / 限 max_output_tokens。"},
-    en:{name:"Average prompt is long",kind:"fact",check:"prompt_tokens · avg > 2048 (60s)",hyp:"Long inputs → heavy prefill / long requests eat the token budget; even chunked prefill drags the tail.",rx:"PD disaggregation / priority scheduling / tune max_num_batched_tokens / cap max_output_tokens."}},
-  {id:"D1b",sev:"info",pre:"S1,S5",
-    zh:{name:"等待队列偏长",kind:"事实",check:"waiting_reqs · avg > 50（30s）",hyp:"请求在排队。",rx:"扩 prefill 容量 / 降 max_num_seqs / 检查上游限流。"},
-    en:{name:"Waiting queue is long",kind:"fact",check:"waiting_reqs · avg > 50 (30s)",hyp:"Requests are queuing.",rx:"Expand prefill capacity / lower max_num_seqs / check upstream rate limiting."}},
-  {id:"D1c",sev:"info",pre:"S1",
-    zh:{name:"MFU 偏低",kind:"事实",check:"perf.mfu_ratio · avg < 0.2（60s）· regime=compute_bound",hyp:"处于计算受限区但算力没打满（prefill 算力不足）。",rx:"升级算力卡 / FP8→FP4 / 启用 FlashAttention-3。"},
-    en:{name:"MFU is low",kind:"fact",check:"perf.mfu_ratio · avg < 0.2 (60s) · regime=compute_bound",hyp:"In the compute-bound regime but compute isn't saturated (prefill under-utilizing the GPU).",rx:"Upgrade to a higher-FLOP GPU / FP8→FP4 / enable FlashAttention-3."}},
-  {id:"D2a",sev:"info",pre:"S2",
-    zh:{name:"MBU 接近峰值",kind:"事实",check:"gpu.mem_util_pct · avg > 85（30s）",hyp:"贴近带宽屋顶（访存受限）。",rx:"投机解码 / KV 量化（FP8）/ 换更高带宽 GPU。"},
-    en:{name:"MBU near peak",kind:"fact",check:"gpu.mem_util_pct · avg > 85 (30s)",hyp:"Hugging the bandwidth roof (memory-bound).",rx:"Speculative decoding / KV quantization (FP8) / higher-bandwidth GPU."}},
-  {id:"D2b",sev:"info",pre:"S2",
-    zh:{name:"并发（running）偏小",kind:"事实",check:"running_reqs · avg ≤ 4（30s）",hyp:"并发太低，没摊薄权重搬运。",rx:"提高客户端并发 / 调 max_num_seqs。"},
-    en:{name:"Running batch is small",kind:"fact",check:"running_reqs · avg ≤ 4 (30s)",hyp:"Concurrency too low — weight movement isn't amortized.",rx:"Raise client concurrency / tune max_num_seqs."}},
-  {id:"D3a",sev:"info",pre:null,
-    zh:{name:"MFU、MBU 双低",kind:"事实",check:"mfu_ratio < 0.2 且 mem_util_pct < 50",hyp:"两个屋顶都没贴近 —— 算力、带宽都有富余，瓶颈不在硬件（可能是 batch 没拼起来 / launch 开销 / 小算子未融合）。",rx:"检查 batch 是否拼起来 / Continuous Batching / CUDA Graph / 算子融合。"},
-    en:{name:"Both MFU and MBU low",kind:"fact",check:"mfu_ratio < 0.2 AND mem_util_pct < 50",hyp:"Neither roof is hugged — compute and bandwidth both have headroom; the bottleneck isn't the hardware (batch not formed / launch overhead / unfused small ops).",rx:"Check batch formation / Continuous Batching / CUDA Graph / operator fusion."}},
-  {id:"D3c",sev:"info",pre:null,
-    zh:{name:"前缀缓存命中率低",kind:"事实",check:"prefix_cache_hit_ratio · avg < 0.1（60s）",hyp:"前缀缓存命中低（若 workload 有公共前缀，则有复用空间；否则正常）。",rx:"检查 prompt 模板公共前缀 / 开 enable_prefix_caching / RadixAttention。"},
-    en:{name:"Low prefix cache hit rate",kind:"fact",check:"prefix_cache_hit_ratio · avg < 0.1 (60s)",hyp:"Low prefix cache hits (if the workload shares prefixes there's reuse to gain; otherwise normal).",rx:"Check prompt template shared prefix / enable_prefix_caching / RadixAttention."}},
-  {id:"D4a",sev:"critical",pre:"S4",
-    zh:{name:"KV 用量高且发生抢占",kind:"事实",check:"kv_cache_usage ≥ 0.9 且 preempted_reqs > 0",hyp:"KV 池将满并已触发抢占。",rx:"KV 量化（FP8）/ 降 max_model_len / KV offload。"},
-    en:{name:"High KV usage with preemption",kind:"fact",check:"kv_cache_usage ≥ 0.9 AND preempted_reqs > 0",hyp:"KV pool near full and already triggering preemption.",rx:"KV quantization (FP8) / lower max_model_len / KV offload."}}
-];
-
 /* ============ i18n dictionary (English overrides; Chinese is inline default) ============ */
 const I18N_EN = {
   "nav.why":"Why","nav.vs":"vs Nsight","nav.demo":"Live demo","nav.how":"How it works","nav.start":"Get started","nav.compat":"Compatibility","nav.roadmap":"Roadmap",
@@ -1241,7 +1185,7 @@ const I18N_EN = {
   "pos.r6":"Skill needed","pos.r6n":"high (GPU architecture)","pos.r6g":"medium","pos.r6u":"low (plain-language output)",
   "pos.r7":"Runs in production","pos.r7n":"one-off diagnosis",
   "pos.punch":'<b>Nsight is the lab microscope</b> — pulled out occasionally, read offline, raw evidence; <b>pping-lang is the always-on stethoscope</b> — runs continuously, speaks plainly, and tells you which knob to turn.<span class="pos-note">For exhaustive microarchitectural tuning of a single custom kernel, Nsight Compute is still that precision scalpel; pping-lang owns the continuous, serving-level, conclusion-driven lane.</span>',
-  "hero.tests":"514 passing","hero.copy":"Copy","hero.cta":"See live demo ↓",
+  "hero.tests":"612 passing","hero.copy":"Copy","hero.cta":"See live demo ↓",
   "prob.tag":"The problem","prob.h2":"Metrics are visible — but they don't conclude",
   "prob.sub":"Prometheus + Grafana will chart every vLLM metric, but the moment you ask \"what's the bottleneck right now, which param do I touch\", it's on you. Two concrete gaps:",
   "prob.c1.h":"Ambiguous metric semantics",
@@ -1252,7 +1196,7 @@ const I18N_EN = {
   "thesis.p":'pping-lang splits diagnosis into two layers: <b>the rule name = an objective measured fact</b> (e.g. "TPOT p99 over SLA"); root cause and fix are listed separately as a <b>signed inference</b>. Facts and guesses sit apart, so you can judge what to trust.',
   "demo.tag":"Live demo","demo.h2":"Dashboard · the full picture of one real benchmark",
   "demo.sub":"Below is real data from all four dashboard tabs after driving <b>502 requests</b> (concurrency 8, builtin mixed-short dataset) at a vLLM 0.21 (Qwen2.5-0.5B) on an RTX 5060 Ti on runw. Click the tabs.",
-  "tab.live":"Live","tab.rules":"Rules","tab.bench":"Bench",
+  "tab.live":"Live","tab.bench":"Bench",
   "kpi.ttft.s":"p50 18.5 · well under SLA","kpi.tpot.s":"p50 4.89 · steady",
   "kpi.tput.l":"Output throughput","kpi.tput.s":"aggregate · 8 concurrent",
   "kpi.decode.l":"Per-request decode",
@@ -1285,7 +1229,6 @@ const I18N_EN = {
   "ker.de.h":"Deep Evidence · why is it slow","ker.de.sub":"stall-reason breakdown over 8.26M samples this window (PerfWorks drill-down)","ker.de.other":"other",
   "ker.de.note":'<b>The kernel name is itself a diagnosis:</b> <code style="font-family:var(--mono)">cutlass wmma_bf16 16x16</code> → tile 16×16 / bf16 / wmma tensorop / SM80. Small tile = small matrix, low concurrency → echoes Roofline\'s "grow the batch". <b>memory_dependency 71%</b> = waiting on memory → hard proof of memory-bound.',
   "ker.bound":'<b>Value boundary (honest disclosure):</b> "drill to the .py source line" only works on Triton / self-compiled kernel paths. For this workload <b>~92% of time is in closed-source cutlass GEMM</b> → there you only get SASS offset + stall reason + kernel-name decode. Confirmed on runw: top kernels are all <code style="font-family:var(--mono)">mappable=false</code>. That\'s a physical fact, not a bug.',
-  "rules.summary":'<b style="color:var(--text-strong)">13</b> curated rules active · thresholds centralized in one <span class="mono" style="font-size:12px">SLA config</span> — edit in the dashboard and it hot-reloads without restarting vLLM.',
   "bench.desc":'Built-in OpenAI-protocol static load tester · scenario <span class="mono" style="font-size:12px">showcase-demo</span> · concurrency 8 · 35s · dataset builtin:mixed-short · output 128 tok',
   "bench.total":"Total requests","bench.okerr":"OK / errors","bench.tput":"Output throughput","bench.tokens":"Output tokens",
   "bench.slo":"SLO met","bench.slo2":"SLO met","bench.dist.h":"Client-side measured latency distribution","bench.dist.sub":"client-side measurement · n = 502","bench.metric":"Metric",
@@ -1296,7 +1239,7 @@ const I18N_EN = {
   "feat.tag":"Capabilities","feat.h2":"Four capabilities, one pip install",
   "feat.1.h":"Live KPI + Roofline","feat.1.p":"12 KPIs (TTFT/TPOT/throughput/KV/queue/MFU/utilization/memory/Prefix/Padding/preemption), a Roofline scatter with an auto-verdict card, and multi-statistic TTFT/TPOT/E2E trends. Hover any item for the formula and reading.",
   "feat.2.h":"Kernel-level PC Sampling (Nsight-grade)","feat.2.p":'<b>Nsight Compute-grade evidence, captured continuously:</b> per-GPU-kernel time share + operator class + dominant stall. Triton kernels resolve straight to a <code>.py</code> source line; closed-source libraries get SASS hotspots + kernel-name decode; even closed-source GEMM attributes back to the <code>nn.Linear</code> that launched it.',
-  "feat.3.h":"Fact-rule diagnosis engine","feat.3.p":"13 curated rules in a three-part \"fact + signed inference + prescription\" shape. Thresholds live in one SLA config, hot-reloaded from the dashboard without restarting vLLM; add/remove custom rules, evaluated by the same engine as the curated ones.",
+  "feat.3.h":"Autopilot auto-tuning","feat.3.p":"Diagnosis-driven auto-tuning: iterate diagnose → change a knob → benchmark → keep / revert, inside a sandbox — with streaming agent calls, structured session summaries, full EN/ZH i18n, and interruptible stop.",
   "feat.4.h":"Built-in load tester","feat.4.p":"Kick off OpenAI-protocol static load tests from the dashboard — configure endpoint / concurrency / duration / prompt source, get client-side TTFT/TPOT/E2E distributions and SLO checks. Three built-in datasets: short Q&A / long docs / code.",
   "start.tag":"Get started","start.h2":"Three ways in, usable right after pip install",
   "start.sub":'No vLLM params changed, auto-loaded. Need kernel-level evidence? Swap <code style="font-family:var(--mono);font-size:.92em">vllm serve</code> for <code style="font-family:var(--mono);font-size:.92em">pping-vllm serve</code>.',
@@ -1311,13 +1254,13 @@ const I18N_EN = {
   "compat.gpu.note":"Unrecognized GPUs don't block metric capture — only peak-dependent derived values are skipped. Native on Linux; Windows via WSL2 + Ubuntu.",
   "road.tag":"Roadmap","road.h2":"Flagship is Autopilot, the foundation is diagnosis","road.now":"current",
   "road.flag":"flagship","road.ap.h":"Autopilot auto-tuning · phased",
-  "road.ap.m0tag":"validated","road.ap.m0mode":"M0","road.ap.m0h":"Sandbox + guarded knobs + LLM loop","road.ap.m0p":"Throughput-under-SLA objective + Autopilot UI; runw true session reached 986 → 6,094 tok/s (×6.18). No source edits, no production; promote remains manual.",
+  "road.ap.m0tag":"validated","road.ap.m0mode":"M0","road.ap.m0h":"Sandbox + guarded knobs + LLM loop","road.ap.m0p":"Throughput-under-SLA objective + Autopilot UI; runw true session reached 986 → 6,094 tok/s (×6.18). No source edits, no production; promote remains manual. Recently added: streaming agent calls, structured session summaries, six workload shapes, EN/ZH i18n, interruptible stop.",
   "road.ap.m1mode":"multi-objective / source-level advice","road.ap.m1h":"More knobs + advisory","road.ap.m1p":"More knobs / multi-objective / de-noising / promote-to-prod; M2 adds kernel/source-level advice via PC sampling (advisory only, never auto-applied).",
   "road.ap.m3mode":"data flywheel","road.ap.m3h":"Multi-GPU tuning + learned policy","road.ap.m3p":"TP/PP/EP communication dimensions; every run accrues a \"diagnosis → action → benchmark Δ\" trace → learn a policy, approaching \"one look, optimal config\".",
   "road.deploy":"Deployment modes",
-  "ap.tag":"Flagship direction","ap.badge":"validated on runw · M0",
+  "ap.tag":"Flagship direction","ap.badge":"validated on runw · M0 · streaming agent · EN/ZH",
   "ap.h2":"Autopilot — diagnosis-driven autonomous tuning",
-  "ap.sub":"Start pping-lang with one command → click \"Auto-tune\" → the Agent iterates in a <b>sandbox</b>: diagnose → turn one knob → benchmark → Δ → keep / revert → and hands you an <b>empirically-verified</b> optimal config plus the full reasoning. It turns an LLM into an LLM-serving performance engineer that reads evidence, acts, and scores itself with benchmarks.",
+  "ap.sub":"Start pping-lang with one command → click \"Auto-tune\" → the Agent iterates in a <b>sandbox</b>: diagnose → turn one knob → benchmark → Δ → keep / revert → and hands you an <b>empirically-verified</b> optimal config plus the full reasoning. It turns an LLM into an LLM-serving performance engineer that reads evidence, acts, and scores itself with benchmarks. Agent calls stream token-by-token (not one blocking wait), each session ends with a structured summary (a causal narrative plus a per-round ledger), it speaks EN/ZH, and a run can be interrupted anytime; six workload shapes (chat / RAG / agent / reasoning / code / custom) give matching bench load and SLA defaults with one flag.",
   "ap.s1":"read current diagnosis + config + history","ap.s2":"pick one knob, anchored to a diagnosis","ap.s3":"restart the sandbox with the new flag","ap.s4":"run the same benchmark, score it","ap.s5":"better → keep / breaks SLA → revert",
   "ap.moat.h":"Why only pping-lang can do this",
   "ap.eye1":"👁 Eyes","ap.eye1d":"deep diagnosis","ap.eye2":"✋ Hands","ap.eye2d":"benchmark + serve control","ap.eye3":"📊 Scorecard","ap.eye3d":"baseline / Δ",
@@ -1355,33 +1298,6 @@ const I18N_EN = {
 /* ============ rendering ============ */
 let curLang = 'zh';
 let chartRoof = null, chartLat = null;
-
-function renderRules(lang){
-  const box = document.getElementById('rules-list');
-  if(!box) return;
-  const kindColor = {'症状':'var(--amber)','事实':'var(--brand)','分类':'var(--teal)','symptom':'var(--amber)','fact':'var(--brand)','classifier':'var(--teal)'};
-  const inferLabel = lang==='en' ? 'signed inference →' : '署名推断 →';
-  const rxLabel = lang==='en' ? 'prescription →' : '处方 →';
-  const preLabel = lang==='en' ? 'requires' : '前置';
-  const checkLabel = lang==='en' ? 'check' : '判定';
-  box.innerHTML = RULES.map(r=>{
-    const d = r[lang];
-    return `<div class="diag ${r.sev}">
-      <div class="sev"></div>
-      <div class="body">
-        <div class="top">
-          <span class="ttl">${d.name}</span>
-          <span class="lvl">${r.sev}</span>
-          <span class="mono" style="font-size:10px;color:#fff;background:${kindColor[d.kind]||'var(--muted)'};padding:1px 7px;border-radius:5px;font-weight:700">${d.kind}</span>
-          <span class="mono" style="font-size:11px;color:var(--muted-2)">${r.id}</span>
-          ${r.pre?`<span class="mono" style="font-size:10px;color:var(--muted-2)">${preLabel} ${r.pre}</span>`:''}
-        </div>
-        <div class="fact"><span style="color:var(--muted-2);font-size:11px">${checkLabel} </span><code>${d.check}</code></div>
-        <div class="rx"><b style="color:var(--brand-strong)">${inferLabel}</b> ${d.hyp}${d.rx?`<br><b>${rxLabel}</b> ${d.rx}`:''}</div>
-      </div>
-    </div>`;
-  }).join('');
-}
 
 const CHART_LBL = {
   zh:{ai:'算术强度 (FLOP/byte) · 脊点 ≈ 212',tput:'吞吐 (TFLOPS)',memRoof:'带宽屋顶',compRoof:'算力屋顶',decode:'decode 迭代',prefill:'prefill 迭代'},
@@ -1449,7 +1365,6 @@ function applyLang(lang){
     el.innerHTML = (lang==='en' && I18N_EN[k]!==undefined) ? I18N_EN[k] : el._zh;
   });
   document.querySelectorAll('.lang-toggle button').forEach(b=>b.classList.toggle('active', b.dataset.lang===lang));
-  renderRules(lang);
   drawCharts(lang);
   try{localStorage.setItem('pping_site_lang',lang)}catch(e){}
 }

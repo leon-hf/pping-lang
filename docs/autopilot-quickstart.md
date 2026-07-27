@@ -44,9 +44,24 @@ python -m pping_lang.autopilot.run \
 | `--bench-concurrency` | **必须明显高于**基线 `max_num_seqs`（不能只是等于！等于时 waiting 永远测不出 >0，Agent 会误判"准入闸没绑定"而不去试提并发——留出 1.5× 左右余量） |
 | `--bench-repeats 3` | median-of-3 去噪：p99 延迟在 SLA 边界不再因单次离群翻转判定 |
 | `--baseline-max-num-seqs / --baseline-gpu-util` | 基线起点；默认 32 / 0.70（故意朴素的常见配置） |
+| `--workload <形态>` | 业务负载形态：一次性给 bench 负载参数（prompt/output tokens、并发）+ SLA 默认值，让 bench、SLA、诊断说同一种负载语言，见下方形态表；不给则退回各参数各自的旧默认（等价 `custom`） |
 | `--quality-gate` | 放开 T2 质量类参数（kv-cache fp8 / 量化 / 投机解码），带输出等价检查 |
 | `--dash-port 8013` | 候选容器带 pping 插件时发布其 dashboard：Agent 直接读**真诊断**而非启发式 |
 | `--agent-lang zh\|en` | Agent 自由文本应答语言（rationale/reason/思考过程）；默认 `zh`。不指定时 LLM 会跟着上下文里的英文技术标识符默认答英文，即使 system prompt 本身是中文 |
+| `--search-mode agent\|grid\|bo` | 参数搜索策略；默认 `agent`（LLM 诊断驱动）。`grid`/`bo` 用 `--search-width` 控制每个参数展开的候选档数 |
+
+### `--workload` 负载形态
+
+显式 flag（如 `--bench-concurrency`）> 形态默认 > 各参数原有兜底；`custom` 不施加任何默认，行为等价不给这个 flag。
+
+| 形态 | 说明 | bench 默认（prompt/output tokens · 并发） | SLA 默认（TTFT/TPOT/E2E p99） |
+|---|---|---|---|
+| `chat` | 对话（短进短出） | 500 / 128 · 64 | 1000ms / 50ms / 3000ms |
+| `rag` | RAG 问答（长 prompt） | 4000 / 256 · 16 | 3000ms / 50ms / 8000ms |
+| `agent` | Agent 工具循环 | 2000 / 512 · 32 | 1000ms / 50ms / 15000ms |
+| `reasoning` | 长推理（长输出） | 1000 / 4096 · 16 | 1000ms / 30ms / 90000ms |
+| `code` | 代码补全（硬延迟闸） | 300 / 128 · 16 | 100ms / 20ms / 2000ms |
+| `custom` | 全手动，不注入任何默认 | — | — |
 
 Agent 供应商任选其一：
 
