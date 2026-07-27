@@ -9,8 +9,8 @@
 [![PyPI](https://img.shields.io/pypi/v/pping-lang?color=4c8bf5&label=PyPI)](https://pypi.org/project/pping-lang/)
 [![Python](https://img.shields.io/badge/python-3.10%20|%203.11%20|%203.12-4c8bf5)](https://pypi.org/project/pping-lang/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-43a047)](LICENSE)
-[![Status](https://img.shields.io/badge/status-pre--alpha-fb8c00)](#项目状态)
-[![Tests](https://img.shields.io/badge/tests-514%20passing-43a047)](tests/)
+[![Status](https://img.shields.io/badge/status-stable-43a047)](#项目状态)
+[![Tests](https://img.shields.io/badge/tests-612%20passing-43a047)](tests/)
 [![Live Demo](https://img.shields.io/badge/%F0%9F%8C%90%20Live%20Demo-online-5b5bd6)](https://leon-hf.github.io/pping-lang/)
 
 **[🌐 在线演示 Live Demo →](https://leon-hf.github.io/pping-lang/)** —— 浏览器直接看真机采到的仪表盘（实时 / Kernel / 规则 / 压测 / Autopilot，中英双语）
@@ -25,6 +25,7 @@
 
 ## Latest News
 
+- **2026-07** —— `v0.1.0` 正式版发布：跳出 alpha。Autopilot 达到 M0+M1（真流式 Agent 调用、6 种业务负载形态、session 结构化摘要、中英双语、随时可中断），PC Sampling 稳定性修复，GitHub Pages 双语展示站上线，测试数增至 612
 - **2026-07** —— Autopilot 真机加固与验证：九个真实调优 session 打磨出的一批修复 —— Agent 可在参数值域内自选跨度（证据支持时一步到位，压测判决兜底）；准入闸绑定守卫（waiting 队列是决定性证据，负载喂不满时诚实说"瓶颈在负载"）；median-of-3 压测去噪（p99 在 SLA 边界不再翻转判定）；LLM 调用失败自动兜底并在 UI 显著标记；调优期间主面板端口由 host 侧 bridge 接管，**刷新页面不再打不开**，结束后自动切回；7B-AWQ 上首次真机命中带宽墙 regime 并诚实收敛
 - **2026-07** —— Autopilot M0：诊断驱动的自动调优 Agent 已接入 dashboard 和 host-side 沙盒编排；runw 真机 session 跑出 `986 → 6,094 tok/s（×6.18）`，每轮只改一个 vLLM 参数，bench 验证后才 kept，生产上线仍是人工 promote
 - **2026-06** —— 事实规则诊断引擎：诊断从扁平 if-else 升级为「事实 + 署名推断」两层 —— 规则名即客观事实（测出来的），根因与处方作为署名推断单列；阈值集中到一份 SLA 配置，可在仪表盘里热加载进运行中的引擎，并支持增删自定义规则
@@ -255,7 +256,7 @@ NVML 100ms ─────┤   /api/snapshot    /api/roofline        ≤60s
 
 ## 项目状态
 
-Pre-alpha (`v0.1.0a1`)。当前为 Embedded 模式，目标场景为单机本地开发与单卡 / 单 Pod 部署。生产侧的 Sidecar 模式、K8s 多副本聚合在 v0.2 规划。
+`v0.1.0`（首个正式版）。当前为 Embedded 模式，目标场景为单机本地开发与单卡 / 单 Pod 部署。生产侧的 Sidecar 模式、K8s 多副本聚合在 v0.2 规划。
 
 API 在 0.x 阶段允许不兼容变更；规则 JSON schema 与 dashboard URL 路径承诺向后兼容。
 

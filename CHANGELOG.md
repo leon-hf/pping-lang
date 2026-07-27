@@ -4,6 +4,53 @@
 
 ## [Unreleased]
 
+## [0.1.0] — 2026-07-27
+
+正式版：跳出 alpha。诊断引擎重写成规则决策树、Autopilot 从 0 到 M0+M1（诊断驱动自主调优的旗舰能力）、
+全站中英双语、GitHub Pages 展示站、PC Sampling 稳定性修复。
+
+### Added
+
+**诊断引擎重写**
+- FactRule 决策树 schema + 10 条内置规则（四大瓶颈：算力 / 带宽 / 容量 / 空载守卫）
+- 纯规则求值核心（precondition guard、any/all、ratio、regime gate）
+- 无 `perf_stats` 时的 analytical operating point（regime / MFU / AI 推算，不依赖 vLLM 0.20+）
+- `DiagnosisEngine` 运行时接入插件（默认启用，legacy DuckDB RuleEngine 下线）
+- 自定义规则复用同一 DiagnosisEngine；规则配置改成弹窗表单
+
+**Sink 与持久化**
+- JSONL 持久化取代 DuckDB 存储；规则求值直接读内存 ring，DuckDB 移出诊断热路径
+- Sink 背压下自适应降采样，替代原先的尾部无序丢弃
+
+**Autopilot —— 旗舰能力，从无到有（M0 + M1）**
+- 沙盒化诊断驱动自动调优 Agent：观察诊断 → 假设一个参数 → 压测验证 → 留下 / 回滚
+- 支持 OpenAI 兼容 / Anthropic / Kimi Coding 三种 Agent 供应商；真流式（SSE）调用，替代阻塞式整段等待
+- 6 种业务负载形态（chat / RAG / agent / reasoning / code / custom）一键给出匹配的压测负载与 SLA 默认值
+- E2E p99 SLA 从硬性关卡改为仅监控（TTFT / TPOT 仍卡关，避免因通用默认值不合模型实际而误判"无改善"）
+- session 结束给结构化摘要：因果链叙述 + 逐轮账本（每个参数的 from→to、判定、Δ）
+- 全中英双语（Agent 应答语言可配置、UI 全量 i18n），支持随时中断
+- 一大批真机 dogfood 修复：waiting 队列作为 load-binding 判据、agent HTTP 调用重试退避、
+  Kimi max_tokens 避免 thinking 饿死输出、vLLM 硬拒绝的 knob 不再提议、p99 延迟按 median-of-N 去噪、
+  session 边界正确性、baseline 失败自愈
+
+**UI / i18n**
+- 全站 i18n 框架（中 / 英切换），KPI / Kernel / Bench / Rules / Autopilot 全量翻译
+- Linear 风格主题（冷灰 + 靛蓝）+ sticky tabs
+- GitHub Pages 双语展示站（`docs/index.html`），含实测 runw 数据与 Autopilot 真机轨迹
+
+### Changed
+- "规则决策树"改名为"规则"（去掉不必要的术语包装）
+- Autopilot 启动按钮改名为"执行"（更准确描述动作）
+
+### Fixed
+- PC Sampling：禁用会在 Blackwell + CUDA 13 上与在飞推理死锁的 reprime 自愈机制
+- 指标 / 诊断时间戳改存墙钟而非单调钟（避免跨进程 / 重启后时间线错位）
+- `/api/diagnoses` 按 `rule_id` 去重
+- Autopilot 大量正确性修复（详见上）及 dashboard 面板的一系列展示 / 状态 bug
+
+### Tests
+- 测试数从 209 增至 612
+
 ## [0.1.0a1] — 2026-06-14
 
 首个 alpha。第 1-3 周采集/诊断/Sink 完成后，继续做完 CUPTI kernel 级剖析（阶段 1a/2/3）、

@@ -1,6 +1,6 @@
 # Contributing to pping-lang
 
-谢谢关注！v0.1 还在 pre-alpha，欢迎 issue / PR。
+谢谢关注！项目在 v0.1 阶段快速演进，欢迎 issue / PR。
 
 ## 开发环境
 

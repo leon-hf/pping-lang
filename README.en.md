@@ -9,8 +9,8 @@
 [![PyPI](https://img.shields.io/pypi/v/pping-lang?color=4c8bf5&label=PyPI)](https://pypi.org/project/pping-lang/)
 [![Python](https://img.shields.io/badge/python-3.10%20|%203.11%20|%203.12-4c8bf5)](https://pypi.org/project/pping-lang/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-43a047)](LICENSE)
-[![Status](https://img.shields.io/badge/status-pre--alpha-fb8c00)](#project-status)
-[![Tests](https://img.shields.io/badge/tests-514%20passing-43a047)](tests/)
+[![Status](https://img.shields.io/badge/status-stable-43a047)](#project-status)
+[![Tests](https://img.shields.io/badge/tests-612%20passing-43a047)](tests/)
 [![Live Demo](https://img.shields.io/badge/%F0%9F%8C%90%20Live%20Demo-online-5b5bd6)](https://leon-hf.github.io/pping-lang/)
 
 **[🌐 Live Demo →](https://leon-hf.github.io/pping-lang/)** — see the dashboard captured from a live GPU box right in your browser (Live / Kernel / Rules / Bench / Autopilot, bilingual)
@@ -25,6 +25,8 @@
 
 ## Latest News
 
+- **2026-07** — `v0.1.0` released: out of alpha. Autopilot reaches M0+M1 (real streaming agent calls, six workload shapes, structured session summaries, EN/ZH i18n, interruptible stop), PC Sampling stability fixes, the bilingual GitHub Pages showcase went live, test count is up to 612
+- **2026-07** — Autopilot hardened and validated on real hardware: a batch of fixes distilled from nine real tuning sessions — the agent can pick its own step size within a knob's range (jumping straight to a value when the evidence supports it, with the benchmark verdict as the backstop); an admission-gate binding guard (the waiting queue is the decisive evidence — when offered load can't fill the batch, it honestly says "the bottleneck is the load"); median-of-3 benchmark de-noising (p99 latency no longer flips the verdict right at an SLA boundary); failed LLM calls now fall back automatically with a visible UI badge; during tuning, the main dashboard's port is taken over by the host-side bridge so **a page refresh no longer breaks**, then switches back automatically when the session ends; first real-hardware session to hit the bandwidth-wall regime on 7B-AWQ and converge honestly
 - **2026-07** — Autopilot M0: the diagnosis-driven auto-tuning agent is wired into the dashboard and host-side sandbox orchestration; a true runw session reached `986 → 6,094 tok/s (×6.18)`, changing one vLLM knob per round and keeping only benchmark-verified wins, while production promotion remains manual
 - **2026-06** — Fact-rule diagnosis engine: diagnosis is upgraded from a flat if-else into two layers, "facts + attributed inference" — the rule name is the objective fact (what was measured), while root causes and prescriptions are listed separately as attributed inference; thresholds are centralized into a single SLA config that can be hot-reloaded into the running engine from the dashboard, with support for adding and removing custom rules
 - **2026-06** — Metric persistence drops DuckDB: the in-process DuckDB is replaced with sequential append-only JSONL (AppendLog), eliminating the per-iteration INSERT and its contention for the GIL/IO with colocated serving; the retention window becomes time-based (`PPING_LANG_RETENTION_SECONDS`, default 2h), rolling by volume with bounded disk usage
@@ -251,7 +253,7 @@ The hot path only performs an O(1) enqueue — no I/O, serialization, or lock wa
 
 ## Project Status
 
-Pre-alpha (`v0.1.0a1`). Currently in Embedded mode, targeting single-machine local development and single-card / single-Pod deployment. The production-side Sidecar mode and K8s multi-replica aggregation are planned for v0.2.
+`v0.1.0` (first stable release). Currently in Embedded mode, targeting single-machine local development and single-card / single-Pod deployment. The production-side Sidecar mode and K8s multi-replica aggregation are planned for v0.2.
 
 The API allows incompatible changes during the 0.x stage; the rule JSON schema and the dashboard URL paths are promised to be backward compatible.
 
