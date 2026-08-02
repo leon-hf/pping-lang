@@ -1256,7 +1256,7 @@
                     <div style="width: 108px; text-align: right; font-size: 11.5px; font-variant-numeric: tabular-nums; color: var(--muted-2);"
                          x-text="fmt(s.a, 1) + '% → ' + fmt(s.b, 1) + '%'"></div>
                     <div :style="'width:62px;text-align:right;font-size:12px;font-variant-numeric:tabular-nums;font-weight:600;color:'
-                           + (s.good === true ? 'var(--teal)' : (s.good === false ? 'var(--coral)' : 'var(--muted-2)'))"
+                           + (s.good === true ? 'var(--teal)' : (s.good === false ? 'var(--rose)' : 'var(--muted-2)'))"
                          x-text="ksnapDelta(s.delta) + ' pp'"></div>
                   </div>
                 </template>
@@ -1293,7 +1293,7 @@
                         </td>
                         <td><span class="kcls" :style="`background:${kernelColor(r.cls)}1a;color:${kernelColor(r.cls)}`" x-text="kernelLabel(r.cls)"></span></td>
                         <td :style="'text-align:right;font-variant-numeric:tabular-nums;font-weight:600;color:'
-                              + (r.good === true ? 'var(--teal)' : (r.good === false ? 'var(--coral)' : 'var(--muted-2)'))"
+                              + (r.good === true ? 'var(--teal)' : (r.good === false ? 'var(--rose)' : 'var(--muted-2)'))"
                             x-text="r.ratePct == null ? '—' : ksnapDelta(r.ratePct) + '%'"></td>
                         <td style="text-align: right; font-variant-numeric: tabular-nums; font-size: 11.5px; color: var(--muted);"
                             x-text="(r.shareA == null ? '—' : fmt(r.shareA, 1) + '%') + ' → ' + (r.shareB == null ? '—' : fmt(r.shareB, 1) + '%')"></td>
