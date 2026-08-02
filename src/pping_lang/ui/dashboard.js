@@ -253,6 +253,10 @@ const I18N = {
     'kern.howMeasured': '测量方式',
     'kern.samplingPeriod': '采样周期 每 {period} cycle 一次(2^{log}) ·\n本窗 {w}s 采到 {samples} 样本 ·\n GetData 累计开销 {getdata}ms ·\n丢样 {dropped} · HW 缓冲满 {hwfull} 次 ·\nGPU 硬件采样,无需 Nsight、不停服务',
     'kern.noInitialData': '点击上方按钮启动一次短窗 PC Sampling,查看这些 kernel 内部的 stall 类型(访存依赖 / 计算管线 / 同步 …)。',
+    // #5 comm 桶细分
+    'csub.title': '通信细分',
+    'csub.hint': '占通信总时间 · allreduce 常是延迟型,all_gather / reduce_scatter 常是带宽型,优化手段不同',
+    'csub.ofTotal': '全局 {pct}%',
     // #6 Kernel 快照 A/B 对比(改 kernel 前后验证)
     'ksnap.saveA': '存为快照 A',
     'ksnap.saveB': '存为快照 B',
@@ -729,6 +733,10 @@ Your "extra guidance" is appended after this contract.`,
     'kern.howMeasured': 'How measured',
     'kern.samplingPeriod': 'Sample every {period} cycles (2^{log}) ·\nThis window {w}s collected {samples} samples ·\nGetData cumulative overhead {getdata}ms ·\nDropped {dropped} · HW buffer full {hwfull} times ·\nGPU hardware sampling, no Nsight, no service interruption',
     'kern.noInitialData': 'Click the button above to open a short-window PC Sampling — see what\'s stalling inside these kernels (memory deps / compute pipeline / sync …).',
+    // #5 comm bucket subdivision
+    'csub.title': 'Comm breakdown',
+    'csub.hint': '% of total comm time · allreduce is usually latency-bound, all_gather / reduce_scatter usually bandwidth-bound — different fixes',
+    'csub.ofTotal': '{pct}% overall',
     // #6 Kernel snapshot A/B compare (verify a kernel change)
     'ksnap.saveA': 'Save as snapshot A',
     'ksnap.saveB': 'Save as snapshot B',
@@ -2496,6 +2504,14 @@ function dashboard() {
         elementwise: 'Elementwise', sampling: 'Sampling', index: 'Index/Gather',
         other: 'Other',
       }[cls] || cls;
+    },
+    // comm 子类 → 展示名(集合通信操作名是业界通用术语,不翻译)
+    commSubLabel(sub) {
+      return {
+        allreduce: 'AllReduce', reducescatter: 'ReduceScatter', allgather: 'AllGather',
+        sendrecv: 'SendRecv', broadcast: 'Broadcast', alltoall: 'AllToAll',
+        reduce: 'Reduce', other: 'Other',
+      }[sub] || sub;
     },
     // === Kernel tab 诊断辅助(全部从 deep.result 现有数据推导,无需后端)===
     // #5 mangled 名 → 人话

@@ -316,7 +316,11 @@ def test_ui_assets_split_and_under_budget():
     html = (ui / "index.html").stat().st_size
     css = (ui / "dashboard.css").stat().st_size
     js = (ui / "dashboard.js").stat().st_size
-    assert html < 140_000, f"index.html is {html} bytes, exceeds 140KB"
+    # Kernel tab 补两块 markup(2026-08-02)过了 140KB → 抬到 150KB：
+    #   #6 改动前后对比卡(A/B 快照槽 + 负载对照 + warp/stall/逐 kernel 三段 diff 表);
+    #   #5 comm 桶细分条(allreduce / allgather / reducescatter / …)。
+    # 都是实打实的新面板,不是重复 markup;gzip 后仍十几 KB,仍不值得为此上构建工具。
+    assert html < 150_000, f"index.html is {html} bytes, exceeds 150KB"
     # Autopilot 预览 tab 接入(.ap-* 一整套样式)后过了 70KB → 抬到 90KB;gzip 后仍十几 KB。
     assert css < 90_000, f"dashboard.css is {css} bytes, exceeds 90KB"
     # 双语规则 i18n(中/英各一份)随诊断规则增删而长;0.21 处方更新后过了 135KB。
@@ -333,7 +337,9 @@ def test_ui_assets_split_and_under_budget():
     # ~70 个 ap.* i18n key(中英各一份)+ VERDICT/STOP_LABELS/BOTTLENECK_LABEL 双语字典 +
     # resultSummaryText/sessionNarrativeText/knobLedger/actionSpaceSummaryText 等叙事函数
     # 各自补英文分支(非拼接翻译碎片,是完整句子模板)。一次性体积跳变,过了 165KB → 抬到 200KB。
-    assert js < 200_000, f"dashboard.js is {js} bytes, exceeds 200KB"
+    # Kernel tab 的 #6 前后对比 + #5 comm 细分(2026-08-02)过了 200KB → 抬到 210KB：
+    # 32 个 ksnap.*/csub.* key(中英各一份)+ 快照存取/对齐 diff/负载漂移判据等方法。
+    assert js < 210_000, f"dashboard.js is {js} bytes, exceeds 210KB"
 
 
 def test_css_and_js_served(client):

@@ -138,6 +138,21 @@ DEFAULT_CLASSIFY_RULES: list[tuple[tuple[str, ...], str]] = [
 ]
 
 
+# comm 桶内部再细分。不同集合通信的瓶颈性质不同(allreduce 常是延迟型,
+# all_gather / reduce_scatter 常是带宽型),同一个 "comm 45%" 背后可能是完全不同的问题。
+# ★ 顺序敏感且比上面更严：allreduce / reduce_scatter 名里都含 "reduce",
+#   故泛化的 "reduce" 必须垫底,否则会把前两者吃掉。
+COMM_SUBCLASS_RULES: list[tuple[tuple[str, ...], str]] = [
+    (("allreduce", "all_reduce"), "allreduce"),
+    (("reduce_scatter", "reducescatter"), "reducescatter"),
+    (("all_gather", "allgather"), "allgather"),
+    (("sendrecv", "send_recv", "p2p"), "sendrecv"),
+    (("broadcast", "bcast"), "broadcast"),
+    (("alltoall", "all_to_all"), "alltoall"),
+    (("reduce",), "reduce"),          # 垫底：前面没命中的裸 reduce
+]
+
+
 class KernelClassifier:
     """mangled kernel 名 → 语义类,结果按名记忆化。
 
@@ -148,6 +163,7 @@ class KernelClassifier:
     def __init__(self, rules: list[tuple[tuple[str, ...], str]] | None = None) -> None:
         self._rules = rules if rules is not None else DEFAULT_CLASSIFY_RULES
         self._cache: dict[str, str] = {}
+        self._sub_cache: dict[str, str | None] = {}
 
     def classify(self, name: str) -> str:
         cls = self._cache.get(name)
@@ -155,6 +171,26 @@ class KernelClassifier:
             cls = self._match(name)
             self._cache[name] = cls
         return cls
+
+    def comm_subclass(self, name: str) -> str | None:
+        """comm kernel → 集合通信子类;非 comm kernel → None。
+
+        刻意**不**改 classify() 的返回值："comm" 是对外稳定契约(KERNEL_CLASS_TO_METRIC、
+        routes 的 share 映射、UI 配色都按它 key),改成 "comm.allreduce" 会让这些 kernel
+        从 metric 映射里整个掉出去。故子类作并列维度单独给。
+        """
+        if name in self._sub_cache:
+            return self._sub_cache[name]
+        sub: str | None = None
+        if self.classify(name) == "comm":
+            low = name.lower()
+            sub = "other"
+            for needles, s in COMM_SUBCLASS_RULES:
+                if any(n in low for n in needles):
+                    sub = s
+                    break
+        self._sub_cache[name] = sub
+        return sub
 
     def _match(self, name: str) -> str:
         low = name.lower()
@@ -485,6 +521,8 @@ class StallAggregator:
                 rows.append({
                     "kernel": kname,
                     "cls": self._kcls.classify(kname),   # 算子类(gemm/attention/comm/...)
+                    # comm 子类(allreduce/allgather/...);非 comm kernel 为 None
+                    "comm_sub": self._kcls.comm_subclass(kname),
                     "samples": ktotal,
                     "time_pct": (100.0 * ktotal / grand_total) if grand_total else 0.0,
                     "stall_samples": stall_total,
@@ -509,6 +547,34 @@ class StallAggregator:
             ]
             shares.sort(key=lambda d: d["time_pct"], reverse=True)
             return shares
+
+    def comm_subclass_shares(self) -> list[dict[str, Any]]:
+        """comm 桶内部按集合通信子类拆分的 GPU 时间占比。
+
+        pct_of_comm = 该子类占**通信总时间**的比例(回答"通信时间主要花在哪种集合操作上");
+        time_pct    = 该子类占**全部 GPU 时间**的比例(回答"值不值得管")。
+        单卡部署没有 comm kernel,返回空表 —— UI 据此整段不显示。
+        """
+        with self._lock:
+            grand_total = sum(c.get("_total", 0) for c in self._kernel.values())
+            acc: dict[str, int] = defaultdict(int)
+            for kname, cats in self._kernel.items():
+                sub = self._kcls.comm_subclass(kname)
+                if sub is not None:
+                    acc[sub] += cats.get("_total", 0)
+            comm_total = sum(acc.values())
+            if not comm_total:
+                return []
+            rows = [
+                {
+                    "sub": sub,
+                    "pct_of_comm": 100.0 * n / comm_total,
+                    "time_pct": (100.0 * n / grand_total) if grand_total else 0.0,
+                }
+                for sub, n in acc.items()
+            ]
+            rows.sort(key=lambda d: d["pct_of_comm"], reverse=True)
+            return rows
 
     def stall_reason_detail(self, top_per_class: int = 6) -> dict[str, list[dict[str, Any]]]:
         """每个语义类底下的原始 PerfWorks stall reason 名 + 样本(专家下钻)。
@@ -1406,6 +1472,7 @@ class PcSamplingController:
             getdata_ms, dropped, hwfull = self._lib.overhead()
             table = agg.kernel_stall_table(self._top_n)
             class_shares = agg.kernel_class_shares()    # 须在 snapshot_and_reset(清零)之前取
+            comm_shares = agg.comm_subclass_shares()    # 同上;单卡为空表
             reason_detail = agg.stall_reason_detail()   # 同上,清零前取原始 reason 名
             stats = agg.snapshot_and_reset()
             shares = sorted(
@@ -1422,6 +1489,7 @@ class PcSamplingController:
                 "issued_pct": stats[M.KERNEL_STALL_ISSUED_PCT],
                 "stall_shares": shares,
                 "kernel_class_shares": class_shares,
+                "comm_subclass_shares": comm_shares,
                 "reason_detail": reason_detail,
                 "kernel_table": table,
                 "pc_hotspots": hotspots,

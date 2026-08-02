@@ -620,6 +620,27 @@
                 </span>
               </template>
             </div>
+            <!-- #5 comm 桶细分：单卡为空表,整段不显示 -->
+            <template x-if="deep.result.comm_subclass_shares && deep.result.comm_subclass_shares.length">
+              <div style="margin-top: 12px; padding: 10px 13px; background: var(--surface-alt); border-radius: 8px;">
+                <div style="margin-bottom: 7px;">
+                  <span style="font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em;" x-text="t('csub.title')"></span>
+                  <span style="font-size: 11px; color: var(--muted-2);" x-text="' · ' + t('csub.hint')"></span>
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 5px;">
+                  <template x-for="cs in deep.result.comm_subclass_shares" :key="cs.sub">
+                    <div style="display: flex; align-items: center; gap: 9px;">
+                      <div style="width: 116px; font-size: 11.5px; color: var(--text);" x-text="commSubLabel(cs.sub)"></div>
+                      <div style="flex: 1; background: #e9ebee; border-radius: 3px; height: 10px; overflow: hidden;">
+                        <div :style="`width:${Math.min(100, cs.pct_of_comm)}%;height:100%;background:${kernelColor('comm')}`"></div>
+                      </div>
+                      <div style="width: 52px; text-align: right; font-size: 11.5px; font-variant-numeric: tabular-nums; font-weight: 600;" x-text="fmt(cs.pct_of_comm, 1) + '%'"></div>
+                      <div style="width: 92px; text-align: right; font-size: 11px; color: var(--muted-2); font-variant-numeric: tabular-nums;" x-text="t('csub.ofTotal', {pct: fmt(cs.time_pct, 1)})"></div>
+                    </div>
+                  </template>
+                </div>
+              </div>
+            </template>
           </div>
           <!-- #1+#2+#3 诊断头条：GPU 在等多少 · 什么瓶颈 · 最大可回收点 -->
           <template x-if="issuedVerdict() && bottleneckVerdict()">

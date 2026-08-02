@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from pping_lang.collector.cupti import (
+    KERNEL_CLASS_TO_METRIC,
     CuptiKernelCollector,
     FakeActivitySource,
     FakePcSamplingLib,
@@ -82,6 +83,71 @@ def test_classifier_memoizes():
 def test_classifier_comm_wins_over_gemm_ordering():
     # nccl reduce kernel 名里可能也含通用词,comm 规则在前应优先命中
     assert KernelClassifier().classify("nccl_reduce_scatter_kernel") == "comm"
+
+
+# === comm 子类细分(#5 短期部分)===
+
+def test_comm_subclass_real_nccl_names():
+    """真实 NCCL kernel 名 → 集合通信子类。
+
+    ★ 顺序陷阱：AllReduce / ReduceScatter 名里都含 "reduce",若泛化的 "reduce"
+      规则不垫底,这两类会被整个吃掉、退化成一个笼统桶 —— 正是本功能要消除的问题。
+    """
+    clf = KernelClassifier()
+    assert clf.comm_subclass("ncclDevKernel_AllReduce_Sum_f32_RING_LL") == "allreduce"
+    assert clf.comm_subclass("ncclDevKernel_ReduceScatter_Sum_bf16_RING_LL") == "reducescatter"
+    assert clf.comm_subclass("ncclDevKernel_AllGather_RING_LL") == "allgather"
+    assert clf.comm_subclass("ncclDevKernel_SendRecv") == "sendrecv"
+    assert clf.comm_subclass("ncclDevKernel_Broadcast_RING_LL") == "broadcast"
+    assert clf.comm_subclass("ncclDevKernel_AllToAll") == "alltoall"
+    # 裸 reduce(前面都没命中)才落到泛化桶
+    assert clf.comm_subclass("ncclDevKernel_Reduce_Sum_f32") == "reduce"
+
+
+def test_comm_subclass_none_for_non_comm():
+    clf = KernelClassifier()
+    assert clf.comm_subclass("flash_fwd_kernel") is None
+    assert clf.comm_subclass("ampere_fp16_s16816gemm_fp16") is None
+
+
+def test_comm_subclass_does_not_change_base_class():
+    """子类是并列维度：classify() 必须仍返回 "comm"。
+
+    "comm" 是对外稳定契约(KERNEL_CLASS_TO_METRIC / routes share 映射 / UI 配色都按它 key),
+    若改成 "comm.allreduce",这些 kernel 会从 metric 映射里整个掉出去。
+    """
+    clf = KernelClassifier()
+    for name in ("ncclDevKernel_AllReduce_Sum_f32", "ncclDevKernel_AllGather_RING"):
+        assert clf.classify(name) == "comm"
+    # 契约本身：metric 映射里必须仍能按 "comm" 找到这些 kernel 的去处
+    assert "comm" in KERNEL_CLASS_TO_METRIC
+
+
+def test_comm_subclass_shares_empty_on_single_gpu():
+    """单卡没有 comm kernel → 空表(UI 据此整段不显示),不是一堆 0 行。"""
+    agg = StallAggregator()
+    agg.add([_s("flash_fwd_kernel", "long_scoreboard", 100)])
+    assert agg.comm_subclass_shares() == []
+
+
+def test_comm_subclass_shares_split_and_normalize():
+    agg = StallAggregator()
+    agg.add([
+        _s("ncclDevKernel_AllReduce_Sum_f32", "barrier", 60),
+        _s("ncclDevKernel_AllGather_RING_LL", "long_scoreboard", 20),
+        _s("flash_fwd_kernel", "long_scoreboard", 20),
+    ])
+    rows = agg.comm_subclass_shares()
+    by_sub = {r["sub"]: r for r in rows}
+    assert set(by_sub) == {"allreduce", "allgather"}
+    # pct_of_comm 在 comm 内部归一(60/80, 20/80)
+    assert abs(by_sub["allreduce"]["pct_of_comm"] - 75.0) < 1e-6
+    assert abs(by_sub["allgather"]["pct_of_comm"] - 25.0) < 1e-6
+    # time_pct 是占全部 GPU 时间(60/100, 20/100)
+    assert abs(by_sub["allreduce"]["time_pct"] - 60.0) < 1e-6
+    assert abs(by_sub["allgather"]["time_pct"] - 20.0) < 1e-6
+    # 降序
+    assert [r["sub"] for r in rows] == ["allreduce", "allgather"]
 
 
 # === WindowAggregator ===
