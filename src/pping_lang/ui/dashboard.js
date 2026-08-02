@@ -253,6 +253,33 @@ const I18N = {
     'kern.howMeasured': '测量方式',
     'kern.samplingPeriod': '采样周期 每 {period} cycle 一次(2^{log}) ·\n本窗 {w}s 采到 {samples} 样本 ·\n GetData 累计开销 {getdata}ms ·\n丢样 {dropped} · HW 缓冲满 {hwfull} 次 ·\nGPU 硬件采样,无需 Nsight、不停服务',
     'kern.noInitialData': '点击上方按钮启动一次短窗 PC Sampling,查看这些 kernel 内部的 stall 类型(访存依赖 / 计算管线 / 同步 …)。',
+    // #6 Kernel 快照 A/B 对比(改 kernel 前后验证)
+    'ksnap.saveA': '存为快照 A',
+    'ksnap.saveB': '存为快照 B',
+    'ksnap.slotA': '快照 A(改动前)',
+    'ksnap.slotB': '快照 B(改动后)',
+    'ksnap.clear': '清除',
+    'ksnap.savedAt': '{time} 采集',
+    'ksnap.title': '📐 改动前后对比',
+    'ksnap.hint': 'Δ = B 相对 A;绿 = 更好,红 = 更差',
+    'ksnap.needBoth': '存下 A(改动前)和 B(改动后)两个快照后,这里显示逐 kernel 的差异。',
+    'ksnap.loadContext': '负载对照',
+    'ksnap.loadSame': '典型 kernel 变化 {median}(中位数),说明变化集中在少数 kernel 上而非全体平移 —— 两次负载可比,下面的绝对 Δ 可信。整体 GPU 活跃度 {total}。',
+    'ksnap.loadDrift': '⚠ 典型 kernel 变化 {median}(中位数)—— 几乎所有 kernel 都同向平移了,这更像是两次取样时的流量/负载不同,而不是某个改动生效。下面的"绝对速率 Δ"会被这个差异污染,建议在相同负载下重采。整体 GPU 活跃度 {total}。',
+    'ksnap.periodMismatch': '⚠ 两次快照的采样周期不同(2^{a} vs 2^{b}),已按周期归一化后再比,但仍建议用同一周期重采。',
+    'ksnap.stallDiff': '全局 stall 构成变化',
+    'ksnap.stallDiffSub': '百分点差(B − A)· 下降 = 该类 stall 减少',
+    'ksnap.warpDiff': 'Warp 周期去向变化',
+    'ksnap.kernelDiff': '逐 kernel 差异',
+    'ksnap.kernelDiffSub': '按 GPU 时间占比排序 · 只列前 25',
+    'ksnap.colRate': '绝对速率 Δ',
+    'ksnap.colRateTip': '该 kernel 每墙钟秒消耗的 GPU 周期(已按采样周期归一化)。这是"这个 kernel 真的变快了吗"的答案 —— 前提是两次负载相同。',
+    'ksnap.colShare': 'GPU 时间占比',
+    'ksnap.colShareTip': '占比是相对值：单个 kernel 变快会自动抬高其它所有 kernel 的占比。判断"变没变快"请看绝对速率 Δ。',
+    'ksnap.colStall': '主导 stall',
+    'ksnap.new': '新增',
+    'ksnap.gone': '消失',
+    'ksnap.shareCaveat': '注意：占比是相对值 —— 优化掉一个 kernel 会让其余所有 kernel 的占比"看起来变差"。要判断某个 kernel 自身有没有变快,看绝对速率 Δ。',
     'bench.createTitle': '新建压测',
     'bench.createHint': '提交后异步执行，结果落库后出现在下方历史',
     'bench.name': '名称（可选）',
@@ -702,6 +729,33 @@ Your "extra guidance" is appended after this contract.`,
     'kern.howMeasured': 'How measured',
     'kern.samplingPeriod': 'Sample every {period} cycles (2^{log}) ·\nThis window {w}s collected {samples} samples ·\nGetData cumulative overhead {getdata}ms ·\nDropped {dropped} · HW buffer full {hwfull} times ·\nGPU hardware sampling, no Nsight, no service interruption',
     'kern.noInitialData': 'Click the button above to open a short-window PC Sampling — see what\'s stalling inside these kernels (memory deps / compute pipeline / sync …).',
+    // #6 Kernel snapshot A/B compare (verify a kernel change)
+    'ksnap.saveA': 'Save as snapshot A',
+    'ksnap.saveB': 'Save as snapshot B',
+    'ksnap.slotA': 'Snapshot A (before)',
+    'ksnap.slotB': 'Snapshot B (after)',
+    'ksnap.clear': 'Clear',
+    'ksnap.savedAt': 'captured {time}',
+    'ksnap.title': '📐 Before / after compare',
+    'ksnap.hint': 'Δ = B relative to A; green = better, red = worse',
+    'ksnap.needBoth': 'Save both A (before) and B (after) to see the per-kernel diff here.',
+    'ksnap.loadContext': 'Load context',
+    'ksnap.loadSame': 'Typical kernel moved {median} (median) — the change is concentrated in a few kernels rather than shifting everything, so the loads are comparable and the absolute Δ below is trustworthy. Overall GPU activity {total}.',
+    'ksnap.loadDrift': '⚠ Typical kernel moved {median} (median) — nearly every kernel shifted in the same direction, which looks more like different traffic/load between the two captures than like a change taking effect. The "absolute rate Δ" below is confounded by that; re-capture under matching load. Overall GPU activity {total}.',
+    'ksnap.periodMismatch': '⚠ The two snapshots used different sampling periods (2^{a} vs 2^{b}). Values are normalized by period before comparing, but re-capturing with one period is still recommended.',
+    'ksnap.stallDiff': 'Global stall breakdown change',
+    'ksnap.stallDiffSub': 'Percentage-point delta (B − A) · down = less of that stall',
+    'ksnap.warpDiff': 'Warp cycle destination change',
+    'ksnap.kernelDiff': 'Per-kernel diff',
+    'ksnap.kernelDiffSub': 'Sorted by GPU time share · top 25 only',
+    'ksnap.colRate': 'Absolute rate Δ',
+    'ksnap.colRateTip': 'GPU cycles this kernel consumes per wall-clock second (normalized by sampling period). This is the answer to "did this kernel actually get faster" — provided both snapshots ran under the same load.',
+    'ksnap.colShare': 'GPU time share',
+    'ksnap.colShareTip': 'Share is relative: making one kernel faster automatically inflates every other kernel\'s share. To judge whether a kernel got faster, read the absolute rate Δ.',
+    'ksnap.colStall': 'Dominant stall',
+    'ksnap.new': 'new',
+    'ksnap.gone': 'gone',
+    'ksnap.shareCaveat': 'Note: share is a relative number — optimizing one kernel away makes every remaining kernel\'s share "look worse". To judge whether a given kernel itself got faster, read the absolute rate Δ.',
     'bench.createTitle': 'Create New Benchmark',
     'bench.createHint': 'Runs asynchronously after submission; results appear in history below',
     'bench.name': 'Name (optional)',
@@ -2390,6 +2444,9 @@ function dashboard() {
     },
     // Deep Evidence(阶段 2 PC Sampling 按需取证)：为什么这些 kernel 慢
     deep: { running: false, available_now: false, result: null, findings: [], error: null },
+    // #6 改动前后对比：两个 Deep Evidence 快照(A=改动前基准,B=改动后)。存 localStorage,
+    // 让"改 kernel → 重启服务 → 再采一次"这个真实工作流跨页面刷新还留得住 A。
+    kernelSnaps: { A: null, B: null },   // 每槽 {ts, result}
     kernelShowAll: false,        // Kernel 明细表：false=只显示前 N 行
     kernelCollapsed: 10,         // 收起时显示的行数
     kernelExpanded: null,        // 展开看 stall 构成 + 建议的行索引(null=都收起)
@@ -2616,8 +2673,9 @@ function dashboard() {
     },
     // === Deep Evidence(全局 / warp 效率 / 方法论)辅助 ===
     // Warp 周期三态(占全部样本)：发指令 / 就绪未选中(余量) / 真 stall(在等)
-    warpSplit() {
-      const r = this.deep.result;
+    // res 省略时用当前取证结果;传入则可算任意快照(#6 前后对比复用)
+    warpSplit(res) {
+      const r = res || this.deep.result;
       if (!r || !r.available) return null;
       const issued = r.issued_pct || 0;
       const slackShare = ((r.stall_shares || []).find(s => s.cls === 'scheduler_slack') || {}).pct || 0;
@@ -2741,6 +2799,145 @@ function dashboard() {
         this.deep.running = false;
       }
     },
+    // ===== #6 Kernel 快照 A/B 对比：改完 kernel 之后,工具内直接验证有没有变好 =====
+    // 不需要任何新采集源 —— deep.result 本身就是一次完整快照,缺的只是"存下来 + 对齐 diff"。
+    _KSNAP_KEY: 'pping.kernelSnaps',
+    _ksnapLoad() {
+      try {
+        const o = JSON.parse(localStorage.getItem(this._KSNAP_KEY) || 'null');
+        if (o && typeof o === 'object') this.kernelSnaps = { A: o.A || null, B: o.B || null };
+      } catch (e) { /* 存储损坏 / 隐私模式：退回空快照,不阻断 Kernel tab */ }
+    },
+    _ksnapPersist() {
+      try { localStorage.setItem(this._KSNAP_KEY, JSON.stringify(this.kernelSnaps)); }
+      catch (e) { /* 配额满 / 隐私模式：内存里照样能对比,只是刷新后丢 */ }
+    },
+    saveKernelSnap(slot) {
+      const r = this.deep.result;
+      if (!r || !r.available) return;
+      this.kernelSnaps[slot] = { ts: Date.now(), result: r };
+      this._ksnapPersist();
+    },
+    clearKernelSnap(slot) {
+      this.kernelSnaps[slot] = null;
+      this._ksnapPersist();
+    },
+    ksnapTime(slot) {
+      const s = this.kernelSnaps[slot];
+      return s ? new Date(s.ts).toLocaleTimeString() : '';
+    },
+    ksnapReady() { return !!(this.kernelSnaps.A && this.kernelSnaps.B); },
+
+    // 采样"绝对速率"：samples × 2^period / window_s ∝ 该 kernel 每墙钟秒消耗的 GPU 周期。
+    // 为什么不用 time_pct：占比是**相对**值,把一个 kernel 优化掉会自动抬高其余所有 kernel
+    // 的占比 —— 直接拿占比做前后对比会得出"其它 kernel 都变差了"的假结论。乘 2^period 是为了
+    // 让采样周期不同的两次快照也可比(样本数 ∝ 时间 / 周期)。
+    _ksnapRate(samples, res) {
+      const w = Number(res && res.window_s) || 0;
+      if (w <= 0 || samples == null) return null;
+      return samples * Math.pow(2, Number(res.period_log2) || 0) / w;
+    },
+
+    // 负载对照。★ 这里不能用"总采样速率变化"当漂移信号 —— 优化成功本身就会让总速率下降
+    // (kernel 变快 → GPU 活跃周期变少),那样会在优化生效时误报"负载不可比"。
+    // 真正能区分两者的是**变化的分散程度**：
+    //   - 负载变了(一次高峰一次空闲)→ 几乎所有 kernel 的绝对速率一起同向平移 → 中位数大;
+    //   - 优化生效 → 只有被改的那几个 kernel 动,其余不动 → 中位数≈0,尾部有大值。
+    // 故用 per-kernel Δ 的**中位数**作漂移判据,总速率只作为上下文数字展示。
+    ksnapLoad() {
+      if (!this.ksnapReady()) return null;
+      const A = this.kernelSnaps.A.result, B = this.kernelSnaps.B.result;
+      const ra = this._ksnapRate(A.sample_total, A), rb = this._ksnapRate(B.sample_total, B);
+      const totalPct = (ra && rb) ? 100 * (rb - ra) / ra : null;
+      // 只取两侧都存在的 kernel(新增/消失的没有可比基准)
+      const deltas = this.ksnapRows()
+        .filter(r => r.ratePct != null).map(r => r.ratePct).sort((x, y) => x - y);
+      let medianPct = null;
+      if (deltas.length) {
+        const m = Math.floor(deltas.length / 2);
+        medianPct = deltas.length % 2 ? deltas[m] : (deltas[m - 1] + deltas[m]) / 2;
+      }
+      return {
+        totalPct, medianPct,
+        // 样本太少(<4 个共同 kernel)时中位数不稳,不下漂移结论,只展示数字
+        drift: medianPct != null && deltas.length >= 4 && Math.abs(medianPct) >= 15,
+        periodA: A.period_log2, periodB: B.period_log2,
+        periodMismatch: A.period_log2 !== B.period_log2,
+      };
+    },
+
+    // 逐 kernel 对齐 diff。|Δ|<5% 视为持平：PC Sampling 是统计估计,窗与窗之间本身有噪声,
+    // 阈值比 bench 的 2% 放宽是因为采样噪声大于压测运行间噪声。
+    ksnapRows() {
+      if (!this.ksnapReady()) return [];
+      const A = this.kernelSnaps.A.result, B = this.kernelSnaps.B.result;
+      const index = (res) => new Map((res.kernel_table || []).map(k => [k.kernel, k]));
+      const ma = index(A), mb = index(B);
+      const rows = [];
+      for (const name of new Set([...ma.keys(), ...mb.keys()])) {
+        const a = ma.get(name), b = mb.get(name);
+        const ra = a ? this._ksnapRate(a.samples, A) : null;
+        const rb = b ? this._ksnapRate(b.samples, B) : null;
+        const ratePct = (ra != null && rb != null && ra > 0) ? 100 * (rb - ra) / ra : null;
+        const shareA = a ? a.time_pct : null, shareB = b ? b.time_pct : null;
+        rows.push({
+          kernel: name,
+          cls: (b || a).cls,
+          status: !a ? 'new' : (!b ? 'gone' : 'both'),
+          shareA, shareB,
+          shareDelta: (shareA != null && shareB != null) ? shareB - shareA : null,
+          ratePct,
+          good: (ratePct != null && Math.abs(ratePct) >= 5) ? ratePct < 0 : null,
+          stallA: a ? a.dominant_stall : null,
+          stallB: b ? b.dominant_stall : null,
+          stallChanged: !!(a && b && a.dominant_stall !== b.dominant_stall),
+          weight: Math.max(shareA || 0, shareB || 0),
+        });
+      }
+      rows.sort((x, y) => y.weight - x.weight);
+      return rows.slice(0, 25);
+    },
+
+    // 全局 stall 构成的百分点差。stall 占比下降 = 更好;|Δ|<1 个百分点视为持平。
+    ksnapStallRows() {
+      if (!this.ksnapReady()) return [];
+      const pick = (res) => Object.fromEntries((res.stall_shares || []).map(s => [s.cls, s.pct]));
+      const a = pick(this.kernelSnaps.A.result), b = pick(this.kernelSnaps.B.result);
+      return [...new Set([...Object.keys(a), ...Object.keys(b)])]
+        .map(cls => {
+          const pa = a[cls] || 0, pb = b[cls] || 0, delta = pb - pa;
+          // scheduler_slack 高常是好事(有余量),不套"越低越好"
+          const good = (cls === 'scheduler_slack' || Math.abs(delta) < 1) ? null : delta < 0;
+          return { cls, a: pa, b: pb, delta, good };
+        })
+        .filter(r => r.a >= 0.5 || r.b >= 0.5)
+        .sort((x, y) => Math.abs(y.delta) - Math.abs(x.delta));
+    },
+
+    // Warp 三态的前后差(issued 越高越好,stall 越低越好,slack 是中性信息)
+    ksnapWarpRows() {
+      if (!this.ksnapReady()) return [];
+      const wa = this.warpSplit(this.kernelSnaps.A.result);
+      const wb = this.warpSplit(this.kernelSnaps.B.result);
+      if (!wa || !wb) return [];
+      return [
+        { key: 'issued', label: t('kern.issued'), a: wa.issued, b: wb.issued, higherBetter: true },
+        { key: 'slack', label: t('kern.slack'), a: wa.slack, b: wb.slack, higherBetter: null },
+        { key: 'stall', label: t('kern.stallWait'), a: wa.stall, b: wb.stall, higherBetter: false },
+      ].map(r => {
+        const delta = r.b - r.a;
+        const good = (r.higherBetter == null || Math.abs(delta) < 1) ? null
+          : (r.higherBetter ? delta > 0 : delta < 0);
+        return { ...r, delta, good };
+      });
+    },
+    // Δ 数字统一成 "+x.x%" / "−x.x%"(带符号,便于扫读)
+    ksnapDelta(v, digits) {
+      if (v == null || isNaN(v)) return '—';
+      const n = Number(v);
+      return (n > 0 ? '+' : '') + n.toFixed(digits == null ? 1 : digits);
+    },
+
     // kernel 数据是否"实时"(采集时刻够近),用于新鲜度横幅
     // 延迟分位条(三行式)：某分位占 p99 的宽度%(p99=满刻度;三段挤一条看不清,实测反馈)
     pctW(d, q) {
@@ -2886,6 +3083,7 @@ function dashboard() {
       _e2eChart  = _createMiniLatencyChart('e2e-chart',  '#0d8b80');
       // kernel 趋势图懒创建(canvas 在 x-if 里,见 _updateKernelTrends)
 
+      this._ksnapLoad();   // #6 前后对比快照：刷新页面/重启服务后 A 还在
       this.fetchSystem();
       this.refresh();
       setInterval(() => this.refresh(), 2000);

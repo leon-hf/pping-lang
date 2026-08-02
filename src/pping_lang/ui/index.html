@@ -1046,7 +1046,14 @@
             <h3 x-text="t('kern.deepEvidence')"><span style="color: var(--muted-2); font-weight: 400; font-size: 12px;" x-text="t('kern.deepEvidenceSub')"></span></h3>
             <div style="margin-top: 4px; font-size: 11.5px; color: var(--muted-2);" x-text="t('kern.deepHint')"></div>
           </div>
-          <div>
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <!-- #6：把当前这次取证结果存成 A(改动前)/ B(改动后),下方卡片出 diff -->
+            <template x-if="deep.result && deep.result.available">
+              <div style="display: flex; gap: 6px;">
+                <button class="btn" @click="saveKernelSnap('A')" :title="t('ksnap.saveA')" x-text="kernelSnaps.A ? 'A ✓' : 'A'"></button>
+                <button class="btn" @click="saveKernelSnap('B')" :title="t('ksnap.saveB')" x-text="kernelSnaps.B ? 'B ✓' : 'B'"></button>
+              </div>
+            </template>
             <button class="btn" :disabled="deep.running" @click="runDeepEvidence(5)">
               <span x-show="!deep.running" x-text="t('kern.collectEvidence')"></span>
               <span x-show="deep.running" x-text="t('kern.collecting')"></span>
@@ -1138,6 +1145,153 @@
           <div class="roofline-verdict empty" style="margin: 12px 0 0;" x-text="t('kern.noInitialData')"></div>
         </template>
       </div>
+
+      <!-- ===== #6 改动前后对比(两个 Deep Evidence 快照的 diff,无需新采集)===== -->
+      <template x-if="kernelSnaps.A || kernelSnaps.B">
+        <div class="chart-card" style="margin-top: 18px;">
+          <div class="head" style="margin-bottom: 10px;">
+            <h3><span x-text="t('ksnap.title')"></span> <span style="color: var(--muted-2); font-weight: 400; font-size: 12px;" x-text="t('ksnap.hint')"></span></h3>
+          </div>
+
+          <!-- 两个槽位的状态 + 清除 -->
+          <div style="display: flex; gap: 18px; flex-wrap: wrap; margin-bottom: 12px; font-size: 12px;">
+            <template x-for="slot in ['A', 'B']" :key="slot">
+              <span style="display: inline-flex; align-items: center; gap: 7px;">
+                <strong :style="slot === 'A' ? 'color: var(--indigo)' : 'color: var(--teal)'"
+                        x-text="slot === 'A' ? t('ksnap.slotA') : t('ksnap.slotB')"></strong>
+                <template x-if="kernelSnaps[slot]">
+                  <span style="display: inline-flex; align-items: center; gap: 7px;">
+                    <span style="color: var(--muted);" x-text="t('ksnap.savedAt', {time: ksnapTime(slot)})"></span>
+                    <button class="btn" style="padding: 2px 8px; font-size: 11px;" @click="clearKernelSnap(slot)" x-text="t('ksnap.clear')"></button>
+                  </span>
+                </template>
+                <template x-if="!kernelSnaps[slot]">
+                  <span style="color: var(--muted-2);">—</span>
+                </template>
+              </span>
+            </template>
+          </div>
+
+          <!-- 只存了一个槽 -->
+          <template x-if="!ksnapReady()">
+            <div class="roofline-verdict empty" style="margin: 0;" x-text="t('ksnap.needBoth')"></div>
+          </template>
+
+          <template x-if="ksnapReady()">
+            <div>
+              <!-- 负载对照：绝对速率 Δ 的可信前提。漂移大时必须先说,免得把"负载变轻"读成"优化生效" -->
+              <template x-if="ksnapLoad()">
+                <div :style="'margin-bottom:16px;padding:11px 14px;border-radius:8px;font-size:11.5px;line-height:1.7;background:var(--surface-alt);'
+                       + (ksnapLoad().drift ? 'border-left:3px solid #b7791f;color:var(--text);' : 'color:var(--muted);')">
+                  <strong style="color: var(--text);" x-text="t('ksnap.loadContext')"></strong>
+                  <span x-show="!ksnapLoad().drift" x-text="t('ksnap.loadSame', {median: ksnapDelta(ksnapLoad().medianPct) + '%', total: ksnapDelta(ksnapLoad().totalPct) + '%'})"></span>
+                  <span x-show="ksnapLoad().drift" x-text="t('ksnap.loadDrift', {median: ksnapDelta(ksnapLoad().medianPct) + '%', total: ksnapDelta(ksnapLoad().totalPct) + '%'})"></span>
+                  <div x-show="ksnapLoad().periodMismatch" style="margin-top: 5px;"
+                       x-text="t('ksnap.periodMismatch', {a: ksnapLoad().periodA, b: ksnapLoad().periodB})"></div>
+                </div>
+              </template>
+
+              <!-- Warp 三态 + 全局 stall 构成的前后差 -->
+              <div style="font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 8px;" x-text="t('ksnap.warpDiff')"></div>
+              <div class="cmp-grid" style="margin-bottom: 18px;">
+                <template x-for="r in ksnapWarpRows()" :key="r.key">
+                  <div class="cmp-block">
+                    <div class="cmp-block-head">
+                      <span class="cmp-metric" x-text="r.label"></span>
+                      <span class="cmp-delta" :class="r.good === true ? 'good' : (r.good === false ? 'bad' : '')"
+                            x-text="ksnapDelta(r.delta) + ' pp'"></span>
+                    </div>
+                    <div class="cmp-bar-row">
+                      <span class="cmp-ab a">A</span>
+                      <div class="cmp-track"><i class="a" :style="`width:${Math.min(100, r.a)}%`"></i></div>
+                      <b x-text="fmt(r.a, 1) + '%'"></b>
+                    </div>
+                    <div class="cmp-bar-row">
+                      <span class="cmp-ab b">B</span>
+                      <div class="cmp-track"><i class="b" :style="`width:${Math.min(100, r.b)}%`"></i></div>
+                      <b x-text="fmt(r.b, 1) + '%'"></b>
+                    </div>
+                  </div>
+                </template>
+              </div>
+
+              <!-- 副标题必须是兄弟节点：x-text 会覆写 textContent,放子元素里会被清掉 -->
+              <div style="margin-bottom: 8px;">
+                <span style="font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em;" x-text="t('ksnap.stallDiff')"></span>
+                <span style="font-size: 12px; color: var(--muted-2);" x-text="' · ' + t('ksnap.stallDiffSub')"></span>
+              </div>
+              <div style="display: flex; flex-direction: column; gap: 7px; margin-bottom: 20px;">
+                <template x-for="s in ksnapStallRows()" :key="s.cls">
+                  <div style="display: flex; align-items: center; gap: 10px;">
+                    <div style="width: 160px; font-size: 12px; color: var(--muted);" x-text="stallLabel(s.cls)"></div>
+                    <div style="flex: 1; display: flex; flex-direction: column; gap: 2px;">
+                      <div style="background: #e9ebee; border-radius: 3px; height: 8px; overflow: hidden;">
+                        <div :style="`width:${Math.min(100, s.a)}%;height:100%;background:var(--indigo);opacity:0.7`"></div>
+                      </div>
+                      <div style="background: #e9ebee; border-radius: 3px; height: 8px; overflow: hidden;">
+                        <div :style="`width:${Math.min(100, s.b)}%;height:100%;background:var(--teal);opacity:0.85`"></div>
+                      </div>
+                    </div>
+                    <div style="width: 108px; text-align: right; font-size: 11.5px; font-variant-numeric: tabular-nums; color: var(--muted-2);"
+                         x-text="fmt(s.a, 1) + '% → ' + fmt(s.b, 1) + '%'"></div>
+                    <div :style="'width:62px;text-align:right;font-size:12px;font-variant-numeric:tabular-nums;font-weight:600;color:'
+                           + (s.good === true ? 'var(--teal)' : (s.good === false ? 'var(--coral)' : 'var(--muted-2)'))"
+                         x-text="ksnapDelta(s.delta) + ' pp'"></div>
+                  </div>
+                </template>
+              </div>
+
+              <!-- 逐 kernel diff -->
+              <div style="margin-bottom: 8px;">
+                <span style="font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em;" x-text="t('ksnap.kernelDiff')"></span>
+                <span style="font-size: 12px; color: var(--muted-2);" x-text="' · ' + t('ksnap.kernelDiffSub')"></span>
+              </div>
+              <div style="overflow-x: auto;">
+                <table class="kernel-table">
+                  <thead>
+                    <tr>
+                      <th style="width: 36%;">Kernel</th>
+                      <th x-text="t('kern.kernelClass')"></th>
+                      <th style="text-align: right; width: 130px;" :title="t('ksnap.colRateTip')" x-text="t('ksnap.colRate') + ' ⓘ'"></th>
+                      <th style="text-align: right; width: 168px;" :title="t('ksnap.colShareTip')" x-text="t('ksnap.colShare') + ' ⓘ'"></th>
+                      <th x-text="t('ksnap.colStall')"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <template x-for="r in ksnapRows()" :key="r.kernel">
+                      <tr>
+                        <td>
+                          <div style="font-weight: 600; color: var(--text-strong); font-size: 12.5px;">
+                            <span x-text="kernelFriendly(r.kernel, r.cls)"></span>
+                            <span x-show="r.status !== 'both'"
+                                  :style="'margin-left:6px;padding:1px 6px;border-radius:999px;font-size:10px;font-weight:600;color:#fff;background:'
+                                    + (r.status === 'new' ? 'var(--teal)' : 'var(--muted-2)')"
+                                  x-text="r.status === 'new' ? t('ksnap.new') : t('ksnap.gone')"></span>
+                          </div>
+                          <code class="kname" style="font-size: 10.5px; color: var(--muted-2);" x-text="r.kernel" :title="r.kernel"></code>
+                        </td>
+                        <td><span class="kcls" :style="`background:${kernelColor(r.cls)}1a;color:${kernelColor(r.cls)}`" x-text="kernelLabel(r.cls)"></span></td>
+                        <td :style="'text-align:right;font-variant-numeric:tabular-nums;font-weight:600;color:'
+                              + (r.good === true ? 'var(--teal)' : (r.good === false ? 'var(--coral)' : 'var(--muted-2)'))"
+                            x-text="r.ratePct == null ? '—' : ksnapDelta(r.ratePct) + '%'"></td>
+                        <td style="text-align: right; font-variant-numeric: tabular-nums; font-size: 11.5px; color: var(--muted);"
+                            x-text="(r.shareA == null ? '—' : fmt(r.shareA, 1) + '%') + ' → ' + (r.shareB == null ? '—' : fmt(r.shareB, 1) + '%')"></td>
+                        <td style="font-size: 11.5px;">
+                          <span :style="`color:${stallColor(r.stallA)}`" x-text="r.stallA ? stallLabel(r.stallA) : '—'"></span>
+                          <template x-if="r.stallChanged">
+                            <span><span style="color: var(--muted-2);"> → </span><strong :style="`color:${stallColor(r.stallB)}`" x-text="stallLabel(r.stallB)"></strong></span>
+                          </template>
+                        </td>
+                      </tr>
+                    </template>
+                  </tbody>
+                </table>
+              </div>
+              <div style="margin-top: 11px; font-size: 11px; color: var(--muted-2); line-height: 1.7;" x-text="t('ksnap.shareCaveat')"></div>
+            </div>
+          </template>
+        </div>
+      </template>
     </div>
 
     <!-- ===== 规则 tab ===== -->
