@@ -19,6 +19,8 @@
 
 [Live Demo](https://leon-hf.github.io/pping-lang/) · [Quick Start](#quick-start) · [Dashboard](#dashboard) · [Compatibility](#compatibility) · [Architecture](#architecture) · [Roadmap](#roadmap)
 
+<img src="docs/images/dashboard-live-en.png" alt="pping-lang dashboard · Live tab: KPIs, roofline with automatic verdict, latency trends (captured from a live GPU box)" width="900">
+
 </div>
 
 ---
@@ -120,6 +122,10 @@ A single-page application, a single HTML file, with no frontend build tooling re
 | Bench | A built-in OpenAI-protocol static load tester; configure endpoint / call name / concurrency / duration / prompt source, and it outputs client-side TTFT / TPOT / E2E distributions and SLO validation |
 
 Live data is read directly from the Sink's in-memory ring buffer, with latency roughly equal to the polling interval.
+
+The Kernel tab (captured live on runw's RTX 5060 Ti, an 8.26M-sample window):
+
+![Kernel tab: per-kernel GPU time share + operator classes, launch-origin attribution, stall-reason breakdown](docs/images/dashboard-kernel-en.png)
 
 ---
 

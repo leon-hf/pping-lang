@@ -19,6 +19,8 @@
 
 [在线演示](https://leon-hf.github.io/pping-lang/) · [快速上手](#快速上手) · [Autopilot 真机调优 Quickstart](docs/autopilot-quickstart.md) · [仪表盘](#仪表盘) · [兼容性](#兼容性) · [架构](#架构) · [路线图](#路线图)
 
+<img src="docs/images/dashboard-live-zh.png" alt="pping-lang 仪表盘 · 实时标签页：KPI、Roofline 自动结论、延迟时序（runw 真机实采）" width="900">
+
 </div>
 
 ---
@@ -123,6 +125,10 @@ pping-vllm serve <model>      # 等价于 vllm serve,额外开启 Kernel 级采�
 | 压测 | 内置 OpenAI 协议静态压测器，配置 endpoint / 调用名 / 并发 / 时长 / prompt 来源，输出 client-side TTFT / TPOT / E2E 分布及 SLO 校验 |
 
 实时数据从 Sink 的内存 ring buffer 直读，延迟约等于轮询间隔。
+
+Kernel 标签页（runw RTX 5060 Ti 实采，826 万样本窗口）：
+
+![Kernel 标签页：kernel 时间占比 + 算子分类、启动来源归因、stall reason 分解](docs/images/dashboard-kernel-zh.png)
 
 ---
 
