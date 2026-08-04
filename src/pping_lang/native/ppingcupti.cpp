@@ -561,8 +561,13 @@ int pping_pcs_stop(void) {
                      "getdata_ms=%.1f、dropped=%llu、hwfull=%llu\n",
                      g.module_cbs.load(), g.skipped_drains.load(),
                      g.getdata_ms.load(), g.dropped.load(), g.hwfull.load());
+    // 分段打点:stop 带载会死锁(见 engine_pcs.py 注释),但"卡在哪一步"此前无人定位过。
+    // 宿主/容器都没有 gdb,靠这些打点即可判断:最后印出的阶段就是卡住的那一步。
+#define PCS_STOP_STAGE(s) do { if (dbg()) std::fprintf(stderr, "[ppingcupti] stop-stage: %s\n", (s)); } while (0)
+    PCS_STOP_STAGE("1-join-worker-begin");
     g.stop_flag.store(true);
     if (g.worker.joinable()) g.worker.join();
+    PCS_STOP_STAGE("2-join-worker-done");
     // 关 module 回调 + 标记停止(回调据此 no-op),避免收尾期间还有 module 事件进来
     if (g_sub != nullptr) {
         for (CUpti_driver_api_trace_cbid_enum mc : kModuleCbids)
@@ -573,18 +578,23 @@ int pping_pcs_stop(void) {
             for (CUpti_driver_api_trace_cbid_enum lc : kLaunchCbids)
                 cuptiEnableCallback(0, g_sub, CUPTI_CB_DOMAIN_DRIVER_API, lc);
     }
+    PCS_STOP_STAGE("3-callbacks-disabled");
     g.running.store(false);
     CUptiResult r;
     {
         CUpti_PCSamplingStopParams p;
         std::memset(&p, 0, sizeof p);
         p.size = CUpti_PCSamplingStopParamsSize; p.ctx = g.ctx;
+        PCS_STOP_STAGE("4-cuptiPCSamplingStop-begin");
         r = cuptiPCSamplingStop(&p);
+        PCS_STOP_STAGE("5-cuptiPCSamplingStop-done");
         if (r != CUPTI_SUCCESS) set_err("stop", r);
     }
     // stop 后再 drain 残留进 live(api_mu 保护;worker 已停、回调已关)
     {
+        PCS_STOP_STAGE("6-final-drain-lock-begin");
         std::lock_guard<std::recursive_mutex> lk(g.api_mu);
+        PCS_STOP_STAGE("7-final-drain-lock-acquired");
         for (int k = 0; k < 64; ++k) {
             size_t n = drain_sd_apilocked();
             if (n == 0 && g.sd.remainingNumPcs == 0) break;
@@ -598,6 +608,8 @@ int pping_pcs_stop(void) {
     }
     free_sd();
     g.running.store(false);
+    PCS_STOP_STAGE("8-all-done");
+#undef PCS_STOP_STAGE
     return 0;
 }
 
