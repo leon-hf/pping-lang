@@ -253,6 +253,38 @@ const I18N = {
     'kern.howMeasured': '测量方式',
     'kern.samplingPeriod': '采样周期 每 {period} cycle 一次(2^{log}) ·\n本窗 {w}s 采到 {samples} 样本 ·\n GetData 累计开销 {getdata}ms ·\n丢样 {dropped} · HW 缓冲满 {hwfull} 次 ·\nGPU 硬件采样,无需 Nsight、不停服务',
     'kern.noInitialData': '点击上方按钮启动一次短窗 PC Sampling,查看这些 kernel 内部的 stall 类型(访存依赖 / 计算管线 / 同步 …)。',
+    // 深度剖析(#1/#2/#3/#4/#7)—— 回答"该怎么改",区别于 PC Sampling 的"为什么慢"
+    'dprof.title': '🔬 深度剖析 — 该怎么改',
+    'dprof.sub': '按需采集 · 会短暂暂停服务',
+    'dprof.hint': '上面告诉你哪个 kernel 慢、为什么慢;这里告诉你卡在什么资源上、该往哪改',
+    'dprof.collect': '采集深度剖析',
+    'dprof.collecting': '采集中(服务暂停)…',
+    'dprof.costWarn': '⚠ 采集期间服务会暂停:先停止接新请求、等在飞的算完,再采。指标需多轮重放 kernel,通常 1-3 秒。',
+    'dprof.meta': '采集于 {time} · 服务暂停 {pause} ms · kernel 重放 {passes} 遍',
+    'dprof.empty': '还没采过。点上面的按钮做一次深度剖析 —— 它会给出每个 kernel 的占用率、寄存器压力、Tensor Core 利用率和访存命中率。',
+    'dprof.occupancy': '占用率',
+    'dprof.occAchieved': '实测',
+    'dprof.occTheoretical': '理论上限',
+    'dprof.occGap': '差 {gap} 个百分点',
+    'dprof.limiter': '受限于',
+    'dprof.limiterRegs': '寄存器({n}/线程)',
+    'dprof.limiterSmem': 'Shared Memory({n} KB/block)',
+    'dprof.limiterGrid': 'grid 太小(打不满 SM)',
+    'dprof.limiterNone': '未受限',
+    'dprof.launchCfg': '启动配置',
+    'dprof.tensorCore': 'Tensor Core',
+    'dprof.l2hit': 'L2 命中',
+    'dprof.dram': 'DRAM',
+    'dprof.waveQuant': 'Wave 量化',
+    'dprof.waveDetail': '{waves} 个 wave,最后一波只用了 {pct}% 的 SM',
+    'dprof.waveAdvice': '把 grid 调成 SM 数的整数倍可回收这部分空转',
+    'dprof.regAdvice': '寄存器压力限制了占用率 —— 试试 __launch_bounds__ 或拆分 kernel',
+    'dprof.smemAdvice': 'Shared memory 限制了占用率 —— 减小 tile 或改用动态 smem',
+    'dprof.tensorLow': 'Tensor Core 利用率低 —— 检查维度是否对齐 tile 要求',
+    'dprof.noAdvice': '这个 kernel 没有明显的配置层问题',
+    'dprof.l2Uncalibrated': 'L2 数值尚未标定,仅供参考',
+    'dprof.colKernel': 'Kernel',
+    'dprof.expandHint': '点行展开看启动配置与建议',
     // #5 comm 桶细分
     'csub.title': '通信细分',
     'csub.hint': '占通信总时间 · allreduce 常是延迟型,all_gather / reduce_scatter 常是带宽型,优化手段不同',
@@ -733,6 +765,38 @@ Your "extra guidance" is appended after this contract.`,
     'kern.howMeasured': 'How measured',
     'kern.samplingPeriod': 'Sample every {period} cycles (2^{log}) ·\nThis window {w}s collected {samples} samples ·\nGetData cumulative overhead {getdata}ms ·\nDropped {dropped} · HW buffer full {hwfull} times ·\nGPU hardware sampling, no Nsight, no service interruption',
     'kern.noInitialData': 'Click the button above to open a short-window PC Sampling — see what\'s stalling inside these kernels (memory deps / compute pipeline / sync …).',
+    // Deep profile (#1/#2/#3/#4/#7) — answers "what to change", vs PC Sampling's "why it's slow"
+    'dprof.title': '🔬 Deep profile — what to change',
+    'dprof.sub': 'On-demand · briefly pauses serving',
+    'dprof.hint': 'Above tells you which kernel is slow and why; this tells you which resource it is limited by and what to change',
+    'dprof.collect': 'Collect deep profile',
+    'dprof.collecting': 'Collecting (serving paused)…',
+    'dprof.costWarn': '⚠ Serving pauses during collection: new requests stop, in-flight work drains, then metrics are collected. Metrics need multiple kernel replay passes — typically 1-3s.',
+    'dprof.meta': 'Collected {time} · serving paused {pause} ms · kernels replayed {passes}×',
+    'dprof.empty': 'Not collected yet. Hit the button above for a deep profile — it gives per-kernel occupancy, register pressure, Tensor Core utilization and cache hit rates.',
+    'dprof.occupancy': 'Occupancy',
+    'dprof.occAchieved': 'achieved',
+    'dprof.occTheoretical': 'theoretical',
+    'dprof.occGap': '{gap} pp short',
+    'dprof.limiter': 'Limited by',
+    'dprof.limiterRegs': 'registers ({n}/thread)',
+    'dprof.limiterSmem': 'shared memory ({n} KB/block)',
+    'dprof.limiterGrid': 'grid too small (cannot fill SMs)',
+    'dprof.limiterNone': 'not limited',
+    'dprof.launchCfg': 'Launch config',
+    'dprof.tensorCore': 'Tensor Core',
+    'dprof.l2hit': 'L2 hit',
+    'dprof.dram': 'DRAM',
+    'dprof.waveQuant': 'Wave quantization',
+    'dprof.waveDetail': '{waves} waves; the last one uses only {pct}% of the SMs',
+    'dprof.waveAdvice': 'Round grid size to a multiple of the SM count to reclaim that idle tail',
+    'dprof.regAdvice': 'Register pressure caps occupancy — try __launch_bounds__ or splitting the kernel',
+    'dprof.smemAdvice': 'Shared memory caps occupancy — shrink the tile or switch to dynamic smem',
+    'dprof.tensorLow': 'Low Tensor Core utilization — check whether dimensions meet the tile alignment',
+    'dprof.noAdvice': 'No obvious launch-configuration problem with this kernel',
+    'dprof.l2Uncalibrated': 'L2 value not yet calibrated — treat as indicative only',
+    'dprof.colKernel': 'Kernel',
+    'dprof.expandHint': 'Click a row for launch config and advice',
     // #5 comm bucket subdivision
     'csub.title': 'Comm breakdown',
     'csub.hint': '% of total comm time · allreduce is usually latency-bound, all_gather / reduce_scatter usually bandwidth-bound — different fixes',
@@ -2452,6 +2516,10 @@ function dashboard() {
     },
     // Deep Evidence(阶段 2 PC Sampling 按需取证)：为什么这些 kernel 慢
     deep: { running: false, available_now: false, result: null, findings: [], error: null },
+    // 深度剖析(#1/#2/#3/#4/#7):Activity 的启动配置 + Profiling 的硬件指标。
+    // 与 Deep Evidence(PC Sampling)**硬件互斥**,故是独立的一次按需窗口,且要暂停服务。
+    deepProf: { running: false, result: null, error: null },
+    dprofExpanded: null,        // 展开看启动配置 + 建议的行索引
     // #6 改动前后对比：两个 Deep Evidence 快照(A=改动前基准,B=改动后)。存 localStorage,
     // 让"改 kernel → 重启服务 → 再采一次"这个真实工作流跨页面刷新还留得住 A。
     kernelSnaps: { A: null, B: null },   // 每槽 {ts, result}
@@ -2815,6 +2883,58 @@ function dashboard() {
         this.deep.running = false;
       }
     },
+    // ===== 深度剖析:把硬件指标翻译成"该改哪儿" =====
+    // 触发一次深窗采集(会暂停服务,故不自动跑,必须用户显式点)
+    async runDeepProfile() {
+      if (this.deepProf.running) return;
+      this.deepProf.running = true; this.deepProf.error = null;
+      try {
+        const r = await fetch('/api/kernels/deep_profile?lang=' + _uiLang(),
+          { method: 'POST' }).then(x => x.json());
+        if (r.available) this.deepProf.result = r;
+        else this.deepProf.error = r.error || t('kernel.pcSamplingUnavailable');
+      } catch (e) {
+        this.deepProf.error = t('kernel.requestFailed', {e: e});
+      } finally {
+        this.deepProf.running = false;
+      }
+    },
+    // 占用率条:实测 vs 理论。两者的差就是"还能捞回来多少",是这块面板的主角。
+    dprofOccGap(k) {
+      if (!k || k.occupancy_pct == null || k.occupancy_theoretical_pct == null) return null;
+      return k.occupancy_theoretical_pct - k.occupancy_pct;
+    },
+    // 限制资源 → 人话标签
+    dprofLimiterLabel(k) {
+      if (!k) return '';
+      return {
+        registers: t('dprof.limiterRegs', {n: k.regs_per_thread}),
+        smem: t('dprof.limiterSmem', {n: (((k.smem_static || 0) + (k.smem_dynamic || 0)) / 1024).toFixed(1)}),
+        grid: t('dprof.limiterGrid'),
+      }[k.limiter] || t('dprof.limiterNone');
+    },
+    dprofLimiterColor(k) {
+      return { registers: '#c2334f', smem: '#b7791f', grid: '#5b5bd6' }[k && k.limiter] || '#9a9aa4';
+    },
+    // 可操作建议:按限制资源 + wave 量化给具体动作,而不是只报数字
+    dprofAdvice(k) {
+      if (!k) return [];
+      const out = [];
+      if (k.limiter === 'registers') out.push(t('dprof.regAdvice'));
+      if (k.limiter === 'smem') out.push(t('dprof.smemAdvice'));
+      if (k.wave_quant && k.wave_quant.last_wave_pct != null && k.wave_quant.last_wave_pct < 60)
+        out.push(t('dprof.waveAdvice'));
+      // Tensor Core 阈值 40%:GEMM/attention 类才有意义,其它算子本来就不该走 tensor 管线
+      if ((k.cls === 'gemm' || k.cls === 'attention') && k.tensor_pct != null && k.tensor_pct < 40)
+        out.push(t('dprof.tensorLow'));
+      if (!out.length) out.push(t('dprof.noAdvice'));
+      return out;
+    },
+    dprofGridStr(k) {
+      const f = (a) => Array.isArray(a) ? a.join('×') : '—';
+      return `grid ${f(k.grid)} · block ${f(k.block)}`;
+    },
+
     // ===== #6 Kernel 快照 A/B 对比：改完 kernel 之后,工具内直接验证有没有变好 =====
     // 不需要任何新采集源 —— deep.result 本身就是一次完整快照,缺的只是"存下来 + 对齐 diff"。
     _KSNAP_KEY: 'pping.kernelSnaps',

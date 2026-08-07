@@ -320,7 +320,9 @@ def test_ui_assets_split_and_under_budget():
     #   #6 改动前后对比卡(A/B 快照槽 + 负载对照 + warp/stall/逐 kernel 三段 diff 表);
     #   #5 comm 桶细分条(allreduce / allgather / reducescatter / …)。
     # 都是实打实的新面板,不是重复 markup;gzip 后仍十几 KB,仍不值得为此上构建工具。
-    assert html < 150_000, f"index.html is {html} bytes, exceeds 150KB"
+    # 深度剖析面板(2026-08-04)过了 150KB → 抬到 165KB:每 kernel 的占用率双层条、
+    # 受限资源徽标、Tensor Core / L2 / DRAM 列 + 展开区(启动配置、wave 量化、可操作建议)。
+    assert html < 165_000, f"index.html is {html} bytes, exceeds 165KB"
     # Autopilot 预览 tab 接入(.ap-* 一整套样式)后过了 70KB → 抬到 90KB;gzip 后仍十几 KB。
     assert css < 90_000, f"dashboard.css is {css} bytes, exceeds 90KB"
     # 双语规则 i18n(中/英各一份)随诊断规则增删而长;0.21 处方更新后过了 135KB。
@@ -339,7 +341,8 @@ def test_ui_assets_split_and_under_budget():
     # 各自补英文分支(非拼接翻译碎片,是完整句子模板)。一次性体积跳变,过了 165KB → 抬到 200KB。
     # Kernel tab 的 #6 前后对比 + #5 comm 细分(2026-08-02)过了 200KB → 抬到 210KB：
     # 32 个 ksnap.*/csub.* key(中英各一份)+ 快照存取/对齐 diff/负载漂移判据等方法。
-    assert js < 210_000, f"dashboard.js is {js} bytes, exceeds 210KB"
+    # 同上,深度剖析的 29 个 dprof.* key(中英各一份)+ 限制资源/建议的翻译逻辑。
+    assert js < 225_000, f"dashboard.js is {js} bytes, exceeds 225KB"
 
 
 def test_css_and_js_served(client):

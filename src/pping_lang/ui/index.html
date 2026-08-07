@@ -1167,6 +1167,119 @@
         </template>
       </div>
 
+      <!-- ===== 深度剖析(#1/#2/#3/#4/#7):该怎么改 ===== -->
+      <div class="chart-card" style="margin-top: 18px;">
+        <div class="head" style="display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;">
+          <div>
+            <h3><span x-text="t('dprof.title')"></span> <span style="color: var(--muted-2); font-weight: 400; font-size: 12px;" x-text="t('dprof.sub')"></span></h3>
+            <div style="margin-top: 4px; font-size: 11.5px; color: var(--muted-2);" x-text="t('dprof.hint')"></div>
+          </div>
+          <button class="btn" :disabled="deepProf.running" @click="runDeepProfile()">
+            <span x-show="!deepProf.running" x-text="t('dprof.collect')"></span>
+            <span x-show="deepProf.running" x-text="t('dprof.collecting')"></span>
+          </button>
+        </div>
+
+        <!-- 代价前置说明:这个操作会暂停服务,必须让用户点之前就知道 -->
+        <div style="margin-top: 12px; padding: 10px 13px; background: var(--surface-alt); border-left: 3px solid #b7791f; border-radius: 8px; font-size: 11.5px; color: var(--text); line-height: 1.7;"
+             x-text="t('dprof.costWarn')"></div>
+
+        <template x-if="deepProf.error">
+          <div class="roofline-verdict empty" style="margin: 12px 0 0;" x-text="deepProf.error"></div>
+        </template>
+
+        <template x-if="!deepProf.result && !deepProf.error">
+          <div class="roofline-verdict empty" style="margin: 12px 0 0;" x-text="t('dprof.empty')"></div>
+        </template>
+
+        <template x-if="deepProf.result">
+          <div style="margin-top: 14px;">
+            <!-- 采集元信息:诚实报告这次花了多少代价 -->
+            <div style="font-size: 11.5px; color: var(--muted-2); margin-bottom: 12px;"
+                 x-text="t('dprof.meta', {time: new Date(deepProf.result.collected_at).toLocaleTimeString(), pause: deepProf.result.pause_ms, passes: deepProf.result.passes})"></div>
+
+            <div style="font-size: 11px; color: var(--muted-2); margin-bottom: 8px;" x-text="t('dprof.expandHint')"></div>
+            <div style="overflow-x: auto;">
+              <table class="kernel-table">
+                <thead>
+                  <tr>
+                    <th style="width: 30%;" x-text="t('dprof.colKernel')"></th>
+                    <th style="width: 230px;" x-text="t('dprof.occupancy')"></th>
+                    <th x-text="t('dprof.limiter')"></th>
+                    <th style="text-align: right; width: 92px;" x-text="t('dprof.tensorCore')"></th>
+                    <th style="text-align: right; width: 84px;" x-text="t('dprof.l2hit')"></th>
+                    <th style="text-align: right; width: 96px;" x-text="t('dprof.dram')"></th>
+                    <th style="width: 26px;"></th>
+                  </tr>
+                </thead>
+                <template x-for="(k, i) in deepProf.result.kernels" :key="i">
+                  <tbody>
+                    <tr @click="dprofExpanded = (dprofExpanded === i ? null : i)" style="cursor: pointer;">
+                      <td>
+                        <div style="font-weight: 600; color: var(--text-strong); font-size: 12.5px;" x-text="kernelFriendly(k.kernel, k.cls)"></div>
+                        <code class="kname" style="font-size: 10.5px; color: var(--muted-2);" x-text="k.kernel" :title="k.kernel"></code>
+                      </td>
+                      <!-- 占用率:实测(实心)叠在理论(浅色)上,缺口一眼可见 —— 这是本面板的主角 -->
+                      <td>
+                        <div style="position: relative; background: #e9ebee; border-radius: 4px; height: 14px; overflow: hidden;">
+                          <div :style="`position:absolute;left:0;top:0;height:100%;width:${Math.min(100, k.occupancy_theoretical_pct || 0)}%;background:#c9cdd4`"></div>
+                          <div :style="`position:absolute;left:0;top:0;height:100%;width:${Math.min(100, k.occupancy_pct || 0)}%;background:var(--teal)`"></div>
+                        </div>
+                        <!-- 两行分开写,别让"理论上限"这种词组在窄列里折行折得乱七八糟 -->
+                        <div style="margin-top: 3px; font-size: 10.5px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap;">
+                          <strong style="color: var(--text);" x-text="fmt(k.occupancy_pct, 0) + '%'"></strong>
+                          <span x-text="' ' + t('dprof.occAchieved') + ' / '"></span>
+                          <span style="color: var(--muted-2);" x-text="fmt(k.occupancy_theoretical_pct, 0) + '% ' + t('dprof.occTheoretical')"></span>
+                        </div>
+                        <!-- 只有确实被某个资源卡住时才报"还差多少" —— 未受限的 kernel 天然到不了
+                             100%,那不是问题,标红只会制造假警报 -->
+                        <template x-if="k.limiter && k.limiter !== 'none' && dprofOccGap(k) >= 10">
+                          <div style="font-size: 10.5px; color: var(--rose); font-variant-numeric: tabular-nums; white-space: nowrap;"
+                               x-text="t('dprof.occGap', {gap: fmt(dprofOccGap(k), 0)})"></div>
+                        </template>
+                      </td>
+                      <td>
+                        <span class="kcls" :style="`background:${dprofLimiterColor(k)}1a;color:${dprofLimiterColor(k)}`" x-text="dprofLimiterLabel(k)"></span>
+                      </td>
+                      <td :style="`text-align:right;font-variant-numeric:tabular-nums;color:${(k.cls==='gemm'||k.cls==='attention') && k.tensor_pct < 40 ? 'var(--rose)' : 'var(--text)'}`"
+                          x-text="k.tensor_pct == null ? '—' : fmt(k.tensor_pct, 0) + '%'"></td>
+                      <td style="text-align: right; font-variant-numeric: tabular-nums; color: var(--muted);"
+                          :title="t('dprof.l2Uncalibrated')"
+                          x-text="k.l2_hit_pct == null ? '—' : fmt(k.l2_hit_pct, 0) + '%*'"></td>
+                      <td style="text-align: right; font-variant-numeric: tabular-nums; color: var(--muted);"
+                          x-text="k.dram_gbps == null ? '—' : fmt(k.dram_gbps, 0) + ' GB/s'"></td>
+                      <td style="color: var(--muted-2);" x-text="dprofExpanded === i ? '▴' : '▾'"></td>
+                    </tr>
+                    <!-- 展开:启动配置 + wave 量化 + 可操作建议 -->
+                    <tr x-show="dprofExpanded === i">
+                      <td colspan="7" style="background: var(--surface-alt); padding: 12px 14px;">
+                        <div style="display: flex; flex-wrap: wrap; gap: 18px; font-size: 11.5px; color: var(--muted); margin-bottom: 9px;">
+                          <span><strong style="color: var(--text);" x-text="t('dprof.launchCfg') + ': '"></strong><code x-text="dprofGridStr(k)"></code></span>
+                          <span><code x-text="k.regs_per_thread + ' regs/thread'"></code></span>
+                          <span><code x-text="((k.smem_static||0)+(k.smem_dynamic||0)) + ' B smem'"></code></span>
+                        </div>
+                        <template x-if="k.wave_quant">
+                          <div style="font-size: 11.5px; color: var(--muted); margin-bottom: 9px;">
+                            <strong style="color: var(--text);" x-text="t('dprof.waveQuant') + ': '"></strong>
+                            <span x-text="t('dprof.waveDetail', {waves: k.wave_quant.waves, pct: fmt(k.wave_quant.last_wave_pct, 0)})"></span>
+                          </div>
+                        </template>
+                        <div style="display: flex; flex-direction: column; gap: 5px;">
+                          <template x-for="(a, ai) in dprofAdvice(k)" :key="ai">
+                            <div style="font-size: 12px; color: var(--text);" x-text="'💡 ' + a"></div>
+                          </template>
+                        </div>
+                      </td>
+                    </tr>
+                  </tbody>
+                </template>
+              </table>
+            </div>
+            <div style="margin-top: 10px; font-size: 11px; color: var(--muted-2);" x-text="'* ' + t('dprof.l2Uncalibrated')"></div>
+          </div>
+        </template>
+      </div>
+
       <!-- ===== #6 改动前后对比(两个 Deep Evidence 快照的 diff,无需新采集)===== -->
       <template x-if="kernelSnaps.A || kernelSnaps.B">
         <div class="chart-card" style="margin-top: 18px;">
