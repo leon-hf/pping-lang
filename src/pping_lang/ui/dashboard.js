@@ -255,13 +255,13 @@ const I18N = {
     'kern.noInitialData': '点击上方按钮启动一次短窗 PC Sampling,查看这些 kernel 内部的 stall 类型(访存依赖 / 计算管线 / 同步 …)。',
     // 深度剖析(#1/#2/#3/#4/#7)—— 回答"该怎么改",区别于 PC Sampling 的"为什么慢"
     'dprof.title': '🔬 深度剖析 — 该怎么改',
-    'dprof.sub': '按需采集 · 会短暂暂停服务',
+    'dprof.sub': '常驻采集 · 不暂停服务',
     'dprof.hint': '上面告诉你哪个 kernel 慢、为什么慢;这里告诉你卡在什么资源上、该往哪改',
-    'dprof.collect': '采集深度剖析',
-    'dprof.collecting': '采集中(服务暂停)…',
-    'dprof.costWarn': '⚠ 采集期间服务会暂停:先停止接新请求、等在飞的算完,再采。指标需多轮重放 kernel,通常 1-3 秒。',
-    'dprof.meta': '采集于 {time} · 服务暂停 {pause} ms · kernel 重放 {passes} 遍',
-    'dprof.empty': '还没采过。点上面的按钮做一次深度剖析 —— 它会给出每个 kernel 的占用率、寄存器压力、Tensor Core 利用率和访存命中率。',
+    'dprof.collect': '读取深度剖析',
+    'dprof.collecting': '读取中…',
+    'dprof.costWarn': '启动配置、理论占用率上限、受限资源、wave 量化来自常驻 launch 采集,不暂停服务。实测占用率 / Tensor Core / L2 / DRAM 需深窗采集(未开放),显示 —。理论上限为估算,误差几个百分点。',
+    'dprof.meta': '读自最近采样窗 · {time} · 常驻采集无暂停',
+    'dprof.empty': '还没读过。点上面的按钮,从最近采样窗组装剖析 —— 每个 kernel 的启动配置、理论占用率上限、受限资源和 wave 量化。',
     'dprof.occupancy': '占用率',
     'dprof.occAchieved': '实测',
     'dprof.occTheoretical': '理论上限',
@@ -767,13 +767,13 @@ Your "extra guidance" is appended after this contract.`,
     'kern.noInitialData': 'Click the button above to open a short-window PC Sampling — see what\'s stalling inside these kernels (memory deps / compute pipeline / sync …).',
     // Deep profile (#1/#2/#3/#4/#7) — answers "what to change", vs PC Sampling's "why it's slow"
     'dprof.title': '🔬 Deep profile — what to change',
-    'dprof.sub': 'On-demand · briefly pauses serving',
+    'dprof.sub': 'Always-on capture · no serving pause',
     'dprof.hint': 'Above tells you which kernel is slow and why; this tells you which resource it is limited by and what to change',
-    'dprof.collect': 'Collect deep profile',
-    'dprof.collecting': 'Collecting (serving paused)…',
-    'dprof.costWarn': '⚠ Serving pauses during collection: new requests stop, in-flight work drains, then metrics are collected. Metrics need multiple kernel replay passes — typically 1-3s.',
-    'dprof.meta': 'Collected {time} · serving paused {pause} ms · kernels replayed {passes}×',
-    'dprof.empty': 'Not collected yet. Hit the button above for a deep profile — it gives per-kernel occupancy, register pressure, Tensor Core utilization and cache hit rates.',
+    'dprof.collect': 'Read deep profile',
+    'dprof.collecting': 'Reading…',
+    'dprof.costWarn': 'Launch config, theoretical occupancy cap, limiter and wave quantization come from always-on launch capture — no serving pause. Achieved occupancy / Tensor Core / L2 / DRAM need a deep-window collection (not available yet) and show —. Theoretical cap is an estimate within a few points.',
+    'dprof.meta': 'From the latest sampling window · {time} · always-on, no pause',
+    'dprof.empty': 'Not read yet. Hit the button above to assemble a profile from the latest sampling window — per-kernel launch config, theoretical occupancy cap, limiter and wave quantization.',
     'dprof.occupancy': 'Occupancy',
     'dprof.occAchieved': 'achieved',
     'dprof.occTheoretical': 'theoretical',
@@ -2904,9 +2904,10 @@ function dashboard() {
       if (!k || k.occupancy_pct == null || k.occupancy_theoretical_pct == null) return null;
       return k.occupancy_theoretical_pct - k.occupancy_pct;
     },
-    // 限制资源 → 人话标签
+    // 限制资源 → 人话标签(无 launch 配置 = null → "—",不谎称"未受限")
     dprofLimiterLabel(k) {
       if (!k) return '';
+      if (!k.limiter) return '—';
       return {
         registers: t('dprof.limiterRegs', {n: k.regs_per_thread}),
         smem: t('dprof.limiterSmem', {n: (((k.smem_static || 0) + (k.smem_dynamic || 0)) / 1024).toFixed(1)}),

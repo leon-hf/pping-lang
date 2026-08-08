@@ -1180,8 +1180,8 @@
           </button>
         </div>
 
-        <!-- 代价前置说明:这个操作会暂停服务,必须让用户点之前就知道 -->
-        <div style="margin-top: 12px; padding: 10px 13px; background: var(--surface-alt); border-left: 3px solid #b7791f; border-radius: 8px; font-size: 11.5px; color: var(--text); line-height: 1.7;"
+        <!-- 数据口径说明:哪些来自常驻采集(无暂停)、哪些要等深窗 —— 诚实标注 -->
+        <div style="margin-top: 12px; padding: 10px 13px; background: var(--surface-alt); border-left: 3px solid var(--indigo); border-radius: 8px; font-size: 11.5px; color: var(--text); line-height: 1.7;"
              x-text="t('dprof.costWarn')"></div>
 
         <template x-if="deepProf.error">
@@ -1227,9 +1227,9 @@
                         </div>
                         <!-- 两行分开写,别让"理论上限"这种词组在窄列里折行折得乱七八糟 -->
                         <div style="margin-top: 3px; font-size: 10.5px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap;">
-                          <strong style="color: var(--text);" x-text="fmt(k.occupancy_pct, 0) + '%'"></strong>
+                          <strong style="color: var(--text);" x-text="k.occupancy_pct == null ? '—' : fmt(k.occupancy_pct, 0) + '%'"></strong>
                           <span x-text="' ' + t('dprof.occAchieved') + ' / '"></span>
-                          <span style="color: var(--muted-2);" x-text="fmt(k.occupancy_theoretical_pct, 0) + '% ' + t('dprof.occTheoretical')"></span>
+                          <span style="color: var(--muted-2);" x-text="k.occupancy_theoretical_pct == null ? '—' : fmt(k.occupancy_theoretical_pct, 0) + '% ' + t('dprof.occTheoretical')"></span>
                         </div>
                         <!-- 只有确实被某个资源卡住时才报"还差多少" —— 未受限的 kernel 天然到不了
                              100%,那不是问题,标红只会制造假警报 -->

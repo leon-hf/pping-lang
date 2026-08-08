@@ -410,6 +410,27 @@ class LaunchSample:
     stack: str        # 符号化 native 栈(" <- " 连接,top→down 到 Python 解释器边界)
 
 
+@dataclass(slots=True, frozen=True)
+class LaunchCfg:
+    """#1 launch 配置：某 kernel 最近一次 launch 的 grid/block/动态 smem + 首见查一次的函数属性。
+
+    native launch 回调常驻采集(默认开,PPING_LANG_PCS_LAUNCH_CONFIG=0 关),每 launch
+    只多一次 hash 写 + 纳秒级内存读。cudagraph 稳态回放不触发 launch 回调,此时配置来自
+    capture 期(稳态回放即按此执行),launches 可能为 0 但配置仍有效。
+    regs/static_smem/local_mem/max_threads_per_block 为 -1 表示未取到。
+    """
+
+    kernel: str                  # cuFuncGetName/cuKernelGetName 名,或 func_<ptr>
+    launches: int                # 本批 launch 次数(窗 delta;cudagraph 稳态期可为 0)
+    grid: tuple[int, int, int]   # 最近一次 launch 的 grid dim
+    block: tuple[int, int, int]  # 最近一次 launch 的 block dim
+    dyn_smem: int                # 动态 shared mem 字节(launch 参数,latest)
+    regs: int                    # 每线程寄存器数(函数属性,首见查一次)
+    static_smem: int             # 静态 shared mem 字节
+    local_mem: int               # local memory 字节
+    max_threads_per_block: int
+
+
 # launch 栈里的"启动原语"帧(跳过它们,下一帧才是真正的算子 / kernel 身份)
 _LAUNCH_PRIM_PREFIXES = ("cudaLaunchKernel", "cuLaunchKernel", "cublas")
 
@@ -1156,6 +1177,21 @@ class _PpingLaunchRow(ctypes.Structure):
     ]
 
 
+class _PpingLaunchCfgRow(ctypes.Structure):
+    """镜像 PpingLaunchCfgRow(#1 launch 配置):launches + grid/block/dyn_smem + 函数属性。"""
+    _fields_ = [
+        ("launches", ctypes.c_ulonglong),
+        ("grid_x", ctypes.c_uint), ("grid_y", ctypes.c_uint), ("grid_z", ctypes.c_uint),
+        ("block_x", ctypes.c_uint), ("block_y", ctypes.c_uint), ("block_z", ctypes.c_uint),
+        ("dyn_smem", ctypes.c_uint),
+        ("regs", ctypes.c_int),
+        ("static_smem", ctypes.c_int),
+        ("local_mem", ctypes.c_int),
+        ("max_threads_per_block", ctypes.c_int),
+        ("kernel", ctypes.c_char * 256),
+    ]
+
+
 def _default_so_path() -> str:
     """libppingcupti.so 路径：env 覆盖 > 仓库内 native/ 构建产物。"""
     env = os.environ.get("PPING_LANG_PCS_SO")
@@ -1173,6 +1209,7 @@ class PcSamplingLib(Protocol):
     def drain(self) -> list[StallSample]: ...            # 已聚合行(reason 已解析成名)
     def drain_pc(self) -> list[PcSample]: ...            # P3 per-PC 直方图(可空=未开/老 .so)
     def drain_launches(self) -> list[LaunchSample]: ...  # P3 launch 栈(可空=未开/老 .so)
+    def drain_launch_cfg(self) -> list[LaunchCfg]: ...   # #1 launch 配置(可空=老 .so/被关)
     def overhead(self) -> tuple[float, int, int]: ...    # (getdata_ms, dropped, hwfull)
     def last_error(self) -> str: ...
 
@@ -1191,6 +1228,7 @@ class CtypesPcSamplingLib:
         self._lib: Any = None
         self._pc_buf: Any = None
         self._lc_buf: Any = None
+        self._lcfg_buf: Any = None
         self._reason_cache: dict[int, str] = {}
         path = so_path or _default_so_path()
         try:
@@ -1217,6 +1255,10 @@ class CtypesPcSamplingLib:
         if hasattr(c, "pping_pcs_drain_launches"):
             c.pping_pcs_drain_launches.argtypes = [ctypes.POINTER(_PpingLaunchRow), ctypes.c_int]
             c.pping_pcs_drain_launches.restype = ctypes.c_int
+        # #1 launch 配置 drain(同上,老 .so 无此符号则降级)
+        if hasattr(c, "pping_pcs_drain_launch_cfg"):
+            c.pping_pcs_drain_launch_cfg.argtypes = [ctypes.POINTER(_PpingLaunchCfgRow), ctypes.c_int]
+            c.pping_pcs_drain_launch_cfg.restype = ctypes.c_int
         c.pping_pcs_stall_reason_name.argtypes = [ctypes.c_uint, ctypes.c_char_p, ctypes.c_int]
         c.pping_pcs_stall_reason_name.restype = ctypes.c_int
         c.pping_pcs_overhead.argtypes = [
@@ -1303,6 +1345,29 @@ class CtypesPcSamplingLib:
             ))
         return out
 
+    def drain_launch_cfg(self) -> list[LaunchCfg]:
+        """#1：拉 launch 配置表(常驻采集,默认开;老 .so 无符号 → 空,优雅降级)。"""
+        if self._lib is None or not hasattr(self._lib, "pping_pcs_drain_launch_cfg"):
+            return []
+        if getattr(self, "_lcfg_buf", None) is None:
+            self._lcfg_buf = (_PpingLaunchCfgRow * 4096)()
+        n = int(self._lib.pping_pcs_drain_launch_cfg(self._lcfg_buf, 4096))
+        out: list[LaunchCfg] = []
+        for i in range(max(0, n)):
+            row = self._lcfg_buf[i]
+            out.append(LaunchCfg(
+                kernel=row.kernel.decode(errors="replace"),
+                launches=int(row.launches),
+                grid=(int(row.grid_x), int(row.grid_y), int(row.grid_z)),
+                block=(int(row.block_x), int(row.block_y), int(row.block_z)),
+                dyn_smem=int(row.dyn_smem),
+                regs=int(row.regs),
+                static_smem=int(row.static_smem),
+                local_mem=int(row.local_mem),
+                max_threads_per_block=int(row.max_threads_per_block),
+            ))
+        return out
+
     def overhead(self) -> tuple[float, int, int]:
         if self._lib is None:
             return (0.0, 0, 0)
@@ -1327,12 +1392,14 @@ class FakePcSamplingLib:
     def __init__(self, *, available: bool = True, start_rc: int = 0,
                  drain_batches: list[list[StallSample]] | None = None,
                  pc_batches: list[list[PcSample]] | None = None,
-                 launch_batches: list[list[LaunchSample]] | None = None) -> None:
+                 launch_batches: list[list[LaunchSample]] | None = None,
+                 launch_cfg_batches: list[list[LaunchCfg]] | None = None) -> None:
         self._available = available
         self._start_rc = start_rc
         self._batches = list(drain_batches or [])
         self._pc_batches = list(pc_batches or [])
         self._launch_batches = list(launch_batches or [])
+        self._launch_cfg_batches = list(launch_cfg_batches or [])
         self._overhead = (0.0, 0, 0)
         self.started = False
 
@@ -1356,6 +1423,9 @@ class FakePcSamplingLib:
 
     def drain_launches(self) -> list[LaunchSample]:
         return list(self._launch_batches.pop(0)) if self._launch_batches else []
+
+    def drain_launch_cfg(self) -> list[LaunchCfg]:
+        return list(self._launch_cfg_batches.pop(0)) if self._launch_cfg_batches else []
 
     def overhead(self) -> tuple[float, int, int]:
         return self._overhead
@@ -1462,6 +1532,7 @@ class PcSamplingController:
             agg = StallAggregator(self._classifier)
             self._lib.drain()  # 清掉窗开始前已累计的,只取本窗
             self._lib.drain_pc()  # P3：同样清掉 per-PC 直方图,只取本窗
+            self._lib.drain_launch_cfg()  # #1:清零 launch 计数基线(delta 从本窗起算)
             t0 = clock()
             while clock() - t0 < window_s:
                 sleep(drain_interval_s)
@@ -1469,8 +1540,10 @@ class PcSamplingController:
             agg.add(self._lib.drain())  # 收尾再 drain 一次
             pcs = self._lib.drain_pc()  # P3：窗末取 per-PC 直方图(整窗累计)
             launches = self._lib.drain_launches()  # P3:per-kernel launch 栈
+            cfgs = self._lib.drain_launch_cfg()    # #1:launch 配置(grid/block/regs/...)
             getdata_ms, dropped, hwfull = self._lib.overhead()
             table = agg.kernel_stall_table(self._top_n)
+            self._attach_launch_cfg(table, cfgs)  # #1:launch 配置按 kernel 名 merge 进表
             class_shares = agg.kernel_class_shares()    # 须在 snapshot_and_reset(清零)之前取
             comm_shares = agg.comm_subclass_shares()    # 同上;单卡为空表
             reason_detail = agg.stall_reason_detail()   # 同上,清零前取原始 reason 名
@@ -1583,6 +1656,29 @@ class PcSamplingController:
             if e and e["mappable"]:
                 out.append(e)
         return out
+
+    def _attach_launch_cfg(self, table: list[dict[str, Any]],
+                           cfgs: list[LaunchCfg]) -> None:
+        """#1：把 launch 配置(grid/block/smem/regs/...)按 kernel 名 merge 进 kernel 表。
+
+        join 用精确名匹配(PC 数据的 functionName 与 cuFuncGetName/cuKernelGetName 同源)。
+        无配置的行 launch_cfg=None(老 .so / PPING_LANG_PCS_LAUNCH_CONFIG=0 / 该 kernel
+        本窗未捕获到 launch)。launch_cfg.launches=0 + 有配置 = cudagraph 稳态回放
+        (配置来自 capture 期,语义见 LaunchCfg docstring)。
+        """
+        by_name = {c.kernel: c for c in cfgs}
+        for row in table:
+            c = by_name.get(row["kernel"])
+            row["launch_cfg"] = None if c is None else {
+                "launches": c.launches,
+                "grid": list(c.grid),
+                "block": list(c.block),
+                "dyn_smem": c.dyn_smem,
+                "regs": c.regs,
+                "static_smem": c.static_smem,
+                "local_mem": c.local_mem,
+                "max_threads_per_block": c.max_threads_per_block,
+            }
 
     def _attach_launch_stacks(self, hotspots: list[dict[str, Any]],
                               launches: list[LaunchSample]) -> None:

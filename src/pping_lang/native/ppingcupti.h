@@ -80,6 +80,35 @@ typedef struct {
  * 最多写 max_rows 行;返回写入行数(>=0),负数表错误。 */
 int pping_pcs_drain_launches(PpingLaunchRow* out, int max_rows);
 
+/* #1 launch 配置:一条 per-kernel 行 —— 最近一次 launch 的 grid/block/动态 smem(launch
+ * 参数,记 latest,逐 launch 可能不同)+ 首见查一次的函数属性(regs/静态 smem/local/
+ * maxThreads;-1 = 未取到)。
+ * 默认常驻采集(launch 回调增量成本 ~ns 级内存读),PPING_LANG_PCS_LAUNCH_CONFIG=0 关。
+ * cudagraph 语义:稳态图回放走 cuGraphLaunch,不触发 per-kernel launch 回调;图 capture
+ * 期间会真实调 launch API,故配置来自 capture 期(稳态回放即按此执行),此时本窗
+ * launches 可能为 0,但配置仍有效。 */
+typedef struct {
+    unsigned long long launches;                 /* 本批该 kernel 的 launch 次数(与上次 drain 的 delta) */
+    unsigned int       grid_x, grid_y, grid_z;   /* 最近一次 launch 的 grid dim */
+    unsigned int       block_x, block_y, block_z;/* 最近一次 launch 的 block dim */
+    unsigned int       dyn_smem;                 /* 动态 shared mem 字节(launch 参数,latest) */
+    int                regs;                     /* 每线程寄存器数(函数属性,首见查一次) */
+    int                static_smem;              /* 静态 shared mem 字节 */
+    int                local_mem;                /* local memory 字节 */
+    int                max_threads_per_block;
+    char               kernel[PPING_KERNEL_NAME_LEN];  /* kernel 名(cuFuncGetName/cuKernelGetName,截断) */
+} PpingLaunchCfgRow;
+
+/* 只开 launch 采集(配置 + 可选栈),不起 PC Sampling —— 与 PCS 会话互不依赖(PCS 被
+ * 其他进程独占时也能用)。幂等。返回 0 成功。 */
+int pping_pcs_launch_cfg_start(void);
+
+/* 拉 launch 配置表(非 swap:条目常驻 —— cudagraph 稳态回放期间没有新 launch 回调,
+ * swap 会让 capture 期拿到的配置第二窗消失;函数属性也借此只查一次)。launches 报与上次
+ * drain 的 delta;无新 launch 的 kernel 也会出行(launches=0,配置为 capture/历史值)。
+ * 最多写 max_rows 行;返回写入行数(>=0),负数表错误。 */
+int pping_pcs_drain_launch_cfg(PpingLaunchCfgRow* out, int max_rows);
+
 /* 自我观测(5% 预算可见性):
  *   getdata_ms = 自 start 起 cuptiPCSamplingGetData 累计墙钟(ms)
  *   dropped    = 丢弃样本数(HW 满)+ drain 容量溢出丢的行

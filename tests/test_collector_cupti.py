@@ -13,6 +13,7 @@ from pping_lang.collector.cupti import (
     FlamegraphAggregator,
     KernelClassifier,
     KernelEvent,
+    LaunchCfg,
     PcSamplingController,
     StallAggregator,
     StallClassifier,
@@ -724,3 +725,69 @@ def test_collector_reports_dropped_records():
     sink.close()
     by_name = {m.name: m.value for m in sink.flushed_metrics}
     assert by_name[M.PPING_LANG_CUPTI_DROPPED_TOTAL] == 42.0
+
+
+# === #1 launch 配置(launch_cfg merge 进 kernel 表)===
+
+def test_pc_sampling_window_merges_launch_cfg():
+    """run_window 把 launch 配置按 kernel 名 merge 进 kernel_table;无配置的行 launch_cfg=None。"""
+    lib = FakePcSamplingLib(
+        drain_batches=[
+            [],   # baseline drain(窗开始前清零,被丢弃)
+            [_s("attn", "long_scoreboard", 60), _s("attn", "selected", 40)],
+            [_s("gemm", "math_pipe_throttle", 50)],
+            [],   # 收尾 drain
+        ],
+        launch_cfg_batches=[
+            [],   # baseline(清零 launch 计数基线)
+            [LaunchCfg(kernel="attn", launches=3, grid=(64, 1, 1), block=(128, 1, 1),
+                       dyn_smem=4096, regs=32, static_smem=0, local_mem=0,
+                       max_threads_per_block=1024)],
+        ],
+    )
+    fc = _FakeClockSleep()
+    ctl = PcSamplingController(lib)
+    res = ctl.run_window(window_s=1.0, drain_interval_s=0.5, clock=fc.clock, sleep=fc.sleep)
+
+    assert res["available"] is True
+    rows = {r["kernel"]: r for r in res["kernel_table"]}
+    cfg = rows["attn"]["launch_cfg"]
+    assert cfg["launches"] == 3
+    assert cfg["grid"] == [64, 1, 1]
+    assert cfg["block"] == [128, 1, 1]
+    assert cfg["dyn_smem"] == 4096
+    assert cfg["regs"] == 32
+    assert cfg["max_threads_per_block"] == 1024
+    # gemm 没有 launch 配置(未匹配到)→ None,不是缺 key
+    assert rows["gemm"]["launch_cfg"] is None
+
+
+def test_pc_sampling_window_launch_cfg_absent_is_none():
+    """老 .so / 采集被关(drain_launch_cfg 恒空)→ 所有行 launch_cfg=None,不影响主流程。"""
+    lib = FakePcSamplingLib(drain_batches=[[], [_s("attn", "long_scoreboard", 60)], []])
+    fc = _FakeClockSleep()
+    ctl = PcSamplingController(lib)
+    res = ctl.run_window(window_s=0.5, drain_interval_s=0.5, clock=fc.clock, sleep=fc.sleep)
+    assert res["available"] is True
+    assert res["kernel_table"][0]["launch_cfg"] is None
+
+
+def test_pc_sampling_window_launch_cfg_zero_launches_kept():
+    """cudagraph 稳态语义:本窗无新 launch(launches=0)但配置仍应带出(来自 capture 期)。"""
+    lib = FakePcSamplingLib(
+        drain_batches=[[], [_s("attn", "long_scoreboard", 60)], []],
+        launch_cfg_batches=[
+            [],
+            [LaunchCfg(kernel="attn", launches=0, grid=(8, 1, 1), block=(256, 1, 1),
+                       dyn_smem=0, regs=24, static_smem=128, local_mem=0,
+                       max_threads_per_block=1024)],
+        ],
+    )
+    fc = _FakeClockSleep()
+    ctl = PcSamplingController(lib)
+    res = ctl.run_window(window_s=0.5, drain_interval_s=0.5, clock=fc.clock, sleep=fc.sleep)
+    cfg = res["kernel_table"][0]["launch_cfg"]
+    assert cfg is not None
+    assert cfg["launches"] == 0
+    assert cfg["grid"] == [8, 1, 1]
+    assert cfg["static_smem"] == 128

@@ -877,6 +877,17 @@ def build_app(
             "findings": _stall_findings(last, lang) if last else [],
         }
 
+    # === Deep Profile(#1/#7):常驻 launch 配置 → 理论占用率/受限资源/wave 量化 ===
+    # 与深窗无关:数据来自 launch 回调常驻采集(随 PC Sampling 窗回流),不暂停服务。
+    # 实测占用率/Tensor/L2/DRAM(#2/#3/#4)是深窗指标,未开放 → 字段为 null,UI 显示 "—"。
+    @app.post("/api/kernels/deep_profile")
+    def deep_profile() -> dict[str, Any]:
+        from pping_lang.collector.deep_profile import build_deep_profile  # noqa: PLC0415
+        from pping_lang.hardware import read_sm_limits  # noqa: PLC0415
+        if cupti is None:
+            return {"available": False, "error": "CUPTI collector not configured", "kernels": []}
+        return build_deep_profile(cupti.last_stall_result(), read_sm_limits())
+
     # === GET /api/latency_trends — TTFT / TPOT / E2E bucketed p50+p99 over time ===
     # Same dual-path strategy as /api/kpis: ≤200s windows served from the live
     # ring buffer (per-metric ring holds ~2000 points; at typical req rates
