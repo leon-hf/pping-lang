@@ -6,12 +6,14 @@
 from __future__ import annotations
 
 from pping_lang.collector.cupti import (
+    KERNEL_CLASS_TO_METRIC,
     CuptiKernelCollector,
     FakeActivitySource,
     FakePcSamplingLib,
     FlamegraphAggregator,
     KernelClassifier,
     KernelEvent,
+    LaunchCfg,
     PcSamplingController,
     StallAggregator,
     StallClassifier,
@@ -82,6 +84,71 @@ def test_classifier_memoizes():
 def test_classifier_comm_wins_over_gemm_ordering():
     # nccl reduce kernel 名里可能也含通用词,comm 规则在前应优先命中
     assert KernelClassifier().classify("nccl_reduce_scatter_kernel") == "comm"
+
+
+# === comm 子类细分(#5 短期部分)===
+
+def test_comm_subclass_real_nccl_names():
+    """真实 NCCL kernel 名 → 集合通信子类。
+
+    ★ 顺序陷阱：AllReduce / ReduceScatter 名里都含 "reduce",若泛化的 "reduce"
+      规则不垫底,这两类会被整个吃掉、退化成一个笼统桶 —— 正是本功能要消除的问题。
+    """
+    clf = KernelClassifier()
+    assert clf.comm_subclass("ncclDevKernel_AllReduce_Sum_f32_RING_LL") == "allreduce"
+    assert clf.comm_subclass("ncclDevKernel_ReduceScatter_Sum_bf16_RING_LL") == "reducescatter"
+    assert clf.comm_subclass("ncclDevKernel_AllGather_RING_LL") == "allgather"
+    assert clf.comm_subclass("ncclDevKernel_SendRecv") == "sendrecv"
+    assert clf.comm_subclass("ncclDevKernel_Broadcast_RING_LL") == "broadcast"
+    assert clf.comm_subclass("ncclDevKernel_AllToAll") == "alltoall"
+    # 裸 reduce(前面都没命中)才落到泛化桶
+    assert clf.comm_subclass("ncclDevKernel_Reduce_Sum_f32") == "reduce"
+
+
+def test_comm_subclass_none_for_non_comm():
+    clf = KernelClassifier()
+    assert clf.comm_subclass("flash_fwd_kernel") is None
+    assert clf.comm_subclass("ampere_fp16_s16816gemm_fp16") is None
+
+
+def test_comm_subclass_does_not_change_base_class():
+    """子类是并列维度：classify() 必须仍返回 "comm"。
+
+    "comm" 是对外稳定契约(KERNEL_CLASS_TO_METRIC / routes share 映射 / UI 配色都按它 key),
+    若改成 "comm.allreduce",这些 kernel 会从 metric 映射里整个掉出去。
+    """
+    clf = KernelClassifier()
+    for name in ("ncclDevKernel_AllReduce_Sum_f32", "ncclDevKernel_AllGather_RING"):
+        assert clf.classify(name) == "comm"
+    # 契约本身：metric 映射里必须仍能按 "comm" 找到这些 kernel 的去处
+    assert "comm" in KERNEL_CLASS_TO_METRIC
+
+
+def test_comm_subclass_shares_empty_on_single_gpu():
+    """单卡没有 comm kernel → 空表(UI 据此整段不显示),不是一堆 0 行。"""
+    agg = StallAggregator()
+    agg.add([_s("flash_fwd_kernel", "long_scoreboard", 100)])
+    assert agg.comm_subclass_shares() == []
+
+
+def test_comm_subclass_shares_split_and_normalize():
+    agg = StallAggregator()
+    agg.add([
+        _s("ncclDevKernel_AllReduce_Sum_f32", "barrier", 60),
+        _s("ncclDevKernel_AllGather_RING_LL", "long_scoreboard", 20),
+        _s("flash_fwd_kernel", "long_scoreboard", 20),
+    ])
+    rows = agg.comm_subclass_shares()
+    by_sub = {r["sub"]: r for r in rows}
+    assert set(by_sub) == {"allreduce", "allgather"}
+    # pct_of_comm 在 comm 内部归一(60/80, 20/80)
+    assert abs(by_sub["allreduce"]["pct_of_comm"] - 75.0) < 1e-6
+    assert abs(by_sub["allgather"]["pct_of_comm"] - 25.0) < 1e-6
+    # time_pct 是占全部 GPU 时间(60/100, 20/100)
+    assert abs(by_sub["allreduce"]["time_pct"] - 60.0) < 1e-6
+    assert abs(by_sub["allgather"]["time_pct"] - 20.0) < 1e-6
+    # 降序
+    assert [r["sub"] for r in rows] == ["allreduce", "allgather"]
 
 
 # === WindowAggregator ===
@@ -658,3 +725,69 @@ def test_collector_reports_dropped_records():
     sink.close()
     by_name = {m.name: m.value for m in sink.flushed_metrics}
     assert by_name[M.PPING_LANG_CUPTI_DROPPED_TOTAL] == 42.0
+
+
+# === #1 launch 配置(launch_cfg merge 进 kernel 表)===
+
+def test_pc_sampling_window_merges_launch_cfg():
+    """run_window 把 launch 配置按 kernel 名 merge 进 kernel_table;无配置的行 launch_cfg=None。"""
+    lib = FakePcSamplingLib(
+        drain_batches=[
+            [],   # baseline drain(窗开始前清零,被丢弃)
+            [_s("attn", "long_scoreboard", 60), _s("attn", "selected", 40)],
+            [_s("gemm", "math_pipe_throttle", 50)],
+            [],   # 收尾 drain
+        ],
+        launch_cfg_batches=[
+            [],   # baseline(清零 launch 计数基线)
+            [LaunchCfg(kernel="attn", launches=3, grid=(64, 1, 1), block=(128, 1, 1),
+                       dyn_smem=4096, regs=32, static_smem=0, local_mem=0,
+                       max_threads_per_block=1024)],
+        ],
+    )
+    fc = _FakeClockSleep()
+    ctl = PcSamplingController(lib)
+    res = ctl.run_window(window_s=1.0, drain_interval_s=0.5, clock=fc.clock, sleep=fc.sleep)
+
+    assert res["available"] is True
+    rows = {r["kernel"]: r for r in res["kernel_table"]}
+    cfg = rows["attn"]["launch_cfg"]
+    assert cfg["launches"] == 3
+    assert cfg["grid"] == [64, 1, 1]
+    assert cfg["block"] == [128, 1, 1]
+    assert cfg["dyn_smem"] == 4096
+    assert cfg["regs"] == 32
+    assert cfg["max_threads_per_block"] == 1024
+    # gemm 没有 launch 配置(未匹配到)→ None,不是缺 key
+    assert rows["gemm"]["launch_cfg"] is None
+
+
+def test_pc_sampling_window_launch_cfg_absent_is_none():
+    """老 .so / 采集被关(drain_launch_cfg 恒空)→ 所有行 launch_cfg=None,不影响主流程。"""
+    lib = FakePcSamplingLib(drain_batches=[[], [_s("attn", "long_scoreboard", 60)], []])
+    fc = _FakeClockSleep()
+    ctl = PcSamplingController(lib)
+    res = ctl.run_window(window_s=0.5, drain_interval_s=0.5, clock=fc.clock, sleep=fc.sleep)
+    assert res["available"] is True
+    assert res["kernel_table"][0]["launch_cfg"] is None
+
+
+def test_pc_sampling_window_launch_cfg_zero_launches_kept():
+    """cudagraph 稳态语义:本窗无新 launch(launches=0)但配置仍应带出(来自 capture 期)。"""
+    lib = FakePcSamplingLib(
+        drain_batches=[[], [_s("attn", "long_scoreboard", 60)], []],
+        launch_cfg_batches=[
+            [],
+            [LaunchCfg(kernel="attn", launches=0, grid=(8, 1, 1), block=(256, 1, 1),
+                       dyn_smem=0, regs=24, static_smem=128, local_mem=0,
+                       max_threads_per_block=1024)],
+        ],
+    )
+    fc = _FakeClockSleep()
+    ctl = PcSamplingController(lib)
+    res = ctl.run_window(window_s=0.5, drain_interval_s=0.5, clock=fc.clock, sleep=fc.sleep)
+    cfg = res["kernel_table"][0]["launch_cfg"]
+    assert cfg is not None
+    assert cfg["launches"] == 0
+    assert cfg["grid"] == [8, 1, 1]
+    assert cfg["static_smem"] == 128

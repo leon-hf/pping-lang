@@ -36,6 +36,9 @@ g++ -O2 -fPIC -std=c++17 -I$CU13/include -shared \
 - `pping_pcs_start(period_log2)` — enable+config+start;**★ 必须在 workload 干重活之前调**
   (context 还"新"时),否则 `getNumStallReasons` 返 0。
 - `pping_pcs_drain(rows, max)` — 拉走库内已聚合的 `(kernel, stallReason)→count` 小行。
+- `pping_pcs_drain_launch_cfg(rows, max)` — #1 launch 配置(grid/block/smem/regs…,
+  launch 回调常驻采集,默认开;`PPING_LANG_PCS_LAUNCH_CONFIG=0` 关)。
+- `pping_pcs_launch_cfg_start()` — 只开 launch 采集、不起 PCS(PCS 被独占时也能用)。
 - `pping_pcs_stop()` / `pping_pcs_stall_reason_name()` / `pping_pcs_overhead()` / `pping_pcs_available()`。
 - ctypes 加载用 `RTLD_DEEPBIND`(进程里可能并存多版本 libcupti)。
 

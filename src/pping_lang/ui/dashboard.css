@@ -1778,7 +1778,10 @@
     white-space: nowrap;
   }
   .cmp-delta.good { color: var(--teal); }
-  .cmp-delta.bad { color: var(--coral); }
+  /* ★ 用 --rose(红)而非 --coral：--coral 在品牌改色后已等同 --indigo(#5b5bd6),
+     "变差"渲染成品牌靛蓝、和"变好"的绿形成不了对立信号(见文件头注释:红走 --rose)。
+     这条被品牌改色误伤过,影响 Bench 对比与 Kernel 前后对比两处的 Δ 徽标。 */
+  .cmp-delta.bad { color: var(--rose); }
   .cmp-bar-row {
     display: flex;
     align-items: center;

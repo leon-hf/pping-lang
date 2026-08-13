@@ -253,6 +253,85 @@ const I18N = {
     'kern.howMeasured': '测量方式',
     'kern.samplingPeriod': '采样周期 每 {period} cycle 一次(2^{log}) ·\n本窗 {w}s 采到 {samples} 样本 ·\n GetData 累计开销 {getdata}ms ·\n丢样 {dropped} · HW 缓冲满 {hwfull} 次 ·\nGPU 硬件采样,无需 Nsight、不停服务',
     'kern.noInitialData': '点击上方按钮启动一次短窗 PC Sampling,查看这些 kernel 内部的 stall 类型(访存依赖 / 计算管线 / 同步 …)。',
+    // 深度剖析(#1/#2/#3/#4/#7)—— 回答"该怎么改",区别于 PC Sampling 的"为什么慢"
+    'dprof.title': '🔬 深度剖析 — 该怎么改',
+    'dprof.sub': '常驻采集 · 不暂停服务',
+    'dprof.hint': '上面告诉你哪个 kernel 慢、为什么慢;这里告诉你卡在什么资源上、该往哪改',
+    'dprof.collect': '读取深度剖析',
+    'dprof.collecting': '读取中…',
+    'dprof.costWarn': '启动配置、理论占用率上限、受限资源、wave 量化来自常驻 launch 采集,不暂停服务。roofline 判型/achieved 为软件估算(口径见上方估算卡)。L2/DRAM 列来自一次性 ncu 离线标定(未标定显示 —)。行级实测占用率/Tensor Core 需深窗采集(未开放),显示 —。',
+    'dprof.meta': '读自最近采样窗 · {time} · 常驻采集无暂停',
+    'dprof.empty': '还没读过。点上面的按钮,从最近采样窗组装剖析 —— 每个 kernel 的启动配置、理论占用率上限、受限资源和 wave 量化。',
+    'dprof.occupancy': '占用率',
+    'dprof.occAchieved': '实测',
+    'dprof.occTheoretical': '理论上限',
+    'dprof.occGap': '差 {gap} 个百分点',
+    'dprof.limiter': '受限于',
+    'dprof.limiterRegs': '寄存器({n}/线程)',
+    'dprof.limiterSmem': 'Shared Memory({n} KB/block)',
+    'dprof.limiterGrid': 'grid 太小(打不满 SM)',
+    'dprof.limiterNone': '未受限',
+    'dprof.launchCfg': '启动配置',
+    'dprof.tensorCore': 'Tensor Core',
+    'dprof.l2hit': 'L2 命中',
+    'dprof.dram': 'DRAM',
+    'dprof.waveQuant': 'Wave 量化',
+    'dprof.waveDetail': '{waves} 个 wave,最后一波只用了 {pct}% 的 SM',
+    'dprof.waveAdvice': '把 grid 调成 SM 数的整数倍可回收这部分空转',
+    'dprof.regAdvice': '寄存器压力限制了占用率 —— 试试 __launch_bounds__ 或拆分 kernel',
+    'dprof.smemAdvice': 'Shared memory 限制了占用率 —— 减小 tile 或改用动态 smem',
+    'dprof.tensorLow': 'Tensor Core 利用率低 —— 检查维度是否对齐 tile 要求',
+    'dprof.noAdvice': '这个 kernel 没有明显的配置层问题',
+    'dprof.l2Uncalibrated': 'L2 数值尚未标定,仅供参考',
+    'dprof.calibratedSrc': 'ncu 离线标定实测(decode M=1 口径,一次性维护窗口采集)',
+    'dprof.colKernel': 'Kernel',
+    'dprof.expandHint': '点行展开看启动配置与建议',
+    // #2/#3 family 级 roofline 估算(纯软件推算,不停服务;判型码由后端给,这里翻译)
+    'dprof.estTitle': '📊 Roofline 估算 · kernel 家族级 · 纯软件推算',
+    'dprof.estWindow': '本窗 decode ≈ {steps} 步/s · GPU 活跃 {busy}%',
+    'dprof.estColFam': 'Kernel 家族',
+    'dprof.estColTime': '时间占比',
+    'dprof.estColAI': 'AI(FLOP/B)',
+    'dprof.estColAchieved': 'achieved(估算)',
+    'dprof.estColVerdict': '判型',
+    'dprof.estRidge': 'ridge {r}',
+    'dprof.estVerdict.memory-latency-bound': 'memory-bound · 未喂饱带宽',
+    'dprof.estVerdict.memory-bound': 'memory-bound · 带宽饱和',
+    'dprof.estVerdict.compute-bound': 'compute-bound',
+    'dprof.estNoShape': '形状依赖序列长度,不估',
+    'dprof.estNotesTitle': '口径与假设',
+    'dprof.estLatencyAdvice': '离 memory roof 还很远 —— kernel 没吃饱,加大并发/batch 比改 kernel 更划算',
+    // #5 comm 桶细分
+    'csub.title': '通信细分',
+    'csub.hint': '占通信总时间 · allreduce 常是延迟型,all_gather / reduce_scatter 常是带宽型,优化手段不同',
+    'csub.ofTotal': '全局 {pct}%',
+    // #6 Kernel 快照改动前后对比(改 kernel 前后验证)
+    'ksnap.saveA': '把当前取证结果存为「改动前」基准',
+    'ksnap.saveB': '把当前取证结果存为「改动后」',
+    'ksnap.slotA': '改动前',
+    'ksnap.slotB': '改动后',
+    'ksnap.clear': '清除',
+    'ksnap.savedAt': '{time} 采集',
+    'ksnap.title': '📐 改动前后对比',
+    'ksnap.hint': 'Δ = 改动后 − 改动前;绿 = 更好,红 = 更差',
+    'ksnap.needBoth': '在改动前、改动后各存一份快照,这里显示逐 kernel 的差异。',
+    'ksnap.loadContext': '负载对照',
+    'ksnap.loadSame': '典型 kernel 变化 {median}(中位数),说明变化集中在少数 kernel 上而非全体平移 —— 两次负载可比,下面的绝对 Δ 可信。整体 GPU 活跃度 {total}。',
+    'ksnap.loadDrift': '⚠ 典型 kernel 变化 {median}(中位数)—— 几乎所有 kernel 都同向平移了,这更像是两次取样时的流量/负载不同,而不是某个改动生效。下面的"绝对速率 Δ"会被这个差异污染,建议在相同负载下重采。整体 GPU 活跃度 {total}。',
+    'ksnap.periodMismatch': '⚠ 两次快照的采样周期不同(2^{a} vs 2^{b}),已按周期归一化后再比,但仍建议用同一周期重采。',
+    'ksnap.stallDiff': '全局 stall 构成变化',
+    'ksnap.stallDiffSub': '百分点差(改动后 − 改动前)· 下降 = 该类 stall 减少',
+    'ksnap.warpDiff': 'Warp 周期去向变化',
+    'ksnap.kernelDiff': '逐 kernel 差异',
+    'ksnap.kernelDiffSub': '按 GPU 时间占比排序 · 只列前 25',
+    'ksnap.colRate': '绝对速率 Δ',
+    'ksnap.colRateTip': '该 kernel 每墙钟秒消耗的 GPU 周期(已按采样周期归一化)。这是"这个 kernel 真的变快了吗"的答案 —— 前提是两次负载相同。',
+    'ksnap.colShare': 'GPU 时间占比',
+    'ksnap.colShareTip': '占比是相对值：单个 kernel 变快会自动抬高其它所有 kernel 的占比。判断"变没变快"请看绝对速率 Δ。',
+    'ksnap.colStall': '主导 stall',
+    'ksnap.new': '新增',
+    'ksnap.gone': '消失',
+    'ksnap.shareCaveat': '注意：占比是相对值 —— 优化掉一个 kernel 会让其余所有 kernel 的占比"看起来变差"。要判断某个 kernel 自身有没有变快,看绝对速率 Δ。',
     'bench.createTitle': '新建压测',
     'bench.createHint': '提交后异步执行，结果落库后出现在下方历史',
     'bench.name': '名称（可选）',
@@ -702,6 +781,85 @@ Your "extra guidance" is appended after this contract.`,
     'kern.howMeasured': 'How measured',
     'kern.samplingPeriod': 'Sample every {period} cycles (2^{log}) ·\nThis window {w}s collected {samples} samples ·\nGetData cumulative overhead {getdata}ms ·\nDropped {dropped} · HW buffer full {hwfull} times ·\nGPU hardware sampling, no Nsight, no service interruption',
     'kern.noInitialData': 'Click the button above to open a short-window PC Sampling — see what\'s stalling inside these kernels (memory deps / compute pipeline / sync …).',
+    // Deep profile (#1/#2/#3/#4/#7) — answers "what to change", vs PC Sampling's "why it's slow"
+    'dprof.title': '🔬 Deep profile — what to change',
+    'dprof.sub': 'Always-on capture · no serving pause',
+    'dprof.hint': 'Above tells you which kernel is slow and why; this tells you which resource it is limited by and what to change',
+    'dprof.collect': 'Read deep profile',
+    'dprof.collecting': 'Reading…',
+    'dprof.costWarn': 'Launch config, theoretical occupancy cap, limiter and wave quantization come from always-on launch capture — no serving pause. Roofline verdicts and achieved rates are software estimates (see the estimate card for assumptions). L2/DRAM columns come from a one-time offline ncu calibration (— if not calibrated). Per-kernel achieved occupancy / Tensor Core need a deep-window collection (not available yet) and show —.',
+    'dprof.meta': 'From the latest sampling window · {time} · always-on, no pause',
+    'dprof.empty': 'Not read yet. Hit the button above to assemble a profile from the latest sampling window — per-kernel launch config, theoretical occupancy cap, limiter and wave quantization.',
+    'dprof.occupancy': 'Occupancy',
+    'dprof.occAchieved': 'achieved',
+    'dprof.occTheoretical': 'theoretical',
+    'dprof.occGap': '{gap} pp short',
+    'dprof.limiter': 'Limited by',
+    'dprof.limiterRegs': 'registers ({n}/thread)',
+    'dprof.limiterSmem': 'shared memory ({n} KB/block)',
+    'dprof.limiterGrid': 'grid too small (cannot fill SMs)',
+    'dprof.limiterNone': 'not limited',
+    'dprof.launchCfg': 'Launch config',
+    'dprof.tensorCore': 'Tensor Core',
+    'dprof.l2hit': 'L2 hit',
+    'dprof.dram': 'DRAM',
+    'dprof.waveQuant': 'Wave quantization',
+    'dprof.waveDetail': '{waves} waves; the last one uses only {pct}% of the SMs',
+    'dprof.waveAdvice': 'Round grid size to a multiple of the SM count to reclaim that idle tail',
+    'dprof.regAdvice': 'Register pressure caps occupancy — try __launch_bounds__ or splitting the kernel',
+    'dprof.smemAdvice': 'Shared memory caps occupancy — shrink the tile or switch to dynamic smem',
+    'dprof.tensorLow': 'Low Tensor Core utilization — check whether dimensions meet the tile alignment',
+    'dprof.noAdvice': 'No obvious launch-configuration problem with this kernel',
+    'dprof.l2Uncalibrated': 'L2 value not yet calibrated — treat as indicative only',
+    'dprof.calibratedSrc': 'Measured offline with ncu (decode M=1; one-time maintenance window)',
+    'dprof.colKernel': 'Kernel',
+    'dprof.expandHint': 'Click a row for launch config and advice',
+    // #2/#3 family-level roofline estimate (pure software, no serving pause; backend emits verdict codes, translated here)
+    'dprof.estTitle': '📊 Roofline estimate · kernel-family level · pure software',
+    'dprof.estWindow': 'decode ≈ {steps} steps/s this window · GPU busy {busy}%',
+    'dprof.estColFam': 'Kernel family',
+    'dprof.estColTime': 'Time share',
+    'dprof.estColAI': 'AI (FLOP/B)',
+    'dprof.estColAchieved': 'achieved (est.)',
+    'dprof.estColVerdict': 'Verdict',
+    'dprof.estRidge': 'ridge {r}',
+    'dprof.estVerdict.memory-latency-bound': 'memory-bound · bandwidth underfed',
+    'dprof.estVerdict.memory-bound': 'memory-bound · bandwidth saturated',
+    'dprof.estVerdict.compute-bound': 'compute-bound',
+    'dprof.estNoShape': 'shape needs sequence length — not estimated',
+    'dprof.estNotesTitle': 'Assumptions',
+    'dprof.estLatencyAdvice': 'Far from the memory roof — kernels are underfed; raising concurrency/batch beats kernel tuning here',
+    // #5 comm bucket subdivision
+    'csub.title': 'Comm breakdown',
+    'csub.hint': '% of total comm time · allreduce is usually latency-bound, all_gather / reduce_scatter usually bandwidth-bound — different fixes',
+    'csub.ofTotal': '{pct}% overall',
+    // #6 Kernel snapshot before/after compare (verify a kernel change)
+    'ksnap.saveA': 'Store the current evidence as the before-change baseline',
+    'ksnap.saveB': 'Store the current evidence as after-change',
+    'ksnap.slotA': 'Before',
+    'ksnap.slotB': 'After',
+    'ksnap.clear': 'Clear',
+    'ksnap.savedAt': 'captured {time}',
+    'ksnap.title': '📐 Before / after compare',
+    'ksnap.hint': 'Δ = after − before; green = better, red = worse',
+    'ksnap.needBoth': 'Store one snapshot before and one after the change to see the per-kernel diff here.',
+    'ksnap.loadContext': 'Load context',
+    'ksnap.loadSame': 'Typical kernel moved {median} (median) — the change is concentrated in a few kernels rather than shifting everything, so the loads are comparable and the absolute Δ below is trustworthy. Overall GPU activity {total}.',
+    'ksnap.loadDrift': '⚠ Typical kernel moved {median} (median) — nearly every kernel shifted in the same direction, which looks more like different traffic/load between the two captures than like a change taking effect. The "absolute rate Δ" below is confounded by that; re-capture under matching load. Overall GPU activity {total}.',
+    'ksnap.periodMismatch': '⚠ The two snapshots used different sampling periods (2^{a} vs 2^{b}). Values are normalized by period before comparing, but re-capturing with one period is still recommended.',
+    'ksnap.stallDiff': 'Global stall breakdown change',
+    'ksnap.stallDiffSub': 'Percentage-point delta (after − before) · down = less of that stall',
+    'ksnap.warpDiff': 'Warp cycle destination change',
+    'ksnap.kernelDiff': 'Per-kernel diff',
+    'ksnap.kernelDiffSub': 'Sorted by GPU time share · top 25 only',
+    'ksnap.colRate': 'Absolute rate Δ',
+    'ksnap.colRateTip': 'GPU cycles this kernel consumes per wall-clock second (normalized by sampling period). This is the answer to "did this kernel actually get faster" — provided both snapshots ran under the same load.',
+    'ksnap.colShare': 'GPU time share',
+    'ksnap.colShareTip': 'Share is relative: making one kernel faster automatically inflates every other kernel\'s share. To judge whether a kernel got faster, read the absolute rate Δ.',
+    'ksnap.colStall': 'Dominant stall',
+    'ksnap.new': 'new',
+    'ksnap.gone': 'gone',
+    'ksnap.shareCaveat': 'Note: share is a relative number — optimizing one kernel away makes every remaining kernel\'s share "look worse". To judge whether a given kernel itself got faster, read the absolute rate Δ.',
     'bench.createTitle': 'Create New Benchmark',
     'bench.createHint': 'Runs asynchronously after submission; results appear in history below',
     'bench.name': 'Name (optional)',
@@ -2390,6 +2548,13 @@ function dashboard() {
     },
     // Deep Evidence(阶段 2 PC Sampling 按需取证)：为什么这些 kernel 慢
     deep: { running: false, available_now: false, result: null, findings: [], error: null },
+    // 深度剖析(#1/#2/#3/#4/#7):Activity 的启动配置 + Profiling 的硬件指标。
+    // 与 Deep Evidence(PC Sampling)**硬件互斥**,故是独立的一次按需窗口,且要暂停服务。
+    deepProf: { running: false, result: null, error: null },
+    dprofExpanded: null,        // 展开看启动配置 + 建议的行索引
+    // #6 改动前后对比：两个 Deep Evidence 快照(A=改动前基准,B=改动后)。存 localStorage,
+    // 让"改 kernel → 重启服务 → 再采一次"这个真实工作流跨页面刷新还留得住 A。
+    kernelSnaps: { A: null, B: null },   // 每槽 {ts, result}
     kernelShowAll: false,        // Kernel 明细表：false=只显示前 N 行
     kernelCollapsed: 10,         // 收起时显示的行数
     kernelExpanded: null,        // 展开看 stall 构成 + 建议的行索引(null=都收起)
@@ -2439,6 +2604,14 @@ function dashboard() {
         elementwise: 'Elementwise', sampling: 'Sampling', index: 'Index/Gather',
         other: 'Other',
       }[cls] || cls;
+    },
+    // comm 子类 → 展示名(集合通信操作名是业界通用术语,不翻译)
+    commSubLabel(sub) {
+      return {
+        allreduce: 'AllReduce', reducescatter: 'ReduceScatter', allgather: 'AllGather',
+        sendrecv: 'SendRecv', broadcast: 'Broadcast', alltoall: 'AllToAll',
+        reduce: 'Reduce', other: 'Other',
+      }[sub] || sub;
     },
     // === Kernel tab 诊断辅助(全部从 deep.result 现有数据推导,无需后端)===
     // #5 mangled 名 → 人话
@@ -2616,8 +2789,9 @@ function dashboard() {
     },
     // === Deep Evidence(全局 / warp 效率 / 方法论)辅助 ===
     // Warp 周期三态(占全部样本)：发指令 / 就绪未选中(余量) / 真 stall(在等)
-    warpSplit() {
-      const r = this.deep.result;
+    // res 省略时用当前取证结果;传入则可算任意快照(#6 前后对比复用)
+    warpSplit(res) {
+      const r = res || this.deep.result;
       if (!r || !r.available) return null;
       const issued = r.issued_pct || 0;
       const slackShare = ((r.stall_shares || []).find(s => s.cls === 'scheduler_slack') || {}).pct || 0;
@@ -2741,6 +2915,229 @@ function dashboard() {
         this.deep.running = false;
       }
     },
+    // ===== 深度剖析:把硬件指标翻译成"该改哪儿" =====
+    // 触发一次深窗采集(会暂停服务,故不自动跑,必须用户显式点)
+    async runDeepProfile() {
+      if (this.deepProf.running) return;
+      this.deepProf.running = true; this.deepProf.error = null;
+      try {
+        const r = await fetch('/api/kernels/deep_profile?lang=' + _uiLang(),
+          { method: 'POST' }).then(x => x.json());
+        if (r.available) this.deepProf.result = r;
+        else this.deepProf.error = r.error || t('kernel.pcSamplingUnavailable');
+      } catch (e) {
+        this.deepProf.error = t('kernel.requestFailed', {e: e});
+      } finally {
+        this.deepProf.running = false;
+      }
+    },
+    // 占用率条:实测 vs 理论。两者的差就是"还能捞回来多少",是这块面板的主角。
+    dprofOccGap(k) {
+      if (!k || k.occupancy_pct == null || k.occupancy_theoretical_pct == null) return null;
+      return k.occupancy_theoretical_pct - k.occupancy_pct;
+    },
+    // 限制资源 → 人话标签(无 launch 配置 = null → "—",不谎称"未受限")
+    dprofLimiterLabel(k) {
+      if (!k) return '';
+      if (!k.limiter) return '—';
+      return {
+        registers: t('dprof.limiterRegs', {n: k.regs_per_thread}),
+        smem: t('dprof.limiterSmem', {n: (((k.smem_static || 0) + (k.smem_dynamic || 0)) / 1024).toFixed(1)}),
+        grid: t('dprof.limiterGrid'),
+      }[k.limiter] || t('dprof.limiterNone');
+    },
+    dprofLimiterColor(k) {
+      return { registers: '#c2334f', smem: '#b7791f', grid: '#5b5bd6' }[k && k.limiter] || '#9a9aa4';
+    },
+    // 可操作建议:按限制资源 + wave 量化给具体动作,而不是只报数字
+    dprofAdvice(k) {
+      if (!k) return [];
+      const out = [];
+      if (k.limiter === 'registers') out.push(t('dprof.regAdvice'));
+      if (k.limiter === 'smem') out.push(t('dprof.smemAdvice'));
+      if (k.wave_quant && k.wave_quant.last_wave_pct != null && k.wave_quant.last_wave_pct < 60)
+        out.push(t('dprof.waveAdvice'));
+      // Tensor Core 阈值 40%:GEMM/attention 类才有意义,其它算子本来就不该走 tensor 管线
+      if ((k.cls === 'gemm' || k.cls === 'attention') && k.tensor_pct != null && k.tensor_pct < 40)
+        out.push(t('dprof.tensorLow'));
+      if (!out.length) out.push(t('dprof.noAdvice'));
+      return out;
+    },
+    dprofGridStr(k) {
+      const f = (a) => Array.isArray(a) ? a.join('×') : '—';
+      return `grid ${f(k.grid)} · block ${f(k.block)}`;
+    },
+    // ===== #2/#3 family 级 roofline 估算(后端 roofline_est 给码,这里翻译/上色) =====
+    dprofFamLabel(fam) {
+      return {
+        'marlin-int4': 'Marlin INT4 GEMM (qkv/o/gate_up/down)',
+        'cublas-gemv': 'cuBLAS GEMV (lm_head)',
+        'flash-attn': 'FlashAttention',
+        'cutlass-gemm': 'CUTLASS GEMM (qkv/o/gate_up/down)',
+      }[fam] || fam;
+    },
+    dprofVerdictLabel(f) {
+      if (!f || !f.verdict) return f && f.ai_flop_per_byte == null ? t('dprof.estNoShape') : '—';
+      return t('dprof.estVerdict.' + f.verdict);
+    },
+    dprofVerdictColor(f) {
+      return {
+        'memory-latency-bound': '#b7791f',   // 未喂饱:琥珀,该加 batch
+        'memory-bound': '#5b5bd6',           // 带宽饱和:靛蓝,得减字节
+        'compute-bound': 'var(--teal)',
+      }[f && f.verdict] || '#9a9aa4';
+    },
+    // achieved 行:有数 → "6.0 GB/s(1.3% roof)";没数 → "—"。两个 roof 取相关的那个:
+    // memory-bound 看带宽 roof,compute-bound 看算力 roof
+    dprofAchievedStr(f) {
+      if (!f) return '—';
+      if (f.verdict === 'compute-bound') {
+        return f.achieved_tflops == null ? '—'
+          : `${fmt(f.achieved_tflops, 2)} TFLOPS (${fmt(f.pct_of_compute_peak, 1)}% roof)`;
+      }
+      return f.achieved_gbps == null ? '—'
+        : `${fmt(f.achieved_gbps, 1)} GB/s (${fmt(f.pct_of_mem_peak, 1)}% roof)`;
+    },
+
+    // ===== #6 Kernel 快照 A/B 对比：改完 kernel 之后,工具内直接验证有没有变好 =====
+    // 不需要任何新采集源 —— deep.result 本身就是一次完整快照,缺的只是"存下来 + 对齐 diff"。
+    _KSNAP_KEY: 'pping.kernelSnaps',
+    _ksnapLoad() {
+      try {
+        const o = JSON.parse(localStorage.getItem(this._KSNAP_KEY) || 'null');
+        if (o && typeof o === 'object') this.kernelSnaps = { A: o.A || null, B: o.B || null };
+      } catch (e) { /* 存储损坏 / 隐私模式：退回空快照,不阻断 Kernel tab */ }
+    },
+    _ksnapPersist() {
+      try { localStorage.setItem(this._KSNAP_KEY, JSON.stringify(this.kernelSnaps)); }
+      catch (e) { /* 配额满 / 隐私模式：内存里照样能对比,只是刷新后丢 */ }
+    },
+    saveKernelSnap(slot) {
+      const r = this.deep.result;
+      if (!r || !r.available) return;
+      this.kernelSnaps[slot] = { ts: Date.now(), result: r };
+      this._ksnapPersist();
+    },
+    clearKernelSnap(slot) {
+      this.kernelSnaps[slot] = null;
+      this._ksnapPersist();
+    },
+    ksnapTime(slot) {
+      const s = this.kernelSnaps[slot];
+      return s ? new Date(s.ts).toLocaleTimeString() : '';
+    },
+    ksnapReady() { return !!(this.kernelSnaps.A && this.kernelSnaps.B); },
+
+    // 采样"绝对速率"：samples × 2^period / window_s ∝ 该 kernel 每墙钟秒消耗的 GPU 周期。
+    // 为什么不用 time_pct：占比是**相对**值,把一个 kernel 优化掉会自动抬高其余所有 kernel
+    // 的占比 —— 直接拿占比做前后对比会得出"其它 kernel 都变差了"的假结论。乘 2^period 是为了
+    // 让采样周期不同的两次快照也可比(样本数 ∝ 时间 / 周期)。
+    _ksnapRate(samples, res) {
+      const w = Number(res && res.window_s) || 0;
+      if (w <= 0 || samples == null) return null;
+      return samples * Math.pow(2, Number(res.period_log2) || 0) / w;
+    },
+
+    // 负载对照。★ 这里不能用"总采样速率变化"当漂移信号 —— 优化成功本身就会让总速率下降
+    // (kernel 变快 → GPU 活跃周期变少),那样会在优化生效时误报"负载不可比"。
+    // 真正能区分两者的是**变化的分散程度**：
+    //   - 负载变了(一次高峰一次空闲)→ 几乎所有 kernel 的绝对速率一起同向平移 → 中位数大;
+    //   - 优化生效 → 只有被改的那几个 kernel 动,其余不动 → 中位数≈0,尾部有大值。
+    // 故用 per-kernel Δ 的**中位数**作漂移判据,总速率只作为上下文数字展示。
+    ksnapLoad() {
+      if (!this.ksnapReady()) return null;
+      const A = this.kernelSnaps.A.result, B = this.kernelSnaps.B.result;
+      const ra = this._ksnapRate(A.sample_total, A), rb = this._ksnapRate(B.sample_total, B);
+      const totalPct = (ra && rb) ? 100 * (rb - ra) / ra : null;
+      // 只取两侧都存在的 kernel(新增/消失的没有可比基准)
+      const deltas = this.ksnapRows()
+        .filter(r => r.ratePct != null).map(r => r.ratePct).sort((x, y) => x - y);
+      let medianPct = null;
+      if (deltas.length) {
+        const m = Math.floor(deltas.length / 2);
+        medianPct = deltas.length % 2 ? deltas[m] : (deltas[m - 1] + deltas[m]) / 2;
+      }
+      return {
+        totalPct, medianPct,
+        // 样本太少(<4 个共同 kernel)时中位数不稳,不下漂移结论,只展示数字
+        drift: medianPct != null && deltas.length >= 4 && Math.abs(medianPct) >= 15,
+        periodA: A.period_log2, periodB: B.period_log2,
+        periodMismatch: A.period_log2 !== B.period_log2,
+      };
+    },
+
+    // 逐 kernel 对齐 diff。|Δ|<5% 视为持平：PC Sampling 是统计估计,窗与窗之间本身有噪声,
+    // 阈值比 bench 的 2% 放宽是因为采样噪声大于压测运行间噪声。
+    ksnapRows() {
+      if (!this.ksnapReady()) return [];
+      const A = this.kernelSnaps.A.result, B = this.kernelSnaps.B.result;
+      const index = (res) => new Map((res.kernel_table || []).map(k => [k.kernel, k]));
+      const ma = index(A), mb = index(B);
+      const rows = [];
+      for (const name of new Set([...ma.keys(), ...mb.keys()])) {
+        const a = ma.get(name), b = mb.get(name);
+        const ra = a ? this._ksnapRate(a.samples, A) : null;
+        const rb = b ? this._ksnapRate(b.samples, B) : null;
+        const ratePct = (ra != null && rb != null && ra > 0) ? 100 * (rb - ra) / ra : null;
+        const shareA = a ? a.time_pct : null, shareB = b ? b.time_pct : null;
+        rows.push({
+          kernel: name,
+          cls: (b || a).cls,
+          status: !a ? 'new' : (!b ? 'gone' : 'both'),
+          shareA, shareB,
+          shareDelta: (shareA != null && shareB != null) ? shareB - shareA : null,
+          ratePct,
+          good: (ratePct != null && Math.abs(ratePct) >= 5) ? ratePct < 0 : null,
+          stallA: a ? a.dominant_stall : null,
+          stallB: b ? b.dominant_stall : null,
+          stallChanged: !!(a && b && a.dominant_stall !== b.dominant_stall),
+          weight: Math.max(shareA || 0, shareB || 0),
+        });
+      }
+      rows.sort((x, y) => y.weight - x.weight);
+      return rows.slice(0, 25);
+    },
+
+    // 全局 stall 构成的百分点差。stall 占比下降 = 更好;|Δ|<1 个百分点视为持平。
+    ksnapStallRows() {
+      if (!this.ksnapReady()) return [];
+      const pick = (res) => Object.fromEntries((res.stall_shares || []).map(s => [s.cls, s.pct]));
+      const a = pick(this.kernelSnaps.A.result), b = pick(this.kernelSnaps.B.result);
+      return [...new Set([...Object.keys(a), ...Object.keys(b)])]
+        .map(cls => {
+          const pa = a[cls] || 0, pb = b[cls] || 0, delta = pb - pa;
+          // scheduler_slack 高常是好事(有余量),不套"越低越好"
+          const good = (cls === 'scheduler_slack' || Math.abs(delta) < 1) ? null : delta < 0;
+          return { cls, a: pa, b: pb, delta, good };
+        })
+        .filter(r => r.a >= 0.5 || r.b >= 0.5)
+        .sort((x, y) => Math.abs(y.delta) - Math.abs(x.delta));
+    },
+
+    // Warp 三态的前后差(issued 越高越好,stall 越低越好,slack 是中性信息)
+    ksnapWarpRows() {
+      if (!this.ksnapReady()) return [];
+      const wa = this.warpSplit(this.kernelSnaps.A.result);
+      const wb = this.warpSplit(this.kernelSnaps.B.result);
+      if (!wa || !wb) return [];
+      return [
+        { key: 'issued', label: t('kern.issued'), a: wa.issued, b: wb.issued, higherBetter: true },
+        { key: 'slack', label: t('kern.slack'), a: wa.slack, b: wb.slack, higherBetter: null },
+        { key: 'stall', label: t('kern.stallWait'), a: wa.stall, b: wb.stall, higherBetter: false },
+      ].map(r => {
+        const delta = r.b - r.a;
+        const good = (r.higherBetter == null || Math.abs(delta) < 1) ? null
+          : (r.higherBetter ? delta > 0 : delta < 0);
+        return { ...r, delta, good };
+      });
+    },
+    // Δ 数字统一成 "+x.x%" / "−x.x%"(带符号,便于扫读)
+    ksnapDelta(v, digits) {
+      if (v == null || isNaN(v)) return '—';
+      const n = Number(v);
+      return (n > 0 ? '+' : '') + n.toFixed(digits == null ? 1 : digits);
+    },
+
     // kernel 数据是否"实时"(采集时刻够近),用于新鲜度横幅
     // 延迟分位条(三行式)：某分位占 p99 的宽度%(p99=满刻度;三段挤一条看不清,实测反馈)
     pctW(d, q) {
@@ -2886,6 +3283,7 @@ function dashboard() {
       _e2eChart  = _createMiniLatencyChart('e2e-chart',  '#0d8b80');
       // kernel 趋势图懒创建(canvas 在 x-if 里,见 _updateKernelTrends)
 
+      this._ksnapLoad();   // #6 前后对比快照：刷新页面/重启服务后 A 还在
       this.fetchSystem();
       this.refresh();
       setInterval(() => this.refresh(), 2000);

@@ -102,6 +102,11 @@ _CU_ATTR_MEM_CLOCK = 36         # 显存时钟峰值 kHz
 _CU_ATTR_BUS_WIDTH = 37         # 显存位宽 bit
 _CU_ATTR_CC_MAJOR = 75
 _CU_ATTR_CC_MINOR = 76
+# 占用率估算(#1 launch 配置 → 理论占用率)要的 SM 资源上限
+_CU_ATTR_MAX_THREADS_PER_SM = 39   # 每 SM 最大常驻线程
+_CU_ATTR_MAX_SMEM_PER_SM = 81      # 每 SM shared memory 字节
+_CU_ATTR_MAX_REGS_PER_SM = 82      # 每 SM 寄存器数
+_CU_ATTR_MAX_BLOCKS_PER_SM = 106   # 每 SM 最大常驻 block 数
 
 
 def _load_cudart():  # noqa: ANN202
@@ -152,5 +157,62 @@ def read_gpu_peak(device: int = 0) -> GPUPeak | None:
         compute_tflops = mp_count * (sm_clock_khz * 1e3) * fpc / 1e12
         mem_bw_gbs = 2.0 * (mem_clock_khz * 1e3) * (bus_width / 8) / 1e9
         return GPUPeak(bf16_tflops=round(compute_tflops, 1), mem_bw_gbs=round(mem_bw_gbs, 1))
+    except Exception:
+        return None
+
+
+@dataclass(frozen=True, slots=True)
+class SMLimits:
+    """每 SM 资源上限(现读设备属性)—— 由 launch 配置估理论占用率(#1/#7)用。"""
+
+    mp_count: int              # SM 数
+    max_threads_per_sm: int    # 每 SM 最大常驻线程(= 最大 warp 数 × 32)
+    max_regs_per_sm: int       # 每 SM 寄存器堆大小
+    max_smem_per_sm: int       # 每 SM shared memory 字节
+    max_blocks_per_sm: int     # 每 SM 最大常驻 block 数
+
+
+def read_sm_clock_hz(device: int = 0) -> float | None:
+    """现读 SM 峰值时钟(Hz)。busy 窗估算(PCS 样本率反推 SM 活跃占比)用。
+    失败(无 cudart / 读到 0)→ None,调用方降级(busy 窗给 None)。"""
+    try:
+        import ctypes
+        cudart = _load_cudart()
+        v = ctypes.c_int()
+        rc = cudart.cudaDeviceGetAttribute(
+            ctypes.byref(v), ctypes.c_int(_CU_ATTR_CLOCK_RATE), ctypes.c_int(device))
+        if rc != 0 or v.value <= 0:
+            return None
+        return float(v.value) * 1e3   # kHz → Hz
+    except Exception:
+        return None
+
+
+def read_sm_limits(device: int = 0) -> SMLimits | None:
+    """现读每 SM 资源上限。不需要 CUDA context(同 read_gpu_peak 的机制)。
+
+    任意一步失败(无 cudart / 读到 0)→ None,调用方降级(deep profile 不给理论占用率)。
+    """
+    try:
+        import ctypes
+        cudart = _load_cudart()
+
+        def attr(a: int) -> int:
+            v = ctypes.c_int()
+            rc = cudart.cudaDeviceGetAttribute(ctypes.byref(v), ctypes.c_int(a), ctypes.c_int(device))
+            if rc != 0:
+                raise RuntimeError(f"cudaDeviceGetAttribute({a}) rc={rc}")
+            return v.value
+
+        limits = SMLimits(
+            mp_count=attr(_CU_ATTR_MP_COUNT),
+            max_threads_per_sm=attr(_CU_ATTR_MAX_THREADS_PER_SM),
+            max_regs_per_sm=attr(_CU_ATTR_MAX_REGS_PER_SM),
+            max_smem_per_sm=attr(_CU_ATTR_MAX_SMEM_PER_SM),
+            max_blocks_per_sm=attr(_CU_ATTR_MAX_BLOCKS_PER_SM),
+        )
+        if min(limits.mp_count, limits.max_threads_per_sm, limits.max_regs_per_sm) <= 0:
+            return None
+        return limits
     except Exception:
         return None

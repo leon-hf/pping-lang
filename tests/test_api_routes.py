@@ -705,3 +705,40 @@ def test_deep_evidence_unavailable_without_collector(empty_app):
     assert data["available"] is False
     g = client.get("/api/kernels/deep_evidence").json()
     assert g["available_now"] is False and g["last"] is None
+
+
+# === Deep Profile(#1/#7 常驻 launch 配置 → 该怎么改面板)===
+
+def test_deep_profile_endpoint(tmp_path):
+    """POST /api/kernels/deep_profile 从最近一窗 launch_cfg 组装:理论占用率/受限资源/wave 量化。"""
+    class _FakeCupti:
+        def last_stall_result(self):
+            return {"available": True, "kernel_table": [{
+                "kernel": "gemm_k", "cls": "gemm",
+                "launch_cfg": {"launches": 7, "grid": [512, 1, 1], "block": [256, 1, 1],
+                               "dyn_smem": 0, "regs": 255, "static_smem": 0,
+                               "local_mem": 0, "max_threads_per_block": 1024},
+            }]}
+
+    db = tmp_path / "dp.duckdb"
+    sink = LocalSink(db_path=db, instance_id="x", flush_interval_s=10.0)
+    app = build_app(db_path=str(db), instance_id="x", engine_index=0,
+                    sink=sink, rule_store=RuleStore(), cupti=_FakeCupti())
+    client = TestClient(app)
+    try:
+        data = client.post("/api/kernels/deep_profile").json()
+        assert data["available"] is True
+        assert data["pause_ms"] == 0    # 常驻采集,不暂停服务
+        k = data["kernels"][0]
+        assert k["kernel"] == "gemm_k" and k["grid"] == [512, 1, 1]
+        assert k["regs_per_thread"] == 255
+        # 无 GPU 环境 read_sm_limits() → None:原始配置透传,占用率/受限资源为 None
+        assert k["occupancy_theoretical_pct"] is None and k["limiter"] is None
+    finally:
+        sink.close()
+
+
+def test_deep_profile_unavailable_without_collector(empty_app):
+    client, _db, _sink = empty_app
+    data = client.post("/api/kernels/deep_profile").json()
+    assert data["available"] is False

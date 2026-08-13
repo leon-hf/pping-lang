@@ -877,6 +877,26 @@ def build_app(
             "findings": _stall_findings(last, lang) if last else [],
         }
 
+    # === Deep Profile(#1/#7):常驻 launch 配置 → 理论占用率/受限资源/wave 量化 ===
+    # 与深窗无关:数据来自 launch 回调常驻采集(随 PC Sampling 窗回流),不暂停服务。
+    # #2/#3 由 roofline_est 纯软件估算(family 级,arch × 形状反推 × PCS time_pct);
+    # #4 实测 L2/DRAM 与 row 级实测占用率/Tensor 仍是深窗指标 → 字段为 null,UI 显示 "—"。
+    @app.post("/api/kernels/deep_profile")
+    def deep_profile() -> dict[str, Any]:
+        from pping_lang.collector.deep_profile import build_deep_profile  # noqa: PLC0415
+        from pping_lang.hardware import (  # noqa: PLC0415
+            read_gpu_peak,
+            read_sm_clock_hz,
+            read_sm_limits,
+        )
+        if cupti is None:
+            return {"available": False, "error": "CUPTI collector not configured", "kernels": []}
+        return build_deep_profile(
+            cupti.last_stall_result(), read_sm_limits(),
+            arch=_arch, peak=read_gpu_peak(), sm_clock_hz=read_sm_clock_hz(),
+            calibration=_kernel_calib,
+        )
+
     # === GET /api/latency_trends — TTFT / TPOT / E2E bucketed p50+p99 over time ===
     # Same dual-path strategy as /api/kpis: ≤200s windows served from the live
     # ring buffer (per-metric ring holds ~2000 points; at typical req rates
@@ -951,6 +971,9 @@ def build_app(
     _arch = _extract_arch(vllm_config)
     _params = _estimate_params(_arch) if _arch else None
     _dtype_b = _DTYPE_BYTES.get(_arch["torch_dtype"], 2) if _arch else 2
+    # #4:ncu 离线标定表(decode M=1 口径的 L2/DRAM 实测)。没有文件 → None,面板显示 —
+    from pping_lang.collector.kernel_calibration import load_calibration  # noqa: PLC0415
+    _kernel_calib = load_calibration()
 
     # === GET /api/roofline — live Roofline scatter (points + peak roofs) ===
     # Two data sources, chosen at request time:

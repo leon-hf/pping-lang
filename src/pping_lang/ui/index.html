@@ -620,6 +620,27 @@
                 </span>
               </template>
             </div>
+            <!-- #5 comm 桶细分：单卡为空表,整段不显示 -->
+            <template x-if="deep.result.comm_subclass_shares && deep.result.comm_subclass_shares.length">
+              <div style="margin-top: 12px; padding: 10px 13px; background: var(--surface-alt); border-radius: 8px;">
+                <div style="margin-bottom: 7px;">
+                  <span style="font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em;" x-text="t('csub.title')"></span>
+                  <span style="font-size: 11px; color: var(--muted-2);" x-text="' · ' + t('csub.hint')"></span>
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 5px;">
+                  <template x-for="cs in deep.result.comm_subclass_shares" :key="cs.sub">
+                    <div style="display: flex; align-items: center; gap: 9px;">
+                      <div style="width: 116px; font-size: 11.5px; color: var(--text);" x-text="commSubLabel(cs.sub)"></div>
+                      <div style="flex: 1; background: #e9ebee; border-radius: 3px; height: 10px; overflow: hidden;">
+                        <div :style="`width:${Math.min(100, cs.pct_of_comm)}%;height:100%;background:${kernelColor('comm')}`"></div>
+                      </div>
+                      <div style="width: 52px; text-align: right; font-size: 11.5px; font-variant-numeric: tabular-nums; font-weight: 600;" x-text="fmt(cs.pct_of_comm, 1) + '%'"></div>
+                      <div style="width: 92px; text-align: right; font-size: 11px; color: var(--muted-2); font-variant-numeric: tabular-nums;" x-text="t('csub.ofTotal', {pct: fmt(cs.time_pct, 1)})"></div>
+                    </div>
+                  </template>
+                </div>
+              </div>
+            </template>
           </div>
           <!-- #1+#2+#3 诊断头条：GPU 在等多少 · 什么瓶颈 · 最大可回收点 -->
           <template x-if="issuedVerdict() && bottleneckVerdict()">
@@ -1046,7 +1067,16 @@
             <h3 x-text="t('kern.deepEvidence')"><span style="color: var(--muted-2); font-weight: 400; font-size: 12px;" x-text="t('kern.deepEvidenceSub')"></span></h3>
             <div style="margin-top: 4px; font-size: 11.5px; color: var(--muted-2);" x-text="t('kern.deepHint')"></div>
           </div>
-          <div>
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <!-- #6：把当前这次取证结果存成 改动前/改动后 快照,下方卡片出 diff -->
+            <template x-if="deep.result && deep.result.available">
+              <div style="display: flex; gap: 6px;">
+                <button class="btn" @click="saveKernelSnap('A')" :title="t('ksnap.saveA')"
+                        x-text="(kernelSnaps.A ? '✓ ' : '') + t('ksnap.slotA')"></button>
+                <button class="btn" @click="saveKernelSnap('B')" :title="t('ksnap.saveB')"
+                        x-text="(kernelSnaps.B ? '✓ ' : '') + t('ksnap.slotB')"></button>
+              </div>
+            </template>
             <button class="btn" :disabled="deep.running" @click="runDeepEvidence(5)">
               <span x-show="!deep.running" x-text="t('kern.collectEvidence')"></span>
               <span x-show="deep.running" x-text="t('kern.collecting')"></span>
@@ -1138,6 +1168,318 @@
           <div class="roofline-verdict empty" style="margin: 12px 0 0;" x-text="t('kern.noInitialData')"></div>
         </template>
       </div>
+
+      <!-- ===== 深度剖析(#1/#2/#3/#4/#7):该怎么改 ===== -->
+      <div class="chart-card" style="margin-top: 18px;">
+        <div class="head" style="display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;">
+          <div>
+            <h3><span x-text="t('dprof.title')"></span> <span style="color: var(--muted-2); font-weight: 400; font-size: 12px;" x-text="t('dprof.sub')"></span></h3>
+            <div style="margin-top: 4px; font-size: 11.5px; color: var(--muted-2);" x-text="t('dprof.hint')"></div>
+          </div>
+          <button class="btn" :disabled="deepProf.running" @click="runDeepProfile()">
+            <span x-show="!deepProf.running" x-text="t('dprof.collect')"></span>
+            <span x-show="deepProf.running" x-text="t('dprof.collecting')"></span>
+          </button>
+        </div>
+
+        <!-- 数据口径说明:哪些来自常驻采集(无暂停)、哪些要等深窗 —— 诚实标注 -->
+        <div style="margin-top: 12px; padding: 10px 13px; background: var(--surface-alt); border-left: 3px solid var(--indigo); border-radius: 8px; font-size: 11.5px; color: var(--text); line-height: 1.7;"
+             x-text="t('dprof.costWarn')"></div>
+
+        <template x-if="deepProf.error">
+          <div class="roofline-verdict empty" style="margin: 12px 0 0;" x-text="deepProf.error"></div>
+        </template>
+
+        <template x-if="!deepProf.result && !deepProf.error">
+          <div class="roofline-verdict empty" style="margin: 12px 0 0;" x-text="t('dprof.empty')"></div>
+        </template>
+
+        <template x-if="deepProf.result">
+          <div style="margin-top: 14px;">
+            <!-- 采集元信息:诚实报告这次花了多少代价 -->
+            <div style="font-size: 11.5px; color: var(--muted-2); margin-bottom: 12px;"
+                 x-text="t('dprof.meta', {time: new Date(deepProf.result.collected_at).toLocaleTimeString(), pause: deepProf.result.pause_ms, passes: deepProf.result.passes})"></div>
+
+            <!-- #2/#3 family 级 roofline 估算:纯软件推算(模型结构 × PCS 时间占比),不停服务 -->
+            <template x-if="deepProf.result.roofline_est && deepProf.result.roofline_est.available && deepProf.result.roofline_est.families.length">
+              <div style="margin: 0 0 14px; padding: 12px 14px; background: var(--surface-alt); border-radius: 10px;">
+                <div style="display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 6px;">
+                  <strong style="font-size: 12.5px; color: var(--text-strong);" x-text="t('dprof.estTitle')"></strong>
+                  <span style="font-size: 11px; color: var(--muted-2); font-variant-numeric: tabular-nums;"
+                        x-text="t('dprof.estWindow', {steps: deepProf.result.roofline_est.steps_per_s == null ? '—' : deepProf.result.roofline_est.steps_per_s, busy: deepProf.result.roofline_est.busy_pct == null ? '—' : deepProf.result.roofline_est.busy_pct})"></span>
+                </div>
+                <div style="overflow-x: auto; margin-top: 8px;">
+                  <table class="kernel-table">
+                    <thead>
+                      <tr>
+                        <th style="width: 34%;" x-text="t('dprof.estColFam')"></th>
+                        <th style="text-align: right;" x-text="t('dprof.estColTime')"></th>
+                        <th style="text-align: right;" x-text="t('dprof.estColAI')"></th>
+                        <th style="text-align: right;" x-text="t('dprof.estColAchieved')"></th>
+                        <th x-text="t('dprof.estColVerdict')"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <template x-for="(f, fi) in deepProf.result.roofline_est.families" :key="fi">
+                        <tr>
+                          <td style="font-size: 12px; color: var(--text);" x-text="dprofFamLabel(f.family)"></td>
+                          <td style="text-align: right; font-variant-numeric: tabular-nums;" x-text="fmt(f.time_pct, 1) + '%'"></td>
+                          <td style="text-align: right; font-variant-numeric: tabular-nums;">
+                            <span x-text="f.ai_flop_per_byte == null ? '—' : fmt(f.ai_flop_per_byte, 1)"></span>
+                            <span style="color: var(--muted-2); font-size: 10.5px;"
+                                  x-text="f.ridge_ai == null ? '' : ' · ' + t('dprof.estRidge', {r: fmt(f.ridge_ai, 0)})"></span>
+                          </td>
+                          <td style="text-align: right; font-variant-numeric: tabular-nums;" x-text="dprofAchievedStr(f)"></td>
+                          <td>
+                            <span class="kcls" :style="`background:${dprofVerdictColor(f)}1a;color:${dprofVerdictColor(f)}`" x-text="dprofVerdictLabel(f)"></span>
+                          </td>
+                        </tr>
+                      </template>
+                    </tbody>
+                  </table>
+                </div>
+                <!-- 任一家族未喂饱带宽时,给一句行动建议:加并发比改 kernel 划算 -->
+                <template x-if="deepProf.result.roofline_est.families.some(f => f.verdict === 'memory-latency-bound')">
+                  <div style="margin-top: 8px; font-size: 12px; color: var(--text);" x-text="'💡 ' + t('dprof.estLatencyAdvice')"></div>
+                </template>
+                <details style="margin-top: 8px; font-size: 11px; color: var(--muted-2);">
+                  <summary style="cursor: pointer;" x-text="t('dprof.estNotesTitle')"></summary>
+                  <template x-for="(n, ni) in deepProf.result.roofline_est.notes" :key="ni">
+                    <div style="margin-top: 3px;" x-text="'· ' + n"></div>
+                  </template>
+                </details>
+              </div>
+            </template>
+
+            <div style="font-size: 11px; color: var(--muted-2); margin-bottom: 8px;" x-text="t('dprof.expandHint')"></div>
+            <div style="overflow-x: auto;">
+              <table class="kernel-table">
+                <thead>
+                  <tr>
+                    <th style="width: 30%;" x-text="t('dprof.colKernel')"></th>
+                    <th style="width: 230px;" x-text="t('dprof.occupancy')"></th>
+                    <th x-text="t('dprof.limiter')"></th>
+                    <th style="text-align: right; width: 92px;" x-text="t('dprof.tensorCore')"></th>
+                    <th style="text-align: right; width: 84px;" x-text="t('dprof.l2hit')"></th>
+                    <th style="text-align: right; width: 96px;" x-text="t('dprof.dram')"></th>
+                    <th style="width: 26px;"></th>
+                  </tr>
+                </thead>
+                <template x-for="(k, i) in deepProf.result.kernels" :key="i">
+                  <tbody>
+                    <tr @click="dprofExpanded = (dprofExpanded === i ? null : i)" style="cursor: pointer;">
+                      <td>
+                        <div style="font-weight: 600; color: var(--text-strong); font-size: 12.5px;" x-text="kernelFriendly(k.kernel, k.cls)"></div>
+                        <code class="kname" style="font-size: 10.5px; color: var(--muted-2);" x-text="k.kernel" :title="k.kernel"></code>
+                      </td>
+                      <!-- 占用率:实测(实心)叠在理论(浅色)上,缺口一眼可见 —— 这是本面板的主角 -->
+                      <td>
+                        <div style="position: relative; background: #e9ebee; border-radius: 4px; height: 14px; overflow: hidden;">
+                          <div :style="`position:absolute;left:0;top:0;height:100%;width:${Math.min(100, k.occupancy_theoretical_pct || 0)}%;background:#c9cdd4`"></div>
+                          <div :style="`position:absolute;left:0;top:0;height:100%;width:${Math.min(100, k.occupancy_pct || 0)}%;background:var(--teal)`"></div>
+                        </div>
+                        <!-- 两行分开写,别让"理论上限"这种词组在窄列里折行折得乱七八糟 -->
+                        <div style="margin-top: 3px; font-size: 10.5px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap;">
+                          <strong style="color: var(--text);" x-text="k.occupancy_pct == null ? '—' : fmt(k.occupancy_pct, 0) + '%'"></strong>
+                          <span x-text="' ' + t('dprof.occAchieved') + ' / '"></span>
+                          <span style="color: var(--muted-2);" x-text="k.occupancy_theoretical_pct == null ? '—' : fmt(k.occupancy_theoretical_pct, 0) + '% ' + t('dprof.occTheoretical')"></span>
+                        </div>
+                        <!-- 只有确实被某个资源卡住时才报"还差多少" —— 未受限的 kernel 天然到不了
+                             100%,那不是问题,标红只会制造假警报 -->
+                        <template x-if="k.limiter && k.limiter !== 'none' && dprofOccGap(k) >= 10">
+                          <div style="font-size: 10.5px; color: var(--rose); font-variant-numeric: tabular-nums; white-space: nowrap;"
+                               x-text="t('dprof.occGap', {gap: fmt(dprofOccGap(k), 0)})"></div>
+                        </template>
+                      </td>
+                      <td>
+                        <span class="kcls" :style="`background:${dprofLimiterColor(k)}1a;color:${dprofLimiterColor(k)}`" x-text="dprofLimiterLabel(k)"></span>
+                      </td>
+                      <td :style="`text-align:right;font-variant-numeric:tabular-nums;color:${(k.cls==='gemm'||k.cls==='attention') && k.tensor_pct < 40 ? 'var(--rose)' : 'var(--text)'}`"
+                          x-text="k.tensor_pct == null ? '—' : fmt(k.tensor_pct, 0) + '%'"></td>
+                      <td style="text-align: right; font-variant-numeric: tabular-nums; color: var(--muted);"
+                          :title="k.metrics_source === 'calibrated' ? t('dprof.calibratedSrc') : t('dprof.l2Uncalibrated')"
+                          x-text="k.l2_hit_pct == null ? '—' : fmt(k.l2_hit_pct, 0) + '%' + (k.metrics_source === 'calibrated' ? '†' : '*')"></td>
+                      <td style="text-align: right; font-variant-numeric: tabular-nums; color: var(--muted);"
+                          :title="k.metrics_source === 'calibrated' ? t('dprof.calibratedSrc') : ''"
+                          x-text="k.dram_gbps == null ? '—' : fmt(k.dram_gbps, 0) + ' GB/s' + (k.metrics_source === 'calibrated' ? '†' : '')"></td>
+                      <td style="color: var(--muted-2);" x-text="dprofExpanded === i ? '▴' : '▾'"></td>
+                    </tr>
+                    <!-- 展开:启动配置 + wave 量化 + 可操作建议 -->
+                    <tr x-show="dprofExpanded === i">
+                      <td colspan="7" style="background: var(--surface-alt); padding: 12px 14px;">
+                        <div style="display: flex; flex-wrap: wrap; gap: 18px; font-size: 11.5px; color: var(--muted); margin-bottom: 9px;">
+                          <span><strong style="color: var(--text);" x-text="t('dprof.launchCfg') + ': '"></strong><code x-text="dprofGridStr(k)"></code></span>
+                          <span><code x-text="k.regs_per_thread + ' regs/thread'"></code></span>
+                          <span><code x-text="((k.smem_static||0)+(k.smem_dynamic||0)) + ' B smem'"></code></span>
+                        </div>
+                        <template x-if="k.wave_quant">
+                          <div style="font-size: 11.5px; color: var(--muted); margin-bottom: 9px;">
+                            <strong style="color: var(--text);" x-text="t('dprof.waveQuant') + ': '"></strong>
+                            <span x-text="t('dprof.waveDetail', {waves: k.wave_quant.waves, pct: fmt(k.wave_quant.last_wave_pct, 0)})"></span>
+                          </div>
+                        </template>
+                        <div style="display: flex; flex-direction: column; gap: 5px;">
+                          <template x-for="(a, ai) in dprofAdvice(k)" :key="ai">
+                            <div style="font-size: 12px; color: var(--text);" x-text="'💡 ' + a"></div>
+                          </template>
+                        </div>
+                      </td>
+                    </tr>
+                  </tbody>
+                </template>
+              </table>
+            </div>
+            <div style="margin-top: 10px; font-size: 11px; color: var(--muted-2);" x-text="'* ' + t('dprof.l2Uncalibrated') + ' · † ' + t('dprof.calibratedSrc')"></div>
+          </div>
+        </template>
+      </div>
+
+      <!-- ===== #6 改动前后对比(两个 Deep Evidence 快照的 diff,无需新采集)===== -->
+      <template x-if="kernelSnaps.A || kernelSnaps.B">
+        <div class="chart-card" style="margin-top: 18px;">
+          <div class="head" style="margin-bottom: 10px;">
+            <h3><span x-text="t('ksnap.title')"></span> <span style="color: var(--muted-2); font-weight: 400; font-size: 12px;" x-text="t('ksnap.hint')"></span></h3>
+          </div>
+
+          <!-- 两个槽位的状态 + 清除 -->
+          <div style="display: flex; gap: 18px; flex-wrap: wrap; margin-bottom: 12px; font-size: 12px;">
+            <template x-for="slot in ['A', 'B']" :key="slot">
+              <span style="display: inline-flex; align-items: center; gap: 7px;">
+                <strong :style="slot === 'A' ? 'color: var(--indigo)' : 'color: var(--teal)'"
+                        x-text="slot === 'A' ? t('ksnap.slotA') : t('ksnap.slotB')"></strong>
+                <template x-if="kernelSnaps[slot]">
+                  <span style="display: inline-flex; align-items: center; gap: 7px;">
+                    <span style="color: var(--muted);" x-text="t('ksnap.savedAt', {time: ksnapTime(slot)})"></span>
+                    <button class="btn" style="padding: 2px 8px; font-size: 11px;" @click="clearKernelSnap(slot)" x-text="t('ksnap.clear')"></button>
+                  </span>
+                </template>
+                <template x-if="!kernelSnaps[slot]">
+                  <span style="color: var(--muted-2);">—</span>
+                </template>
+              </span>
+            </template>
+          </div>
+
+          <!-- 只存了一个槽 -->
+          <template x-if="!ksnapReady()">
+            <div class="roofline-verdict empty" style="margin: 0;" x-text="t('ksnap.needBoth')"></div>
+          </template>
+
+          <template x-if="ksnapReady()">
+            <div>
+              <!-- 负载对照：绝对速率 Δ 的可信前提。漂移大时必须先说,免得把"负载变轻"读成"优化生效" -->
+              <template x-if="ksnapLoad()">
+                <div :style="'margin-bottom:16px;padding:11px 14px;border-radius:8px;font-size:11.5px;line-height:1.7;background:var(--surface-alt);'
+                       + (ksnapLoad().drift ? 'border-left:3px solid #b7791f;color:var(--text);' : 'color:var(--muted);')">
+                  <strong style="color: var(--text);" x-text="t('ksnap.loadContext')"></strong>
+                  <span x-show="!ksnapLoad().drift" x-text="t('ksnap.loadSame', {median: ksnapDelta(ksnapLoad().medianPct) + '%', total: ksnapDelta(ksnapLoad().totalPct) + '%'})"></span>
+                  <span x-show="ksnapLoad().drift" x-text="t('ksnap.loadDrift', {median: ksnapDelta(ksnapLoad().medianPct) + '%', total: ksnapDelta(ksnapLoad().totalPct) + '%'})"></span>
+                  <div x-show="ksnapLoad().periodMismatch" style="margin-top: 5px;"
+                       x-text="t('ksnap.periodMismatch', {a: ksnapLoad().periodA, b: ksnapLoad().periodB})"></div>
+                </div>
+              </template>
+
+              <!-- Warp 三态 + 全局 stall 构成的前后差 -->
+              <div style="font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 8px;" x-text="t('ksnap.warpDiff')"></div>
+              <div class="cmp-grid" style="margin-bottom: 18px;">
+                <template x-for="r in ksnapWarpRows()" :key="r.key">
+                  <div class="cmp-block">
+                    <div class="cmp-block-head">
+                      <span class="cmp-metric" x-text="r.label"></span>
+                      <span class="cmp-delta" :class="r.good === true ? 'good' : (r.good === false ? 'bad' : '')"
+                            x-text="ksnapDelta(r.delta) + ' pp'"></span>
+                    </div>
+                    <div class="cmp-bar-row">
+                      <span class="cmp-ab a" style="width: auto; min-width: 40px;" x-text="t('ksnap.slotA')"></span>
+                      <div class="cmp-track"><i class="a" :style="`width:${Math.min(100, r.a)}%`"></i></div>
+                      <b x-text="fmt(r.a, 1) + '%'"></b>
+                    </div>
+                    <div class="cmp-bar-row">
+                      <span class="cmp-ab b" style="width: auto; min-width: 40px;" x-text="t('ksnap.slotB')"></span>
+                      <div class="cmp-track"><i class="b" :style="`width:${Math.min(100, r.b)}%`"></i></div>
+                      <b x-text="fmt(r.b, 1) + '%'"></b>
+                    </div>
+                  </div>
+                </template>
+              </div>
+
+              <!-- 副标题必须是兄弟节点：x-text 会覆写 textContent,放子元素里会被清掉 -->
+              <div style="margin-bottom: 8px;">
+                <span style="font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em;" x-text="t('ksnap.stallDiff')"></span>
+                <span style="font-size: 12px; color: var(--muted-2);" x-text="' · ' + t('ksnap.stallDiffSub')"></span>
+              </div>
+              <div style="display: flex; flex-direction: column; gap: 7px; margin-bottom: 20px;">
+                <template x-for="s in ksnapStallRows()" :key="s.cls">
+                  <div style="display: flex; align-items: center; gap: 10px;">
+                    <div style="width: 160px; font-size: 12px; color: var(--muted);" x-text="stallLabel(s.cls)"></div>
+                    <div style="flex: 1; display: flex; flex-direction: column; gap: 2px;">
+                      <div style="background: #e9ebee; border-radius: 3px; height: 8px; overflow: hidden;">
+                        <div :style="`width:${Math.min(100, s.a)}%;height:100%;background:var(--indigo);opacity:0.7`"></div>
+                      </div>
+                      <div style="background: #e9ebee; border-radius: 3px; height: 8px; overflow: hidden;">
+                        <div :style="`width:${Math.min(100, s.b)}%;height:100%;background:var(--teal);opacity:0.85`"></div>
+                      </div>
+                    </div>
+                    <div style="width: 108px; text-align: right; font-size: 11.5px; font-variant-numeric: tabular-nums; color: var(--muted-2);"
+                         x-text="fmt(s.a, 1) + '% → ' + fmt(s.b, 1) + '%'"></div>
+                    <div :style="'width:62px;text-align:right;font-size:12px;font-variant-numeric:tabular-nums;font-weight:600;color:'
+                           + (s.good === true ? 'var(--teal)' : (s.good === false ? 'var(--rose)' : 'var(--muted-2)'))"
+                         x-text="ksnapDelta(s.delta) + ' pp'"></div>
+                  </div>
+                </template>
+              </div>
+
+              <!-- 逐 kernel diff -->
+              <div style="margin-bottom: 8px;">
+                <span style="font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em;" x-text="t('ksnap.kernelDiff')"></span>
+                <span style="font-size: 12px; color: var(--muted-2);" x-text="' · ' + t('ksnap.kernelDiffSub')"></span>
+              </div>
+              <div style="overflow-x: auto;">
+                <table class="kernel-table">
+                  <thead>
+                    <tr>
+                      <th style="width: 36%;">Kernel</th>
+                      <th x-text="t('kern.kernelClass')"></th>
+                      <th style="text-align: right; width: 130px;" :title="t('ksnap.colRateTip')" x-text="t('ksnap.colRate') + ' ⓘ'"></th>
+                      <th style="text-align: right; width: 168px;" :title="t('ksnap.colShareTip')" x-text="t('ksnap.colShare') + ' ⓘ'"></th>
+                      <th x-text="t('ksnap.colStall')"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <template x-for="r in ksnapRows()" :key="r.kernel">
+                      <tr>
+                        <td>
+                          <div style="font-weight: 600; color: var(--text-strong); font-size: 12.5px;">
+                            <span x-text="kernelFriendly(r.kernel, r.cls)"></span>
+                            <span x-show="r.status !== 'both'"
+                                  :style="'margin-left:6px;padding:1px 6px;border-radius:999px;font-size:10px;font-weight:600;color:#fff;background:'
+                                    + (r.status === 'new' ? 'var(--teal)' : 'var(--muted-2)')"
+                                  x-text="r.status === 'new' ? t('ksnap.new') : t('ksnap.gone')"></span>
+                          </div>
+                          <code class="kname" style="font-size: 10.5px; color: var(--muted-2);" x-text="r.kernel" :title="r.kernel"></code>
+                        </td>
+                        <td><span class="kcls" :style="`background:${kernelColor(r.cls)}1a;color:${kernelColor(r.cls)}`" x-text="kernelLabel(r.cls)"></span></td>
+                        <td :style="'text-align:right;font-variant-numeric:tabular-nums;font-weight:600;color:'
+                              + (r.good === true ? 'var(--teal)' : (r.good === false ? 'var(--rose)' : 'var(--muted-2)'))"
+                            x-text="r.ratePct == null ? '—' : ksnapDelta(r.ratePct) + '%'"></td>
+                        <td style="text-align: right; font-variant-numeric: tabular-nums; font-size: 11.5px; color: var(--muted);"
+                            x-text="(r.shareA == null ? '—' : fmt(r.shareA, 1) + '%') + ' → ' + (r.shareB == null ? '—' : fmt(r.shareB, 1) + '%')"></td>
+                        <td style="font-size: 11.5px;">
+                          <span :style="`color:${stallColor(r.stallA)}`" x-text="r.stallA ? stallLabel(r.stallA) : '—'"></span>
+                          <template x-if="r.stallChanged">
+                            <span><span style="color: var(--muted-2);"> → </span><strong :style="`color:${stallColor(r.stallB)}`" x-text="stallLabel(r.stallB)"></strong></span>
+                          </template>
+                        </td>
+                      </tr>
+                    </template>
+                  </tbody>
+                </table>
+              </div>
+              <div style="margin-top: 11px; font-size: 11px; color: var(--muted-2); line-height: 1.7;" x-text="t('ksnap.shareCaveat')"></div>
+            </div>
+          </template>
+        </div>
+      </template>
     </div>
 
     <!-- ===== 规则 tab ===== -->

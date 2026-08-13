@@ -72,8 +72,25 @@ struct State {
         int nframes = 0;
         unsigned long long count = 0;
     };
+    // #1 launch 配置(默认**开**,PPING_LANG_PCS_LAUNCH_CONFIG=0 关):CUfunction ->
+    // {launch 计数, 最近一次 launch 的 grid/block/动态 smem(latest), 首见查一次的函数属性}。
+    // 与栈采集共用 launch 回调与 launch_mu,但门控独立(launch_cb_active = 任一开启)。
+    bool launch_cfg = true;
+    struct LaunchCfgAgg {
+        unsigned long long count = 0;
+        unsigned long long reported = 0;  // 上次 drain 已报的 count(导出报 delta,窗语义)
+        // launch 参数(每次 launch 直读,记 latest;动态 smem 逐 launch 可能不同)
+        unsigned gx = 0, gy = 0, gz = 0, bx = 0, by = 0, bz = 0, dyn_smem = 0;
+        // 函数属性(首见查一次;-1 = 未取到)
+        int regs = -1, static_smem = -1, local = -1, max_thr = -1;
+        bool attr_done = false;
+    };
+    // launch 回调是否已 enable(start 或 pping_pcs_launch_cfg_start 置位;stop 清)。
+    // 与 g.running 解耦:launch 采集是纯 DRIVER_API 回调,不依赖 PCS 会话。
+    std::atomic<bool> launch_cb_active{false};
     std::mutex launch_mu;
-    std::unordered_map<void*, LaunchAgg> launches;  // key = CUfunction
+    std::unordered_map<void*, LaunchAgg> launches;      // key = CUfunction
+    std::unordered_map<void*, LaunchCfgAgg> launch_cfgs;  // key = CUfunction(常驻,不 swap)
     // 串行化所有 PC sampling API 调用(GetData)与 module load/unload —— vLLM 推理中持续 JIT
     // triton kernel,cuModuleLoad/Unload 改 CUPTI 内部函数表,与 worker 的 GetData 并发会
     // use-after-free 崩(§11)。worker GetData 与 module load/unload 的 driver 回调都持此锁,
@@ -286,20 +303,86 @@ static inline bool is_graph_launch_cbid(CUpti_CallbackId cbid) {
            cbid == (CUpti_CallbackId)CUPTI_DRIVER_TRACE_CBID_cuGraphLaunch_ptsz;
 }
 
-// 从 launch 参数取 CUfunction(只读首字段,driver API 参数 ABI 稳定)。
-//   cuLaunchKernel:   { CUfunction f; ... }              —— f 是首字段
-//   cuLaunchKernelEx: { const CUlaunchConfig* config; CUfunction f; ... } —— f 在 config 之后
-static inline CUfunction launch_func(CUpti_CallbackId cbid, const void* fp) {
-    if (!fp) return nullptr;
-    if (cbid == (CUpti_CallbackId)CUPTI_DRIVER_TRACE_CBID_cuLaunchKernel)
-        return *(CUfunction*)fp;
+// 从 launch 参数直读 CUfunction + grid/block/动态 smem(纯内存读,driver API 参数 ABI
+// 稳定;探针 probe_launch_hook.cu 在 runw 实测精确命中,见设计文档 launch-hook 一节)。
+//   cuLaunchKernel:   { CUfunction f; gx,gy,gz,bx,by,bz; smem; stream; params; extra }
+//                     —— f 是首字段,grid/block/smem 是跟在其后的标量参数
+//   cuLaunchKernelEx: { const CUlaunchConfig* config; CUfunction f; ... }
+//                     —— f 在 config 之后,grid/block/smem 在 CUlaunchConfig 里
+// _ptsz(per-thread stream)变体参数布局与原版相同,一并解析。返回 false = 不认识/无参数。
+struct LaunchArgsView {  // cuLaunchKernel 参数包的只读视图(与 ABI 对齐)
+    CUfunction f;
+    unsigned gx, gy, gz, bx, by, bz;
+    unsigned smem;
+    CUstream stream;
+    void** params;
+    void** extra;
+};
+static inline bool parse_launch(CUpti_CallbackId cbid, const void* fp, CUfunction* f,
+                                unsigned* gx, unsigned* gy, unsigned* gz,
+                                unsigned* bx, unsigned* by, unsigned* bz, unsigned* smem) {
+    if (!fp) return false;
+    if (cbid == (CUpti_CallbackId)CUPTI_DRIVER_TRACE_CBID_cuLaunchKernel ||
+        cbid == (CUpti_CallbackId)CUPTI_DRIVER_TRACE_CBID_cuLaunchKernel_ptsz) {
+        const LaunchArgsView* p = (const LaunchArgsView*)fp;
+        *f = p->f;
+        *gx = p->gx; *gy = p->gy; *gz = p->gz;
+        *bx = p->bx; *by = p->by; *bz = p->bz;
+        *smem = p->smem;
+        return *f != nullptr;
+    }
 #ifdef CUPTI_DRIVER_TRACE_CBID_cuLaunchKernelEx
-    if (cbid == (CUpti_CallbackId)CUPTI_DRIVER_TRACE_CBID_cuLaunchKernelEx) {
+    if (cbid == (CUpti_CallbackId)CUPTI_DRIVER_TRACE_CBID_cuLaunchKernelEx ||
+        cbid == (CUpti_CallbackId)CUPTI_DRIVER_TRACE_CBID_cuLaunchKernelEx_ptsz) {
         struct ExHdr { const void* config; CUfunction f; };
-        return ((const ExHdr*)fp)->f;
+        const ExHdr* h = (const ExHdr*)fp;
+        *f = h->f;
+        if (!*f) return false;
+        const CUlaunchConfig* c = (const CUlaunchConfig*)h->config;
+        if (c) {
+            *gx = c->gridDimX; *gy = c->gridDimY; *gz = c->gridDimZ;
+            *bx = c->blockDimX; *by = c->blockDimY; *bz = c->blockDimZ;
+            *smem = c->sharedMemBytes;
+        } else {
+            *gx = *gy = *gz = *bx = *by = *bz = *smem = 0;
+        }
+        return true;
     }
 #endif
-    return nullptr;
+    return false;
+}
+
+// 首见某 kernel 时查一次函数属性(#1)。CUDA 12+ runtime 的 launch 句柄是 CUkernel 不是
+// CUfunction(探针实测 cuFuncGetAttribute 返 rc=400 INVALID_HANDLE)→ 先试
+// cuFuncGetAttribute,失败整体回退 cuKernelGetAttribute(dev 用 cuCtxGetDevice 取;
+// driver API 直发的 kernel 可能还是真 CUfunction,两条路都要)。回调内做这套查询已实测
+// 不死锁(~3.3µs/launch 含 kernel 执行,可忽略)。两路都失败:attr_done 保持 false,
+// 下次 launch 重试(模块加载中的瞬时态)。
+static void query_launch_attrs(CUfunction f, State::LaunchCfgAgg& c) {
+    int v;
+    if (cuFuncGetAttribute(&v, CU_FUNC_ATTRIBUTE_NUM_REGS, f) == CUDA_SUCCESS) {
+        c.regs = v;
+        if (cuFuncGetAttribute(&v, CU_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES, f) == CUDA_SUCCESS)
+            c.static_smem = v;
+        if (cuFuncGetAttribute(&v, CU_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES, f) == CUDA_SUCCESS)
+            c.local = v;
+        if (cuFuncGetAttribute(&v, CU_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK, f) == CUDA_SUCCESS)
+            c.max_thr = v;
+        c.attr_done = true;
+        return;
+    }
+    CUdevice dev = 0;
+    if (cuCtxGetDevice(&dev) != CUDA_SUCCESS) return;
+    if (cuKernelGetAttribute(&v, CU_FUNC_ATTRIBUTE_NUM_REGS, (CUkernel)f, dev) == CUDA_SUCCESS) {
+        c.regs = v;
+        if (cuKernelGetAttribute(&v, CU_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES, (CUkernel)f, dev) == CUDA_SUCCESS)
+            c.static_smem = v;
+        if (cuKernelGetAttribute(&v, CU_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES, (CUkernel)f, dev) == CUDA_SUCCESS)
+            c.local = v;
+        if (cuKernelGetAttribute(&v, CU_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK, (CUkernel)f, dev) == CUDA_SUCCESS)
+            c.max_thr = v;
+        c.attr_done = true;
+    }
 }
 
 // DRIVER_API 回调:module/library load/unload 的 ENTER 锁住 api_mu(直到 EXIT 解锁),
@@ -308,23 +391,38 @@ static inline CUfunction launch_func(CUpti_CallbackId cbid, const void* fp) {
 static void CUPTIAPI _cupti_cb(void*, CUpti_CallbackDomain domain,
                                CUpti_CallbackId cbid, const void* cbdata) {
     if (domain != CUPTI_CB_DOMAIN_DRIVER_API) return;
-    if (!g.running.load()) return;
     const CUpti_CallbackData* cb = (const CUpti_CallbackData*)cbdata;
-    // P3 launch 栈:launch 回调单独轻量处理,**绝不碰 api_mu**(否则每次 launch 与 PC drain
-    // 串行);首见某 CUfunction 抓一次 backtrace(同款 kernel 启动路径稳定),之后只 count++。
-    if (g.launch_stack && is_launch_cbid(cbid)) {
-        if (cb->callbackSite == CUPTI_API_ENTER) {
-            CUfunction f = launch_func(cbid, cb->functionParams);
-            if (f) {
+    // #1 launch 配置 + P3 launch 栈:launch 回调单独轻量处理,**绝不碰 api_mu**(否则每次
+    // launch 与 PC drain 串行,开销爆)。门控 launch_cb_active(配置采集默认开 / 栈默认关,
+    // 任一开启即装回调;可经 pping_pcs_launch_cfg_start 独立于 PCS 开启)。
+    // 回调里只做:读参数(纯内存)+ find/更新聚合 + 首见查一次属性 / 抓一次栈。
+    // cudagraph 语义:稳态图回放走 cuGraphLaunch,**不触发** per-kernel launch 回调;但图
+    // capture 期间会真实调 launch API,故 grid/block 拿到的是 capture 时的真实配置(稳态
+    // 回放即按此执行),首见属性同样来自 capture 期 —— 对稳态负载语义正确。
+    if (is_launch_cbid(cbid)) {
+        if (g.launch_cb_active.load() && cb->callbackSite == CUPTI_API_ENTER) {
+            CUfunction f; unsigned gx, gy, gz, bx, by, bz, smem;
+            if (parse_launch(cbid, cb->functionParams, &f, &gx, &gy, &gz, &bx, &by, &bz, &smem)) {
                 std::lock_guard<std::mutex> lk(g.launch_mu);
-                State::LaunchAgg& a = g.launches[(void*)f];
-                if (a.nframes == 0)  // backtrace allocation-free,只首见调一次
-                    a.nframes = backtrace(a.frames, State::kMaxFrames);
-                a.count++;
+                if (g.launch_cfg) {
+                    State::LaunchCfgAgg& c = g.launch_cfgs[(void*)f];
+                    c.count++;
+                    c.gx = gx; c.gy = gy; c.gz = gz;   // latest(每次 launch 可能不同)
+                    c.bx = bx; c.by = by; c.bz = bz;
+                    c.dyn_smem = smem;
+                    if (!c.attr_done) query_launch_attrs(f, c);  // 首见查一次
+                }
+                if (g.launch_stack) {
+                    State::LaunchAgg& a = g.launches[(void*)f];
+                    if (a.nframes == 0)  // backtrace allocation-free,只首见调一次
+                        a.nframes = backtrace(a.frames, State::kMaxFrames);
+                    a.count++;
+                }
             }
         }
         return;
     }
+    if (!g.running.load()) return;
     // ★ cudagraph 回放串行化:图启动期间持 api_mu(挡住 worker 的 GetData),防驱动级死锁。
     // 只锁不刷新冷却(图启动高频,刷了 GetData 永远饿死)。见 kGraphLaunchCbids 注释。
     if (is_graph_launch_cbid(cbid)) {
@@ -394,6 +492,36 @@ int pping_pcs_available(void) {
     return 1;
 }
 
+// 只开 launch 采集(配置 #1 + 可选栈),**不起 PC Sampling**。launch 采集是纯 DRIVER_API
+// 回调,与 PCS 会话互不依赖 —— PCS 被别的进程/容器独占时也能用(真机验证、轻量场景)。
+// 幂等;之后 pping_pcs_start 会重复 enable(幂等)。返回 0 成功。
+int pping_pcs_launch_cfg_start(void) {
+    if (g.launch_cb_active.load()) return 0;
+    // 门控同 pping_pcs_start:配置默认开(PPING_LANG_PCS_LAUNCH_CONFIG=0 关),
+    // 栈默认关(PPING_LANG_PCS_LAUNCH_STACK=1 开)
+    g.launch_cfg = true;
+    if (const char* e = std::getenv("PPING_LANG_PCS_LAUNCH_CONFIG"))
+        g.launch_cfg = !(*e && *e == '0');
+    if (const char* e = std::getenv("PPING_LANG_PCS_LAUNCH_STACK"))
+        g.launch_stack = (*e && *e != '0');
+    if (!g.launch_cfg && !g.launch_stack) return 0;
+    if (g_sub == nullptr) {
+        CUptiResult sr = cuptiSubscribe(&g_sub, (CUpti_CallbackFunc)_cupti_cb, nullptr);
+        if (sr != CUPTI_SUCCESS) {
+            g_sub = nullptr;
+            set_err("subscribe", sr);
+            return -1;
+        }
+    }
+    for (CUpti_driver_api_trace_cbid_enum lc : kLaunchCbids)
+        cuptiEnableCallback(1, g_sub, CUPTI_CB_DOMAIN_DRIVER_API, lc);
+    g.launch_cb_active.store(true);
+    if (dbg()) std::fprintf(stderr, "[ppingcupti] 仅 launch 采集已开启(无 PCS;配置=%d 栈=%d)\n",
+                            (int)g.launch_cfg, (int)g.launch_stack);
+    g_err[0] = 0;
+    return 0;
+}
+
 int pping_pcs_start(int period_log2) {
     if (g.running.load()) { set_err_str("already running"); return -1; }
     CUcontext ctx = nullptr;
@@ -409,6 +537,11 @@ int pping_pcs_start(int period_log2) {
     // P3 launch 栈(MVP):默认关,避免每次 launch 多付一次回调。
     if (const char* e = std::getenv("PPING_LANG_PCS_LAUNCH_STACK"))
         g.launch_stack = (*e && *e != '0');
+    // #1 launch 配置采集:默认**开**(每 launch 只多一次 hash 写 + 纳秒级内存读,探针实测
+    // 增量可忽略);PPING_LANG_PCS_LAUNCH_CONFIG=0 显式关。
+    g.launch_cfg = true;
+    if (const char* e = std::getenv("PPING_LANG_PCS_LAUNCH_CONFIG"))
+        g.launch_cfg = !(*e && *e == '0');
 
     // 订阅 + 开 module/library load/unload 的 DRIVER_API 回调(§11:vLLM 推理持续 JIT,
     // 整个 load/unload 调用要与 GetData 串行防崩)。**唯一槽**:CUDA 13 只允许一个 CUPTI
@@ -444,10 +577,12 @@ int pping_pcs_start(int period_log2) {
             if (dbg()) std::fprintf(stderr, "[ppingcupti] graph-launch 串行化已开启(排查用)\n");
         }
         if (dbg()) std::fprintf(stderr, "[ppingcupti] module DRIVER_API 回调已开启\n");
-        if (g.launch_stack) {
+        if (g.launch_stack || g.launch_cfg) {
             for (CUpti_driver_api_trace_cbid_enum lc : kLaunchCbids)
                 cuptiEnableCallback(1, g_sub, CUPTI_CB_DOMAIN_DRIVER_API, lc);
-            if (dbg()) std::fprintf(stderr, "[ppingcupti] launch DRIVER_API 回调已开启(MVP 启动栈)\n");
+            g.launch_cb_active.store(true);
+            if (dbg()) std::fprintf(stderr, "[ppingcupti] launch DRIVER_API 回调已开启"
+                                    "(配置采集=%d 栈=%d)\n", (int)g.launch_cfg, (int)g.launch_stack);
         }
     } else if (dbg()) {
         std::fprintf(stderr, "[ppingcupti] 警告:g_sub 为空,module 回调未开启 —— 持续采样不安全\n");
@@ -561,30 +696,42 @@ int pping_pcs_stop(void) {
                      "getdata_ms=%.1f、dropped=%llu、hwfull=%llu\n",
                      g.module_cbs.load(), g.skipped_drains.load(),
                      g.getdata_ms.load(), g.dropped.load(), g.hwfull.load());
+    // 分段打点:stop 带载会死锁(见 engine_pcs.py 注释),但"卡在哪一步"此前无人定位过。
+    // 宿主/容器都没有 gdb,靠这些打点即可判断:最后印出的阶段就是卡住的那一步。
+#define PCS_STOP_STAGE(s) do { if (dbg()) std::fprintf(stderr, "[ppingcupti] stop-stage: %s\n", (s)); } while (0)
+    PCS_STOP_STAGE("1-join-worker-begin");
     g.stop_flag.store(true);
     if (g.worker.joinable()) g.worker.join();
+    PCS_STOP_STAGE("2-join-worker-done");
     // 关 module 回调 + 标记停止(回调据此 no-op),避免收尾期间还有 module 事件进来
     if (g_sub != nullptr) {
         for (CUpti_driver_api_trace_cbid_enum mc : kModuleCbids)
             cuptiEnableCallback(0, g_sub, CUPTI_CB_DOMAIN_DRIVER_API, mc);
         for (CUpti_driver_api_trace_cbid_enum gc : kGraphLaunchCbids)
             cuptiEnableCallback(0, g_sub, CUPTI_CB_DOMAIN_DRIVER_API, gc);
-        if (g.launch_stack)
+        if (g.launch_cb_active.load()) {
             for (CUpti_driver_api_trace_cbid_enum lc : kLaunchCbids)
                 cuptiEnableCallback(0, g_sub, CUPTI_CB_DOMAIN_DRIVER_API, lc);
+            g.launch_cb_active.store(false);
+        }
     }
+    PCS_STOP_STAGE("3-callbacks-disabled");
     g.running.store(false);
     CUptiResult r;
     {
         CUpti_PCSamplingStopParams p;
         std::memset(&p, 0, sizeof p);
         p.size = CUpti_PCSamplingStopParamsSize; p.ctx = g.ctx;
+        PCS_STOP_STAGE("4-cuptiPCSamplingStop-begin");
         r = cuptiPCSamplingStop(&p);
+        PCS_STOP_STAGE("5-cuptiPCSamplingStop-done");
         if (r != CUPTI_SUCCESS) set_err("stop", r);
     }
     // stop 后再 drain 残留进 live(api_mu 保护;worker 已停、回调已关)
     {
+        PCS_STOP_STAGE("6-final-drain-lock-begin");
         std::lock_guard<std::recursive_mutex> lk(g.api_mu);
+        PCS_STOP_STAGE("7-final-drain-lock-acquired");
         for (int k = 0; k < 64; ++k) {
             size_t n = drain_sd_apilocked();
             if (n == 0 && g.sd.remainingNumPcs == 0) break;
@@ -598,6 +745,8 @@ int pping_pcs_stop(void) {
     }
     free_sd();
     g.running.store(false);
+    PCS_STOP_STAGE("8-all-done");
+#undef PCS_STOP_STAGE
     return 0;
 }
 
@@ -692,6 +841,44 @@ int pping_pcs_drain_launches(PpingLaunchRow* out, int max_rows) {
         }
         std::strncpy(row.stack, s.c_str(), sizeof(row.stack) - 1);
         row.stack[sizeof(row.stack) - 1] = 0;
+        n++;
+    }
+    return n;
+}
+
+int pping_pcs_drain_launch_cfg(PpingLaunchCfgRow* out, int max_rows) {
+    if (out == nullptr || max_rows <= 0) return 0;
+    // 名字在导出时解析(调用方是 worker/getter 线程,不在回调里,安全):
+    // cuFuncGetName(cu12.3+)→ cuKernelGetName(CUDA 12+ runtime 的 launch 句柄是 CUkernel,
+    // 探针实测 cuFuncGetAttribute 对它 rc=400,名字查询同理要备 CUkernel 路径)→ func_<ptr>。
+    typedef CUresult (*FnGetName)(const char**, CUfunction);
+    static FnGetName p_getname = (FnGetName)dlsym(RTLD_DEFAULT, "cuFuncGetName");
+    typedef CUresult (*FnKGetName)(const char**, CUkernel);
+    static FnKGetName p_kgetname = (FnKGetName)dlsym(RTLD_DEFAULT, "cuKernelGetName");
+    std::lock_guard<std::mutex> lk(g.launch_mu);  // 与 launch 回调互斥(窗口级调用,名解析在锁内无碍)
+    int n = 0;
+    for (auto& kv : g.launch_cfgs) {
+        if (n >= max_rows) break;
+        CUfunction f = (CUfunction)kv.first;
+        State::LaunchCfgAgg& c = kv.second;
+        PpingLaunchCfgRow& row = out[n];
+        row.launches = c.count - c.reported;  // 本批 delta(窗语义)
+        c.reported = c.count;
+        row.grid_x = c.gx; row.grid_y = c.gy; row.grid_z = c.gz;
+        row.block_x = c.bx; row.block_y = c.by; row.block_z = c.bz;
+        row.dyn_smem = c.dyn_smem;
+        row.regs = c.regs; row.static_smem = c.static_smem;
+        row.local_mem = c.local; row.max_threads_per_block = c.max_thr;
+        const char* knm = nullptr;
+        if (p_getname && p_getname(&knm, f) == CUDA_SUCCESS && knm) {
+            std::strncpy(row.kernel, knm, PPING_KERNEL_NAME_LEN - 1);
+            row.kernel[PPING_KERNEL_NAME_LEN - 1] = 0;
+        } else if (p_kgetname && p_kgetname(&knm, (CUkernel)f) == CUDA_SUCCESS && knm) {
+            std::strncpy(row.kernel, knm, PPING_KERNEL_NAME_LEN - 1);
+            row.kernel[PPING_KERNEL_NAME_LEN - 1] = 0;
+        } else {
+            std::snprintf(row.kernel, PPING_KERNEL_NAME_LEN, "func_%p", (void*)f);
+        }
         n++;
     }
     return n;
