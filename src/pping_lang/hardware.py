@@ -172,6 +172,22 @@ class SMLimits:
     max_blocks_per_sm: int     # 每 SM 最大常驻 block 数
 
 
+def read_sm_clock_hz(device: int = 0) -> float | None:
+    """现读 SM 峰值时钟(Hz)。busy 窗估算(PCS 样本率反推 SM 活跃占比)用。
+    失败(无 cudart / 读到 0)→ None,调用方降级(busy 窗给 None)。"""
+    try:
+        import ctypes
+        cudart = _load_cudart()
+        v = ctypes.c_int()
+        rc = cudart.cudaDeviceGetAttribute(
+            ctypes.byref(v), ctypes.c_int(_CU_ATTR_CLOCK_RATE), ctypes.c_int(device))
+        if rc != 0 or v.value <= 0:
+            return None
+        return float(v.value) * 1e3   # kHz → Hz
+    except Exception:
+        return None
+
+
 def read_sm_limits(device: int = 0) -> SMLimits | None:
     """现读每 SM 资源上限。不需要 CUDA context(同 read_gpu_peak 的机制)。
 

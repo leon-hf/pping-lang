@@ -1198,6 +1198,57 @@
             <div style="font-size: 11.5px; color: var(--muted-2); margin-bottom: 12px;"
                  x-text="t('dprof.meta', {time: new Date(deepProf.result.collected_at).toLocaleTimeString(), pause: deepProf.result.pause_ms, passes: deepProf.result.passes})"></div>
 
+            <!-- #2/#3 family 级 roofline 估算:纯软件推算(模型结构 × PCS 时间占比),不停服务 -->
+            <template x-if="deepProf.result.roofline_est && deepProf.result.roofline_est.available && deepProf.result.roofline_est.families.length">
+              <div style="margin: 0 0 14px; padding: 12px 14px; background: var(--surface-alt); border-radius: 10px;">
+                <div style="display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 6px;">
+                  <strong style="font-size: 12.5px; color: var(--text-strong);" x-text="t('dprof.estTitle')"></strong>
+                  <span style="font-size: 11px; color: var(--muted-2); font-variant-numeric: tabular-nums;"
+                        x-text="t('dprof.estWindow', {steps: deepProf.result.roofline_est.steps_per_s == null ? '—' : deepProf.result.roofline_est.steps_per_s, busy: deepProf.result.roofline_est.busy_pct == null ? '—' : deepProf.result.roofline_est.busy_pct})"></span>
+                </div>
+                <div style="overflow-x: auto; margin-top: 8px;">
+                  <table class="kernel-table">
+                    <thead>
+                      <tr>
+                        <th style="width: 34%;" x-text="t('dprof.estColFam')"></th>
+                        <th style="text-align: right;" x-text="t('dprof.estColTime')"></th>
+                        <th style="text-align: right;" x-text="t('dprof.estColAI')"></th>
+                        <th style="text-align: right;" x-text="t('dprof.estColAchieved')"></th>
+                        <th x-text="t('dprof.estColVerdict')"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <template x-for="(f, fi) in deepProf.result.roofline_est.families" :key="fi">
+                        <tr>
+                          <td style="font-size: 12px; color: var(--text);" x-text="dprofFamLabel(f.family)"></td>
+                          <td style="text-align: right; font-variant-numeric: tabular-nums;" x-text="fmt(f.time_pct, 1) + '%'"></td>
+                          <td style="text-align: right; font-variant-numeric: tabular-nums;">
+                            <span x-text="f.ai_flop_per_byte == null ? '—' : fmt(f.ai_flop_per_byte, 1)"></span>
+                            <span style="color: var(--muted-2); font-size: 10.5px;"
+                                  x-text="f.ridge_ai == null ? '' : ' · ' + t('dprof.estRidge', {r: fmt(f.ridge_ai, 0)})"></span>
+                          </td>
+                          <td style="text-align: right; font-variant-numeric: tabular-nums;" x-text="dprofAchievedStr(f)"></td>
+                          <td>
+                            <span class="kcls" :style="`background:${dprofVerdictColor(f)}1a;color:${dprofVerdictColor(f)}`" x-text="dprofVerdictLabel(f)"></span>
+                          </td>
+                        </tr>
+                      </template>
+                    </tbody>
+                  </table>
+                </div>
+                <!-- 任一家族未喂饱带宽时,给一句行动建议:加并发比改 kernel 划算 -->
+                <template x-if="deepProf.result.roofline_est.families.some(f => f.verdict === 'memory-latency-bound')">
+                  <div style="margin-top: 8px; font-size: 12px; color: var(--text);" x-text="'💡 ' + t('dprof.estLatencyAdvice')"></div>
+                </template>
+                <details style="margin-top: 8px; font-size: 11px; color: var(--muted-2);">
+                  <summary style="cursor: pointer;" x-text="t('dprof.estNotesTitle')"></summary>
+                  <template x-for="(n, ni) in deepProf.result.roofline_est.notes" :key="ni">
+                    <div style="margin-top: 3px;" x-text="'· ' + n"></div>
+                  </template>
+                </details>
+              </div>
+            </template>
+
             <div style="font-size: 11px; color: var(--muted-2); margin-bottom: 8px;" x-text="t('dprof.expandHint')"></div>
             <div style="overflow-x: auto;">
               <table class="kernel-table">
@@ -1244,10 +1295,11 @@
                       <td :style="`text-align:right;font-variant-numeric:tabular-nums;color:${(k.cls==='gemm'||k.cls==='attention') && k.tensor_pct < 40 ? 'var(--rose)' : 'var(--text)'}`"
                           x-text="k.tensor_pct == null ? '—' : fmt(k.tensor_pct, 0) + '%'"></td>
                       <td style="text-align: right; font-variant-numeric: tabular-nums; color: var(--muted);"
-                          :title="t('dprof.l2Uncalibrated')"
-                          x-text="k.l2_hit_pct == null ? '—' : fmt(k.l2_hit_pct, 0) + '%*'"></td>
+                          :title="k.metrics_source === 'calibrated' ? t('dprof.calibratedSrc') : t('dprof.l2Uncalibrated')"
+                          x-text="k.l2_hit_pct == null ? '—' : fmt(k.l2_hit_pct, 0) + '%' + (k.metrics_source === 'calibrated' ? '†' : '*')"></td>
                       <td style="text-align: right; font-variant-numeric: tabular-nums; color: var(--muted);"
-                          x-text="k.dram_gbps == null ? '—' : fmt(k.dram_gbps, 0) + ' GB/s'"></td>
+                          :title="k.metrics_source === 'calibrated' ? t('dprof.calibratedSrc') : ''"
+                          x-text="k.dram_gbps == null ? '—' : fmt(k.dram_gbps, 0) + ' GB/s' + (k.metrics_source === 'calibrated' ? '†' : '')"></td>
                       <td style="color: var(--muted-2);" x-text="dprofExpanded === i ? '▴' : '▾'"></td>
                     </tr>
                     <!-- 展开:启动配置 + wave 量化 + 可操作建议 -->
@@ -1275,7 +1327,7 @@
                 </template>
               </table>
             </div>
-            <div style="margin-top: 10px; font-size: 11px; color: var(--muted-2);" x-text="'* ' + t('dprof.l2Uncalibrated')"></div>
+            <div style="margin-top: 10px; font-size: 11px; color: var(--muted-2);" x-text="'* ' + t('dprof.l2Uncalibrated') + ' · † ' + t('dprof.calibratedSrc')"></div>
           </div>
         </template>
       </div>

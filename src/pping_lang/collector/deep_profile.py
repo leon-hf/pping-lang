@@ -4,8 +4,10 @@
 → API 进程读最近一窗 → 本模块按设备 SM 资源上限(现读,见 hardware.read_sm_limits)
 算出**理论占用率 / 受限资源 / wave 量化**。全程不停服务、不需要深窗。
 
-实测占用率 / Tensor Core / L2 / DRAM(#2/#3/#4)属于 Profiling API 深窗指标,
-本模块一律给 None(UI 显示 "—"),深窗开放后再填。
+#2/#3(roofline 定位 / achieved TFLOPS·GB/s)走 roofline_est 的**纯软件估算**
+(family 级,模型 arch × 形状反推 × PCS time_pct),随本模块一起输出;
+#4 的实测 L2/DRAM 与 row 级 occupancy/tensor 实测仍是深窗指标,一律给 None
+(UI 显示 "—")。
 
 占用率估算口径(标准 roofline-of-occupancy 近似,不考虑 warp 分配粒度,
 误差几个百分点,面板文案已标注"估算"):
@@ -18,7 +20,9 @@ import math
 import time
 from typing import Any
 
-from pping_lang.hardware import SMLimits
+from pping_lang.collector.kernel_calibration import lookup as calib_lookup
+from pping_lang.collector.roofline_est import estimate_families
+from pping_lang.hardware import GPUPeak, SMLimits
 
 _WARP = 32
 
@@ -39,21 +43,29 @@ def _blocks_per_sm(lim: SMLimits, block_threads: int, regs: int, smem_bytes: int
     return {"threads": by_threads, "registers": by_regs, "smem": by_smem, "hw": by_hw}
 
 
-def _row(kernel: str, cls: str, cfg: dict[str, Any] | None, lim: SMLimits | None) -> dict[str, Any]:
+def _row(kernel: str, cls: str, cfg: dict[str, Any] | None, lim: SMLimits | None,
+         calibration: dict[str, Any] | None = None) -> dict[str, Any]:
     row: dict[str, Any] = {
         "kernel": kernel,
         "cls": cls,
-        # 深窗指标(未开放)→ None,UI 显示 "—"
+        # 深窗指标(未开放)→ None,UI 显示 "—";有 ncu 离线标定表则填标定值(#4)
         "occupancy_pct": None,
         "tensor_pct": None,
         "l2_hit_pct": None,
         "dram_gbps": None,
+        "metrics_source": None,
         "grid": None, "block": None,
         "regs_per_thread": None, "smem_static": None, "smem_dynamic": None,
         "occupancy_theoretical_pct": None,
         "limiter": None,
         "wave_quant": None,
     }
+    # #4:ncu 离线标定查表(按 mangled 名精确 join;标定的是 decode M=1 口径)
+    calib = calib_lookup(calibration, kernel)
+    if calib:
+        row["l2_hit_pct"] = calib.get("l2_hit_pct")
+        row["dram_gbps"] = calib.get("dram_gbps")
+        row["metrics_source"] = "calibrated"
     if not cfg:
         return row
     grid = cfg.get("grid") or [0, 0, 0]
@@ -104,20 +116,32 @@ def _row(kernel: str, cls: str, cfg: dict[str, Any] | None, lim: SMLimits | None
 
 
 def build_deep_profile(last_result: dict[str, Any] | None,
-                       sm_limits: SMLimits | None) -> dict[str, Any]:
+                       sm_limits: SMLimits | None,
+                       arch: dict[str, Any] | None = None,
+                       peak: GPUPeak | None = None,
+                       sm_clock_hz: float | None = None,
+                       calibration: dict[str, Any] | None = None) -> dict[str, Any]:
     """由最近一窗 Deep Evidence 结果组装 deep profile 响应。fail-closed:无数据 → available=False。"""
     if not last_result or not last_result.get("available"):
         return {"available": False,
                 "error": "还没有采样窗数据(等首个 PC Sampling 窗口写入)", "kernels": []}
     table = last_result.get("kernel_table") or []
     kernels = [
-        _row(r.get("kernel", ""), r.get("cls", ""), r.get("launch_cfg"), sm_limits)
+        _row(r.get("kernel", ""), r.get("cls", ""), r.get("launch_cfg"), sm_limits,
+             calibration=calibration)
         for r in table
     ]
+    # #2/#3 family 级 roofline 估算(纯软件,与行级 occupancy 估算互不依赖)
+    roofline_est = estimate_families(
+        last_result, arch, peak,
+        mp_count=(sm_limits.mp_count if sm_limits else None),
+        sm_clock_hz=sm_clock_hz,
+    )
     return {
         "available": True,
         "collected_at": int(time.time() * 1000),  # 组装时刻;数据本体是最近一窗
         "pause_ms": 0,     # 常驻 launch 采集,不暂停服务
         "passes": 0,       # 无 kernel 重放(深窗指标未开放)
         "kernels": kernels,
+        "roofline_est": roofline_est,
     }

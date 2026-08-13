@@ -259,7 +259,7 @@ const I18N = {
     'dprof.hint': '上面告诉你哪个 kernel 慢、为什么慢;这里告诉你卡在什么资源上、该往哪改',
     'dprof.collect': '读取深度剖析',
     'dprof.collecting': '读取中…',
-    'dprof.costWarn': '启动配置、理论占用率上限、受限资源、wave 量化来自常驻 launch 采集,不暂停服务。实测占用率 / Tensor Core / L2 / DRAM 需深窗采集(未开放),显示 —。理论上限为估算,误差几个百分点。',
+    'dprof.costWarn': '启动配置、理论占用率上限、受限资源、wave 量化来自常驻 launch 采集,不暂停服务。roofline 判型/achieved 为软件估算(口径见上方估算卡)。L2/DRAM 列来自一次性 ncu 离线标定(未标定显示 —)。行级实测占用率/Tensor Core 需深窗采集(未开放),显示 —。',
     'dprof.meta': '读自最近采样窗 · {time} · 常驻采集无暂停',
     'dprof.empty': '还没读过。点上面的按钮,从最近采样窗组装剖析 —— 每个 kernel 的启动配置、理论占用率上限、受限资源和 wave 量化。',
     'dprof.occupancy': '占用率',
@@ -283,8 +283,24 @@ const I18N = {
     'dprof.tensorLow': 'Tensor Core 利用率低 —— 检查维度是否对齐 tile 要求',
     'dprof.noAdvice': '这个 kernel 没有明显的配置层问题',
     'dprof.l2Uncalibrated': 'L2 数值尚未标定,仅供参考',
+    'dprof.calibratedSrc': 'ncu 离线标定实测(decode M=1 口径,一次性维护窗口采集)',
     'dprof.colKernel': 'Kernel',
     'dprof.expandHint': '点行展开看启动配置与建议',
+    // #2/#3 family 级 roofline 估算(纯软件推算,不停服务;判型码由后端给,这里翻译)
+    'dprof.estTitle': '📊 Roofline 估算 · kernel 家族级 · 纯软件推算',
+    'dprof.estWindow': '本窗 decode ≈ {steps} 步/s · GPU 活跃 {busy}%',
+    'dprof.estColFam': 'Kernel 家族',
+    'dprof.estColTime': '时间占比',
+    'dprof.estColAI': 'AI(FLOP/B)',
+    'dprof.estColAchieved': 'achieved(估算)',
+    'dprof.estColVerdict': '判型',
+    'dprof.estRidge': 'ridge {r}',
+    'dprof.estVerdict.memory-latency-bound': 'memory-bound · 未喂饱带宽',
+    'dprof.estVerdict.memory-bound': 'memory-bound · 带宽饱和',
+    'dprof.estVerdict.compute-bound': 'compute-bound',
+    'dprof.estNoShape': '形状依赖序列长度,不估',
+    'dprof.estNotesTitle': '口径与假设',
+    'dprof.estLatencyAdvice': '离 memory roof 还很远 —— kernel 没吃饱,加大并发/batch 比改 kernel 更划算',
     // #5 comm 桶细分
     'csub.title': '通信细分',
     'csub.hint': '占通信总时间 · allreduce 常是延迟型,all_gather / reduce_scatter 常是带宽型,优化手段不同',
@@ -771,7 +787,7 @@ Your "extra guidance" is appended after this contract.`,
     'dprof.hint': 'Above tells you which kernel is slow and why; this tells you which resource it is limited by and what to change',
     'dprof.collect': 'Read deep profile',
     'dprof.collecting': 'Reading…',
-    'dprof.costWarn': 'Launch config, theoretical occupancy cap, limiter and wave quantization come from always-on launch capture — no serving pause. Achieved occupancy / Tensor Core / L2 / DRAM need a deep-window collection (not available yet) and show —. Theoretical cap is an estimate within a few points.',
+    'dprof.costWarn': 'Launch config, theoretical occupancy cap, limiter and wave quantization come from always-on launch capture — no serving pause. Roofline verdicts and achieved rates are software estimates (see the estimate card for assumptions). L2/DRAM columns come from a one-time offline ncu calibration (— if not calibrated). Per-kernel achieved occupancy / Tensor Core need a deep-window collection (not available yet) and show —.',
     'dprof.meta': 'From the latest sampling window · {time} · always-on, no pause',
     'dprof.empty': 'Not read yet. Hit the button above to assemble a profile from the latest sampling window — per-kernel launch config, theoretical occupancy cap, limiter and wave quantization.',
     'dprof.occupancy': 'Occupancy',
@@ -795,8 +811,24 @@ Your "extra guidance" is appended after this contract.`,
     'dprof.tensorLow': 'Low Tensor Core utilization — check whether dimensions meet the tile alignment',
     'dprof.noAdvice': 'No obvious launch-configuration problem with this kernel',
     'dprof.l2Uncalibrated': 'L2 value not yet calibrated — treat as indicative only',
+    'dprof.calibratedSrc': 'Measured offline with ncu (decode M=1; one-time maintenance window)',
     'dprof.colKernel': 'Kernel',
     'dprof.expandHint': 'Click a row for launch config and advice',
+    // #2/#3 family-level roofline estimate (pure software, no serving pause; backend emits verdict codes, translated here)
+    'dprof.estTitle': '📊 Roofline estimate · kernel-family level · pure software',
+    'dprof.estWindow': 'decode ≈ {steps} steps/s this window · GPU busy {busy}%',
+    'dprof.estColFam': 'Kernel family',
+    'dprof.estColTime': 'Time share',
+    'dprof.estColAI': 'AI (FLOP/B)',
+    'dprof.estColAchieved': 'achieved (est.)',
+    'dprof.estColVerdict': 'Verdict',
+    'dprof.estRidge': 'ridge {r}',
+    'dprof.estVerdict.memory-latency-bound': 'memory-bound · bandwidth underfed',
+    'dprof.estVerdict.memory-bound': 'memory-bound · bandwidth saturated',
+    'dprof.estVerdict.compute-bound': 'compute-bound',
+    'dprof.estNoShape': 'shape needs sequence length — not estimated',
+    'dprof.estNotesTitle': 'Assumptions',
+    'dprof.estLatencyAdvice': 'Far from the memory roof — kernels are underfed; raising concurrency/batch beats kernel tuning here',
     // #5 comm bucket subdivision
     'csub.title': 'Comm breakdown',
     'csub.hint': '% of total comm time · allreduce is usually latency-bound, all_gather / reduce_scatter usually bandwidth-bound — different fixes',
@@ -2934,6 +2966,37 @@ function dashboard() {
     dprofGridStr(k) {
       const f = (a) => Array.isArray(a) ? a.join('×') : '—';
       return `grid ${f(k.grid)} · block ${f(k.block)}`;
+    },
+    // ===== #2/#3 family 级 roofline 估算(后端 roofline_est 给码,这里翻译/上色) =====
+    dprofFamLabel(fam) {
+      return {
+        'marlin-int4': 'Marlin INT4 GEMM (qkv/o/gate_up/down)',
+        'cublas-gemv': 'cuBLAS GEMV (lm_head)',
+        'flash-attn': 'FlashAttention',
+        'cutlass-gemm': 'CUTLASS GEMM (qkv/o/gate_up/down)',
+      }[fam] || fam;
+    },
+    dprofVerdictLabel(f) {
+      if (!f || !f.verdict) return f && f.ai_flop_per_byte == null ? t('dprof.estNoShape') : '—';
+      return t('dprof.estVerdict.' + f.verdict);
+    },
+    dprofVerdictColor(f) {
+      return {
+        'memory-latency-bound': '#b7791f',   // 未喂饱:琥珀,该加 batch
+        'memory-bound': '#5b5bd6',           // 带宽饱和:靛蓝,得减字节
+        'compute-bound': 'var(--teal)',
+      }[f && f.verdict] || '#9a9aa4';
+    },
+    // achieved 行:有数 → "6.0 GB/s(1.3% roof)";没数 → "—"。两个 roof 取相关的那个:
+    // memory-bound 看带宽 roof,compute-bound 看算力 roof
+    dprofAchievedStr(f) {
+      if (!f) return '—';
+      if (f.verdict === 'compute-bound') {
+        return f.achieved_tflops == null ? '—'
+          : `${fmt(f.achieved_tflops, 2)} TFLOPS (${fmt(f.pct_of_compute_peak, 1)}% roof)`;
+      }
+      return f.achieved_gbps == null ? '—'
+        : `${fmt(f.achieved_gbps, 1)} GB/s (${fmt(f.pct_of_mem_peak, 1)}% roof)`;
     },
 
     // ===== #6 Kernel 快照 A/B 对比：改完 kernel 之后,工具内直接验证有没有变好 =====
