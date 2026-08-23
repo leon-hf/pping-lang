@@ -15,9 +15,11 @@
 
 **[🌐 在线演示 Live Demo →](https://leon-hf.github.io/pping-lang/)** —— 浏览器直接看真机采到的仪表盘（实时 / Kernel / 规则 / 压测 / Autopilot，中英双语）
 
-**Autopilot 已跑通真机闭环**：在 runw（RTX 5060 Ti、vLLM 0.21、Qwen2.5-0.5B）上，Agent 在沙盒里按「诊断 → 改一个参数 → 压测 → 留下/回滚」自动把吞吐从 **986 → 6,094 tok/s（×6.18）**，最终给出人工 promote 的 `vllm serve` 推荐命令。同样重要的是它**敢回滚、会认账**：另一次 session 里 Agent 一步提并发拿到 ×5.1，但实测 TPOT p99 破 SLA —— 判负回滚，收敛到该 SLA 下的诚实最优；7B-AWQ 上诊断命中带宽墙后，Agent 论证「无对症参数」诚实收敛，不编造收益。
+[![pping-lang dashboard —— 压测页：TTFT / TPOT / E2E 分布与 SLO 校验](_promo/bench-zh-crop.png)](https://leon-hf.github.io/pping-lang/)
 
-[在线演示](https://leon-hf.github.io/pping-lang/) · [快速上手](#快速上手) · [Autopilot 真机调优 Quickstart](docs/autopilot-quickstart.md) · [仪表盘](#仪表盘) · [兼容性](#兼容性) · [架构](#架构) · [路线图](#路线图)
+> 🤖 **Autopilot 已跑通真机闭环**：沙盒里按「诊断 → 只改一个参数 → 压测 → 留下/回滚」迭代，`max_num_seqs` 逐级 4 → 64，吞吐 **986 → 6,094 tok/s（×6.18）**；破 SLA 就回滚，不编造收益。详见 [Autopilot](#autopilot)。
+
+[在线演示](https://leon-hf.github.io/pping-lang/) · [快速上手](#快速上手) · [Autopilot](#autopilot) · [仪表盘](#仪表盘) · [兼容性](#兼容性) · [架构](#架构) · [路线图](#路线图)
 
 </div>
 
@@ -28,6 +30,10 @@
 - **2026-07** —— `v0.1.0` 正式版发布：跳出 alpha。Autopilot 达到 M0+M1（真流式 Agent 调用、6 种业务负载形态、session 结构化摘要、中英双语、随时可中断），PC Sampling 稳定性修复，GitHub Pages 双语展示站上线，测试数增至 612
 - **2026-07** —— Autopilot 真机加固与验证：九个真实调优 session 打磨出的一批修复 —— Agent 可在参数值域内自选跨度（证据支持时一步到位，压测判决兜底）；准入闸绑定守卫（waiting 队列是决定性证据，负载喂不满时诚实说"瓶颈在负载"）；median-of-3 压测去噪（p99 在 SLA 边界不再翻转判定）；LLM 调用失败自动兜底并在 UI 显著标记；调优期间主面板端口由 host 侧 bridge 接管，**刷新页面不再打不开**，结束后自动切回；7B-AWQ 上首次真机命中带宽墙 regime 并诚实收敛
 - **2026-07** —— Autopilot M0：诊断驱动的自动调优 Agent 已接入 dashboard 和 host-side 沙盒编排；runw 真机 session 跑出 `986 → 6,094 tok/s（×6.18）`，每轮只改一个 vLLM 参数，bench 验证后才 kept，生产上线仍是人工 promote
+
+<details>
+<summary>更早的更新（2026-05 ~ 2026-06）</summary>
+
 - **2026-06** —— 事实规则诊断引擎：诊断从扁平 if-else 升级为「事实 + 署名推断」两层 —— 规则名即客观事实（测出来的），根因与处方作为署名推断单列；阈值集中到一份 SLA 配置，可在仪表盘里热加载进运行中的引擎，并支持增删自定义规则
 - **2026-06** —— 指标持久化去 DuckDB：进程内 DuckDB 改为顺序追加 JSONL（AppendLog），消除每迭代 INSERT 与 colocated serving 抢 GIL/IO；保留窗口改为时间制（`PPING_LANG_RETENTION_SECONDS`，默认 2h），按卷滚动、磁盘有界
 - **2026-06** —— Dual-path 实时读取架构：实时面板从 DuckDB SQL 路径迁移至内存 ring buffer，bench 启动后 KPI 可见性延迟由 20s 降至 2s
@@ -35,6 +41,8 @@
 - **2026-06** —— 延迟指标改为多统计量并报：TTFT / TPOT 同时披露 p50 / p95 / p99 / avg 及请求数，避免单一百分位对偏态分布的失真
 - **2026-05** —— 内置 bench 模块：dashboard 直接发起静态压测，含三个标准 prompt 数据集（短问答 / 长文档 / 代码）
 - **2026-05** —— `v0.1.0a1` 发布至 PyPI
+
+</details>
 
 ---
 
@@ -44,6 +52,15 @@ vLLM 通过 `stat_logger_plugins` 入口暴露完整的运行时指标（Schedul
 
 1. **指标语义模糊**。`GPU utilization` 反映的是 SM duty cycle 而非吞吐量。在 LLM decode 阶段，该值常稳定于 70–90% 而 MFU 不足 5%，原因为 memory-bound。仅看 utilization 数字无法识别此类瓶颈
 2. **缺乏可操作性**。规则触发、阈值告警、根因关联需要使用方自行实现
+
+常见方案都不解决这两件事：
+
+| | Prometheus + Grafana | Nsight Compute / torch profiler | pping-lang |
+|:--|:--|:--|:--|
+| 接入 | 部署抓取 + 看板链路 | 需在 profiler 下启动专用会话 | `pip install` 后照常 `vllm serve`，常驻 |
+| vLLM 语义指标（TTFT / TPOT / KV cache / …） | 部分 | — | 全套 |
+| Kernel 级证据 | ✗ | ✓（手动会话） | ✓ 常驻，含源码行归因 |
+| 自动结论与处方 | ✗（规则需自写） | ✗（只给原始数据） | ✓ 事实规则引擎，阈值热加载 |
 
 pping-lang 直接消费 `stat_logger_plugins` 回调，结合 NVML 物理层采样，通过规则引擎输出结构化诊断与优化路径。示例输出：
 
@@ -111,9 +128,21 @@ pping-vllm serve <model>      # 等价于 vllm serve,额外开启 Kernel 级采�
 
 ---
 
+## Autopilot
+
+不止诊断，还在沙盒里自动调：按「诊断 → 只改一个参数 → 压测 → 留下/回滚」迭代，**生产 promote 永远人工确认**。真机（runw，RTX 5060 Ti、vLLM 0.21、Qwen2.5-0.5B）上验证过的三种收敛形态：
+
+- **真机 ×6.18**：Agent 依据「准入闸过低」诊断把 `max_num_seqs` 逐级 4 → 64，每轮 bench 验证后才保留，吞吐 986 → 6,094 tok/s（×6.18），最终给出人工 promote 的 `vllm serve` 推荐命令
+- **敢回滚**：另一次 session（2026-07-07）一步把 `max_num_seqs` 4 → 32 拿到 ×5.1，但实测 TPOT p99 82 ms 破 50 ms SLA —— 判负回滚，收敛到该 SLA 下的诚实最优。提议可以大胆，判决只认数据
+- **会认账**：7B-AWQ 上诊断命中带宽墙后，Agent 论证「无对症参数」诚实收敛，不编造收益
+
+快速上手见 [Autopilot 真机调优 Quickstart](docs/autopilot-quickstart.md)。
+
+---
+
 ## 仪表盘
 
-单页应用，单文件 HTML，无需前端构建工具。三个标签页：
+单页应用，单文件 HTML，无需前端构建工具。四个标签页：
 
 | 标签页 | 内容 |
 |:--|:--|
