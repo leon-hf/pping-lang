@@ -15,9 +15,11 @@
 
 **[🌐 Live Demo →](https://leon-hf.github.io/pping-lang/)** — see the dashboard captured from a live GPU box right in your browser (Live / Kernel / Rules / Bench / Autopilot, bilingual)
 
-**Autopilot is now a real closed loop**: on runw (RTX 5060 Ti, vLLM 0.21, Qwen2.5-0.5B), the Agent ran in a sandbox and iterated diagnosis → one knob → benchmark → keep/revert, raising throughput from **986 → 6,094 tok/s (×6.18)** and producing a manual-promote `vllm serve` recommendation.
+[![pping-lang dashboard — Bench tab: TTFT / TPOT / E2E distributions and SLO validation](_promo/bench-en-crop.png)](https://leon-hf.github.io/pping-lang/)
 
-[Live Demo](https://leon-hf.github.io/pping-lang/) · [Quick Start](#quick-start) · [Dashboard](#dashboard) · [Compatibility](#compatibility) · [Architecture](#architecture) · [Roadmap](#roadmap)
+> 🤖 **Autopilot runs a real closed loop on hardware**: in a sandbox it iterates *diagnose → change one knob → benchmark → keep/revert*, stepping `max_num_seqs` from 4 to 64 for **986 → 6,094 tok/s (×6.18)** — and it reverts when the SLA breaks instead of claiming victory. See [Autopilot](#autopilot).
+
+[Live Demo](https://leon-hf.github.io/pping-lang/) · [Quick Start](#quick-start) · [Autopilot](#autopilot) · [Dashboard](#dashboard) · [Compatibility](#compatibility) · [Architecture](#architecture) · [Roadmap](#roadmap)
 
 </div>
 
@@ -28,6 +30,10 @@
 - **2026-07** — `v0.1.0` released: out of alpha. Autopilot reaches M0+M1 (real streaming agent calls, six workload shapes, structured session summaries, EN/ZH i18n, interruptible stop), PC Sampling stability fixes, the bilingual GitHub Pages showcase went live, test count is up to 612
 - **2026-07** — Autopilot hardened and validated on real hardware: a batch of fixes distilled from nine real tuning sessions — the agent can pick its own step size within a knob's range (jumping straight to a value when the evidence supports it, with the benchmark verdict as the backstop); an admission-gate binding guard (the waiting queue is the decisive evidence — when offered load can't fill the batch, it honestly says "the bottleneck is the load"); median-of-3 benchmark de-noising (p99 latency no longer flips the verdict right at an SLA boundary); failed LLM calls now fall back automatically with a visible UI badge; during tuning, the main dashboard's port is taken over by the host-side bridge so **a page refresh no longer breaks**, then switches back automatically when the session ends; first real-hardware session to hit the bandwidth-wall regime on 7B-AWQ and converge honestly
 - **2026-07** — Autopilot M0: the diagnosis-driven auto-tuning agent is wired into the dashboard and host-side sandbox orchestration; a true runw session reached `986 → 6,094 tok/s (×6.18)`, changing one vLLM knob per round and keeping only benchmark-verified wins, while production promotion remains manual
+
+<details>
+<summary>Earlier updates (2026-05 – 2026-06)</summary>
+
 - **2026-06** — Fact-rule diagnosis engine: diagnosis is upgraded from a flat if-else into two layers, "facts + attributed inference" — the rule name is the objective fact (what was measured), while root causes and prescriptions are listed separately as attributed inference; thresholds are centralized into a single SLA config that can be hot-reloaded into the running engine from the dashboard, with support for adding and removing custom rules
 - **2026-06** — Metric persistence drops DuckDB: the in-process DuckDB is replaced with sequential append-only JSONL (AppendLog), eliminating the per-iteration INSERT and its contention for the GIL/IO with colocated serving; the retention window becomes time-based (`PPING_LANG_RETENTION_SECONDS`, default 2h), rolling by volume with bounded disk usage
 - **2026-06** — Dual-path real-time read architecture: the live panel migrates from the DuckDB SQL path to an in-memory ring buffer, cutting KPI visibility latency after a bench starts from 20s down to 2s
@@ -35,6 +41,8 @@
 - **2026-06** — Latency metrics now report multiple statistics: TTFT / TPOT disclose p50 / p95 / p99 / avg together with request count, avoiding the distortion a single percentile causes on a skewed distribution
 - **2026-05** — Built-in bench module: the dashboard launches a static load test directly, with three standard prompt datasets (short Q&A / long document / code)
 - **2026-05** — `v0.1.0a1` released to PyPI
+
+</details>
 
 ---
 
@@ -44,6 +52,15 @@ vLLM exposes the full set of runtime metrics (SchedulerStats, IterationStats, cu
 
 1. **Ambiguous metric semantics.** `GPU utilization` reflects SM duty cycle, not throughput. During the LLM decode phase this value often stays steady at 70–90% while MFU is below 5%, because it is memory-bound. Looking at the utilization number alone cannot identify this kind of bottleneck
 2. **Lack of actionability.** Rule firing, threshold alerting, and root-cause correlation all have to be implemented by the consumer themselves
+
+Neither problem is solved by the usual tools:
+
+| | Prometheus + Grafana | Nsight Compute / torch profiler | pping-lang |
+|:--|:--|:--|:--|
+| Setup | deploy scraping + dashboard stack | launch a dedicated profile session | `pip install`, then your normal `vllm serve`; always-on |
+| vLLM semantic metrics (TTFT / TPOT / KV cache / …) | partial | — | full set |
+| Kernel-level evidence | ✗ | ✓ (manual session) | ✓ always-on, incl. source-line attribution |
+| Automatic verdict & prescription | ✗ (write your own rules) | ✗ (raw data only) | ✓ fact-rule engine, hot-reloadable thresholds |
 
 pping-lang consumes the `stat_logger_plugins` callback directly, combines it with NVML physical-layer sampling, and emits structured diagnoses and optimization paths through a rule engine. Example output:
 
@@ -108,9 +125,21 @@ pping-vllm serve <model>      # 等价于 vllm serve,额外开启 Kernel 级采�
 
 ---
 
+## Autopilot
+
+Beyond diagnosis, it auto-tunes in a sandbox: iterate *diagnose → change one knob → benchmark → keep/revert*, with **production promotion always manual**. Three convergence shapes, all validated on real hardware (runw, RTX 5060 Ti, vLLM 0.21, Qwen2.5-0.5B):
+
+- **×6.18 on real hardware**: acting on the "admission gate too low" diagnosis, the agent stepped `max_num_seqs` from 4 to 64, keeping each round only after the benchmark verified it — output throughput 986 → 6,094 tok/s (×6.18), ending with a `vllm serve` recommendation for manual promotion
+- **Willing to revert**: in another session (2026-07-07) it jumped `max_num_seqs` 4 → 32 in one move for ×5.1, but the measured TPOT p99 of 82 ms broke the 50 ms SLA — ruled a loss and reverted, converging to the honest optimum under that SLA. Proposals can be bold; the verdict only trusts data
+- **Honest about walls**: on 7B-AWQ, after the diagnosis hit a bandwidth wall, the agent argued "no applicable knob" and converged without fabricating gains
+
+See the [Autopilot quickstart](docs/autopilot-quickstart.md) to run it yourself.
+
+---
+
 ## Dashboard
 
-A single-page application, a single HTML file, with no frontend build tooling required. Three tabs:
+A single-page application, a single HTML file, with no frontend build tooling required. Four tabs:
 
 | Tab | Contents |
 |:--|:--|
