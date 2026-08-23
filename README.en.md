@@ -29,10 +29,10 @@
 
 ## Overview
 
-vLLM exposes the full set of runtime metrics (SchedulerStats, IterationStats, cudagraph / perf derived quantities) through the `stat_logger_plugins` entry point, and the usual way to consume them is Prometheus scraping + Grafana visualization. That approach can display metrics but does not produce decision-level conclusions, which leaves two concrete problems:
+vLLM itself exposes rich runtime metrics — per-request queueing and latency, how many sequences each step schedules, KV-cache and GPU-memory usage, prefix-cache hit rate, and more — and the usual way to consume them is Prometheus scraping + Grafana visualization. That approach draws curves but never states conclusions, which leaves two concrete problems:
 
-1. **Ambiguous metric semantics.** `GPU utilization` reflects SM duty cycle, not throughput. During the LLM decode phase this value often stays steady at 70–90% while MFU is below 5%, because it is memory-bound. Looking at the utilization number alone cannot identify this kind of bottleneck
-2. **Lack of actionability.** Rule firing, threshold alerting, and root-cause correlation all have to be implemented by the consumer themselves
+1. **Metrics are easy to misread.** The classic case is GPU utilization: it tells you whether the GPU has work to run, not how many tokens it produces. During decode it often sits steady at 70–90% and looks perfectly healthy, while true compute utilization (MFU) is below 5% — the real bottleneck is memory bandwidth; the GPU spends most of its time waiting for data, not computing. Reading the utilization number alone, you'd never spot it
+2. **Conclusions are DIY.** Which thresholds to set, which alerts to fire, which knob matches which symptom — the tool hands you raw metrics and leaves the rules and root-cause mapping entirely to you
 
 Neither problem is solved by the usual tools:
 
