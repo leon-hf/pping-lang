@@ -29,21 +29,12 @@
 
 ## 概述
 
-vLLM 自身暴露了丰富的运行时指标 —— 每个请求的排队与延迟、每步调度的序列数、KV cache 与显存占用、prefix cache 命中率等 —— 通常的消费方式是 Prometheus 抓取 + Grafana 可视化。这套方案能画出曲线，但不输出结论，留下两个具体问题：
+vLLM 服务慢的时候，真正想知道的是：哪个 kernel 慢、为什么慢、该改哪里。监控曲线回答不了 —— GPU 利用率 85% 看着一切健康，其实 decode 阶段瓶颈常在显存带宽（利用率稳定在 70–90% 而真实算力利用率可能不足 5%，GPU 在等数据，不是在算）。要拿到真答案就得下到 kernel 级 —— 而这通常意味着 Nsight Compute 或 torch profiler。它们的问题：
 
-1. **指标容易误读**。最典型的是 GPU 利用率：它只说明「GPU 有没有活在跑」，不说明「产出了多少 token」。decode 阶段它常稳定在 70–90%，看起来一切健康，而真实算力利用率（MFU）可能不足 5% —— 瓶颈其实在显存带宽，GPU 大部分时间在等数据，不是在算。只看利用率数字，这类问题完全看不出来
-2. **结论要自己造**。阈值怎么定、告警怎么触发、看到了现象该调哪个参数 —— 工具只给原始指标，规则与根因关联全要使用方自己实现
+1. **用起来要先停一下**。得专门开一个采集会话：ncu 要把服务跑在 profiler 下面（甚至重放 kernel 多遍来采齐指标），torch profiler 开窗期间开销显著 —— 正常服务被打断，采到的也只是那一小段窗口
+2. **给的是原始证据，不是结论**。SASS 指令、stall reason、occupancy 摆在面前，从数据到「该调哪个参数、该改哪个 kernel」需要微架构专家来读；而且它们只看 GPU，不认识 vLLM 的概念（TTFT / TPOT / KV cache / `max_num_seqs`），两个世界要自己对齐
 
-常见方案都不解决这两件事：
-
-| | Prometheus + Grafana | Nsight Compute / torch profiler | pping-lang |
-|:--|:--|:--|:--|
-| 接入 | 部署抓取 + 看板链路 | 需在 profiler 下启动专用会话 | `pip install` 后照常 `vllm serve`，常驻 |
-| vLLM 语义指标（TTFT / TPOT / KV cache / …） | 部分 | — | 全套 |
-| Kernel 级证据 | ✗ | ✓（手动会话） | ✓ 常驻，含源码行归因 |
-| 自动结论与处方 | ✗（规则需自写） | ✗（只给原始数据） | ✓ 事实规则引擎，阈值热加载 |
-
-pping-lang 直接消费 `stat_logger_plugins` 回调，结合 NVML 物理层采样，通过规则引擎输出结构化诊断与优化路径。示例输出：
+pping-lang 把 Nsight 级的深度做成 vLLM 的常驻听诊器：`pip install` 后照常 `vllm serve` 就有模型级诊断（示例见下），换成 `pping-vllm serve` 再加常驻的 kernel 级证据 —— 全程不停服务、自带结论。示例输出：
 
 ```text
 [pping-lang] WARNING  GPU 利用率偏低

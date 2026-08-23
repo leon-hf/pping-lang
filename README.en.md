@@ -29,21 +29,12 @@
 
 ## Overview
 
-vLLM itself exposes rich runtime metrics — per-request queueing and latency, how many sequences each step schedules, KV-cache and GPU-memory usage, prefix-cache hit rate, and more — and the usual way to consume them is Prometheus scraping + Grafana visualization. That approach draws curves but never states conclusions, which leaves two concrete problems:
+When a vLLM service is slow, what you actually want to know is: which kernel is slow, why, and what to change. Monitoring curves can't answer that — 85% GPU utilization looks perfectly healthy, yet during decode the real bottleneck is often memory bandwidth (utilization sits steady at 70–90% while true compute utilization is below 5%; the GPU is waiting on data, not computing). Getting real answers means going kernel-level — which usually means Nsight Compute or torch profiler. Their problems:
 
-1. **Metrics are easy to misread.** The classic case is GPU utilization: it tells you whether the GPU has work to run, not how many tokens it produces. During decode it often sits steady at 70–90% and looks perfectly healthy, while true compute utilization (MFU) is below 5% — the real bottleneck is memory bandwidth; the GPU spends most of its time waiting for data, not computing. Reading the utilization number alone, you'd never spot it
-2. **Conclusions are DIY.** Which thresholds to set, which alerts to fire, which knob matches which symptom — the tool hands you raw metrics and leaves the rules and root-cause mapping entirely to you
+1. **Using them interrupts the service.** You need a dedicated capture session: ncu runs the target under the profiler (even replaying kernels multiple times to collect every metric), torch profiler adds significant overhead during its window — normal serving is disturbed, and you only capture that one window
+2. **You get raw evidence, not conclusions.** SASS instructions, stall reasons, and occupancy laid out in front of you — turning that data into "which knob to turn, which kernel to fix" takes a microarchitecture expert; and they only see the GPU, with no notion of vLLM concepts (TTFT / TPOT / KV cache / `max_num_seqs`), leaving you to align the two worlds yourself
 
-Neither problem is solved by the usual tools:
-
-| | Prometheus + Grafana | Nsight Compute / torch profiler | pping-lang |
-|:--|:--|:--|:--|
-| Setup | deploy scraping + dashboard stack | launch a dedicated profile session | `pip install`, then your normal `vllm serve`; always-on |
-| vLLM semantic metrics (TTFT / TPOT / KV cache / …) | partial | — | full set |
-| Kernel-level evidence | ✗ | ✓ (manual session) | ✓ always-on, incl. source-line attribution |
-| Automatic verdict & prescription | ✗ (write your own rules) | ✗ (raw data only) | ✓ fact-rule engine, hot-reloadable thresholds |
-
-pping-lang consumes the `stat_logger_plugins` callback directly, combines it with NVML physical-layer sampling, and emits structured diagnoses and optimization paths through a rule engine. Example output:
+pping-lang turns Nsight-grade depth into an always-on stethoscope for vLLM: plain `vllm serve` after `pip install` gets you model-level diagnoses (see below); swap in `pping-vllm serve` to add always-on kernel-level evidence — no service stop, conclusions attached. Example output:
 
 ```text
 [pping-lang] WARNING  GPU 利用率偏低
