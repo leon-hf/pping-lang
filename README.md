@@ -29,9 +29,21 @@
 
 ## 概述
 
-一个常见困境：vLLM 服务在跑，`nvidia-smi` 显示 GPU 利用率 85%，监控曲线一切正常 —— 但吞吐就是上不去。因为 **GPU 利用率反映的是 SM 占空比，不是吞吐**：LLM decode 阶段它常稳定在 70–90%，而 MFU 不足 5% —— 典型的 memory-bound，GPU 在等显存，不是在算。数字本身给不出这个答案。
+vLLM 通过 `stat_logger_plugins` 入口暴露完整的运行时指标（SchedulerStats、IterationStats、cudagraph / perf 派生量），其消费方式通常为 Prometheus 抓取 + Grafana 可视化。该方案能展示指标但不输出决策结论，存在两个具体问题：
 
-现有工具都停在「给你数字」这一层：Prometheus + Grafana 把曲线画得很好看，但不解释；Nsight Compute 证据最深，但要专门的采集会话，还得是微架构专家才读得懂。**从数字到「该调哪个参数、该改哪个 kernel」之间隔着一套领域知识 —— 补上这段距离，就是 pping-lang 做的事**：`pip install` 后照常 `vllm serve`，常驻采集 vLLM 内部指标与 NVML 物理层，规则引擎输出结构化诊断与处方。示例输出：
+1. **指标语义模糊**。`GPU utilization` 反映的是 SM duty cycle 而非吞吐量。在 LLM decode 阶段，该值常稳定于 70–90% 而 MFU 不足 5%，原因为 memory-bound。仅看 utilization 数字无法识别此类瓶颈
+2. **缺乏可操作性**。规则触发、阈值告警、根因关联需要使用方自行实现
+
+常见方案都不解决这两件事：
+
+| | Prometheus + Grafana | Nsight Compute / torch profiler | pping-lang |
+|:--|:--|:--|:--|
+| 接入 | 部署抓取 + 看板链路 | 需在 profiler 下启动专用会话 | `pip install` 后照常 `vllm serve`，常驻 |
+| vLLM 语义指标（TTFT / TPOT / KV cache / …） | 部分 | — | 全套 |
+| Kernel 级证据 | ✗ | ✓（手动会话） | ✓ 常驻，含源码行归因 |
+| 自动结论与处方 | ✗（规则需自写） | ✗（只给原始数据） | ✓ 事实规则引擎，阈值热加载 |
+
+pping-lang 直接消费 `stat_logger_plugins` 回调，结合 NVML 物理层采样，通过规则引擎输出结构化诊断与优化路径。示例输出：
 
 ```text
 [pping-lang] WARNING  GPU 利用率偏低
@@ -56,15 +68,6 @@ Roofline 视图附带自动结论：
   · 权重量化 (AWQ / GPTQ)
   · 升级带宽更高的 GPU
 ```
-
-与常见工具的分工：
-
-| | Prometheus + Grafana | Nsight Compute / torch profiler | pping-lang |
-|:--|:--|:--|:--|
-| 接入 | 部署抓取 + 看板链路 | 需在 profiler 下启动专用会话 | `pip install` 后照常 `vllm serve`，常驻 |
-| vLLM 语义指标（TTFT / TPOT / KV cache / …） | 部分 | — | 全套 |
-| Kernel 级证据 | ✗ | ✓（手动会话） | ✓ 常驻，含源码行归因 |
-| 自动结论与处方 | ✗（规则需自写） | ✗（只给原始数据） | ✓ 事实规则引擎，阈值热加载 |
 
 以上是模型级结论。更深的证据在 Kernel 级 —— 这是 pping-lang 最硬的部分。
 

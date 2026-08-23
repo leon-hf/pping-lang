@@ -29,9 +29,21 @@
 
 ## Overview
 
-A familiar predicament: your vLLM service is up, `nvidia-smi` shows 85% GPU utilization, and every monitoring curve looks healthy — yet throughput is terrible. That's because **GPU utilization measures SM duty cycle, not throughput**: during LLM decode it often sits steady at 70–90% while MFU is below 5% — classic memory-bound; the GPU is waiting on memory, not computing. The numbers alone will never tell you that.
+vLLM exposes the full set of runtime metrics (SchedulerStats, IterationStats, cudagraph / perf derived quantities) through the `stat_logger_plugins` entry point, and the usual way to consume them is Prometheus scraping + Grafana visualization. That approach can display metrics but does not produce decision-level conclusions, which leaves two concrete problems:
 
-Existing tools all stop at "giving you numbers": Prometheus + Grafana draw the curves beautifully but never explain them; Nsight Compute has the deepest evidence but needs a dedicated capture session — and a microarchitecture expert to read it. **Between the numbers and "which knob to turn, which kernel to fix" lies a body of domain knowledge — bridging exactly that gap is what pping-lang does**: `pip install`, keep running `vllm serve` as usual; it continuously collects vLLM's internal metrics plus the NVML physical layer, and a rule engine emits structured diagnoses and prescriptions. Example output:
+1. **Ambiguous metric semantics.** `GPU utilization` reflects SM duty cycle, not throughput. During the LLM decode phase this value often stays steady at 70–90% while MFU is below 5%, because it is memory-bound. Looking at the utilization number alone cannot identify this kind of bottleneck
+2. **Lack of actionability.** Rule firing, threshold alerting, and root-cause correlation all have to be implemented by the consumer themselves
+
+Neither problem is solved by the usual tools:
+
+| | Prometheus + Grafana | Nsight Compute / torch profiler | pping-lang |
+|:--|:--|:--|:--|
+| Setup | deploy scraping + dashboard stack | launch a dedicated profile session | `pip install`, then your normal `vllm serve`; always-on |
+| vLLM semantic metrics (TTFT / TPOT / KV cache / …) | partial | — | full set |
+| Kernel-level evidence | ✗ | ✓ (manual session) | ✓ always-on, incl. source-line attribution |
+| Automatic verdict & prescription | ✗ (write your own rules) | ✗ (raw data only) | ✓ fact-rule engine, hot-reloadable thresholds |
+
+pping-lang consumes the `stat_logger_plugins` callback directly, combines it with NVML physical-layer sampling, and emits structured diagnoses and optimization paths through a rule engine. Example output:
 
 ```text
 [pping-lang] WARNING  GPU 利用率偏低
@@ -57,16 +69,7 @@ The Roofline view comes with an automatic verdict:
   · 升级带宽更高的 GPU
 ```
 
-How the work divides with the usual tools:
-
-| | Prometheus + Grafana | Nsight Compute / torch profiler | pping-lang |
-|:--|:--|:--|:--|
-| Setup | deploy scraping + dashboard stack | launch a dedicated profile session | `pip install`, then your normal `vllm serve`; always-on |
-| vLLM semantic metrics (TTFT / TPOT / KV cache / …) | partial | — | full set |
-| Kernel-level evidence | ✗ | ✓ (manual session) | ✓ always-on, incl. source-line attribution |
-| Automatic verdict & prescription | ✗ (write your own rules) | ✗ (raw data only) | ✓ fact-rule engine, hot-reloadable thresholds |
-
-Those are model-level conclusions. The deeper evidence is at the kernel level — that's where pping-lang is at its strongest.
+Those are model-level conclusions. The deeper evidence is at the kernel level — the hardest part of pping-lang.
 
 ---
 
