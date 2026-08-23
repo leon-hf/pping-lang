@@ -4,7 +4,7 @@
 
 # pping-lang
 
-**vLLM 性能诊断插件 —— 实时指标采集、规则化分析、结构化建议**
+**vLLM 性能诊断插件 —— 常驻 Kernel 级观测、规则化诊断、沙盒自动调参**
 
 [![PyPI](https://img.shields.io/pypi/v/pping-lang?color=4c8bf5&label=PyPI)](https://pypi.org/project/pping-lang/)
 [![Python](https://img.shields.io/badge/python-3.10%20|%203.11%20|%203.12-4c8bf5)](https://pypi.org/project/pping-lang/)
@@ -17,9 +17,11 @@
 
 [![pping-lang dashboard —— 压测页：TTFT / TPOT / E2E 分布与 SLO 校验](_promo/bench-zh-crop.png)](https://leon-hf.github.io/pping-lang/)
 
+> 🔬 **核心能力是 Kernel 级观测**：把通常要开 Nsight Compute 才拿得到的深度 —— 每 kernel 时间占比、warp stall 归因、Python 源码行 / SASS 热点、launch 配置、per-kernel roofline —— 做成**常驻、低开销、不停服务**，并自带结论。详见 [Kernel 观测](#kernel-观测)。
+
 > 🤖 **Autopilot 已跑通真机闭环**：沙盒里按「诊断 → 只改一个参数 → 压测 → 留下/回滚」迭代，`max_num_seqs` 逐级 4 → 64，吞吐 **986 → 6,094 tok/s（×6.18）**；破 SLA 就回滚，不编造收益。详见 [Autopilot](#autopilot)。
 
-[在线演示](https://leon-hf.github.io/pping-lang/) · [快速上手](#快速上手) · [Autopilot](#autopilot) · [仪表盘](#仪表盘) · [兼容性](#兼容性) · [架构](#架构) · [路线图](#路线图)
+[在线演示](https://leon-hf.github.io/pping-lang/) · [快速上手](#快速上手) · [Kernel 观测](#kernel-观测) · [Autopilot](#autopilot) · [仪表盘](#仪表盘) · [兼容性](#兼容性) · [架构](#架构) · [路线图](#路线图)
 
 </div>
 
@@ -66,6 +68,33 @@ Roofline 视图附带自动结论：
   · 权重量化 (AWQ / GPTQ)
   · 升级带宽更高的 GPU
 ```
+
+以上是模型级结论。更深的证据在 Kernel 级 —— 这是 pping-lang 最硬的部分。
+
+---
+
+## Kernel 观测
+
+> Nsight 是实验室显微镜 —— 偶尔抓一段、离线看、给原始证据；pping-lang 是常驻听诊器 —— 一直跑、说人话、告诉你该调哪里。
+
+把通常要开 Nsight Compute 才拿得到的 kernel 级深度，做成**常驻、低开销、不停服务**，并自带结论。`pping-vllm` 完整接入后默认开启，在**默认多进程 `vllm serve`** 上即可工作（PC Sampling 在 EngineCore 进程内驱动，结果跨进程回流 dashboard），eager 与 cudagraph（生产默认）均支持：
+
+| 能力 | 你看到的 | 口径 |
+|:--|:--|:--|
+| 每 kernel 时间占比 + 算子分类 | GEMM / Attention / elementwise / comm 各占多少 GPU 时间，热点是谁 | PC Sampling 常驻（固定周期采样，样本数 ∝ GPU 时间） |
+| Deep Evidence「为什么慢」 | warp 周期三态（发射 / 停滞 / 调度空转）、全局 stall 分解，可下钻到 PerfWorks 原始 reason | 同上 |
+| 源码级热点（双轨） | Triton kernel 定位到 Python 源码行 + 该行代码原文；闭源库给 SASS 指令热点 + kernel 名解码（`cutlass wmma_bf16 16x16` → tile / 精度 / 目标架构） | 源码行需 lineinfo（Triton / 自编译），闭源走 SASS 轨 |
+| 启动来源 | 闭源 GEMM 也归因到调用它的 host 代码链（如 `nn.Linear`） | DRIVER_API launch 回调，首次出现时抓 backtrace |
+| Launch 配置 | 每个 kernel 的 grid / block / 寄存器 / shared memory | launch-hook 常驻，实测与 PCS 共存，增量开销纳秒级 |
+| Deep Profile | 理论 occupancy + 受限资源徽标（寄存器 / smem / grid）+ wave 量化 + 修改建议（`__launch_bounds__` / 缩 tile / grid 对齐 SM 数） | 纯计算（由 launch 配置 + 设备属性推出），pause_ms=0 不停服务 |
+| Per-kernel roofline | 按家族（marlin / cutlass / gemv / flash）的算术强度、achieved 带宽与判型：compute-bound / memory-bound / **memory-latency-bound（该加并发，不是改 kernel）** | 软件估算，不占计数器；AI / 判型高置信，achieved 低置信并标注 |
+| L2 / DRAM 实测 | 每家族的 L2 命中率与 DRAM GB/s（† 徽标） | ncu 离线标定（每 model × GPU 一次，约 20 分钟维护窗）→ 在线查表 |
+| 快照 A/B 对比 | 「改动前 / 改动后」逐 kernel 对比 stall 构成与速率；带负载漂移检测 —— 负载变了会警告，不冤枉你的改动 | 前端 localStorage |
+| 通信细分 | allreduce / all_gather / reduce_scatter 各自占比（多卡场景；单卡自动隐藏） | 同 PCS |
+
+**为什么能做到不停服务**：单卡上所有硬件计数器路径两两互斥 —— 这是实测结论，不是推断：PCS 活跃时开启 Activity 记录返回 `CUPTI_ERROR_NOT_COMPATIBLE`，侧车进程查询 PM Sampling 计数器直接 `HARDWARE_BUSY`。因此 Kernel 观测拆成三路：**常驻 PC Sampling**（诊断证据）+ **launch-hook**（实测可与 PCS 共存，拿 launch 配置）+ **软件估算 / 离线标定查表**（roofline 与 L2 / DRAM，不占计数器）。需要"真值"的深窗采集（停 PCS → Profiling API → 重启）留作独立决策，默认不做。
+
+**诚实边界**：PCS 数字是统计估算而非精确微秒；理论 occupancy 与 achieved 带宽是估算值，UI 逐项标注估算 / 实测（†）与置信度；CUDA graph 稳态下 launch 配置是捕获时值。要求 Linux + 性能计数器解锁 + 本机可编译 `.so`（缺 g++ / CUPTI 头文件则自动降级为基础接入，任何失败都不影响 vLLM 本身）。
 
 ---
 
@@ -126,7 +155,7 @@ pping-vllm serve <model>      # 等价于 vllm serve,额外开启 Kernel 级采�
 | 标签页 | 内容 |
 |:--|:--|
 | 实时 | 12 项 KPI（TTFT / TPOT / 吞吐 / KV cache / 队列状态 / MFU / GPU 利用 / 显存 / Prefix cache / Padding / 抢占率）；Roofline 散点 + 自动结论；TTFT / TPOT / E2E 时序图。每项 KPI 支持 hover 查看公式与解读 |
-| Kernel | 每个 GPU kernel 的 GPU 时间占比 + 算子分类（GEMM / Attention / …）+ 主导 stall；**源码级热点**（Triton kernel 直接定位到 Python 源码行 + 该行代码原文；闭源库给 SASS 指令热点 + kernel 名解码）；**启动来源**（即便闭源 GEMM 也能归因到调用它的 host 代码，如 nn.Linear）；Roofline 宏观定位；Deep Evidence「为什么慢」（warp 周期三态 / 全局 stall 分解 / PerfWorks reason 下钻）。需 `pping-vllm` 完整接入，eager 与 cudagraph（生产默认）模式均支持 |
+| Kernel | Nsight 级深度、常驻采集、不停服务 —— 时间占比 / stall 归因 / 源码级热点 / launch 配置 / Deep Profile / 快照对比，详见 [Kernel 观测](#kernel-观测)。需 `pping-vllm` 完整接入，eager 与 cudagraph（生产默认）均支持 |
 | 规则 | 只读展示生效中的事实规则（事实名 / 严重度 / 判定条件 + 配置解析后的阈值 / 前置与 regime 门）；中心化 SLA + 阈值编辑器，保存即热加载进运行中的引擎，不重启 vLLM；可增删自定义规则，与策展规则同一引擎评估 |
 | 压测 | 内置 OpenAI 协议静态压测器，配置 endpoint / 调用名 / 并发 / 时长 / prompt 来源，输出 client-side TTFT / TPOT / E2E 分布及 SLO 校验 |
 

@@ -4,7 +4,7 @@
 
 # pping-lang
 
-**A vLLM performance diagnosis plugin — real-time metric collection, rule-based analysis, structured recommendations**
+**A vLLM performance diagnosis plugin — always-on kernel-level observability, rule-based diagnosis, sandboxed auto-tuning**
 
 [![PyPI](https://img.shields.io/pypi/v/pping-lang?color=4c8bf5&label=PyPI)](https://pypi.org/project/pping-lang/)
 [![Python](https://img.shields.io/badge/python-3.10%20|%203.11%20|%203.12-4c8bf5)](https://pypi.org/project/pping-lang/)
@@ -17,9 +17,11 @@
 
 [![pping-lang dashboard — Bench tab: TTFT / TPOT / E2E distributions and SLO validation](_promo/bench-en-crop.png)](https://leon-hf.github.io/pping-lang/)
 
+> 🔬 **The core capability is kernel-level observability**: the depth you'd normally open Nsight Compute for — per-kernel time share, warp stall attribution, Python source lines / SASS hotspots, launch configs, per-kernel roofline — made **always-on, low-overhead, with no service stop**, and a conclusion attached. See [Kernel Observability](#kernel-observability).
+
 > 🤖 **Autopilot runs a real closed loop on hardware**: in a sandbox it iterates *diagnose → change one knob → benchmark → keep/revert*, stepping `max_num_seqs` from 4 to 64 for **986 → 6,094 tok/s (×6.18)** — and it reverts when the SLA breaks instead of claiming victory. See [Autopilot](#autopilot).
 
-[Live Demo](https://leon-hf.github.io/pping-lang/) · [Quick Start](#quick-start) · [Autopilot](#autopilot) · [Dashboard](#dashboard) · [Compatibility](#compatibility) · [Architecture](#architecture) · [Roadmap](#roadmap)
+[Live Demo](https://leon-hf.github.io/pping-lang/) · [Quick Start](#quick-start) · [Kernel Observability](#kernel-observability) · [Autopilot](#autopilot) · [Dashboard](#dashboard) · [Compatibility](#compatibility) · [Architecture](#architecture) · [Roadmap](#roadmap)
 
 </div>
 
@@ -66,6 +68,33 @@ The Roofline view comes with an automatic verdict:
   · 权重量化 (AWQ / GPTQ)
   · 升级带宽更高的 GPU
 ```
+
+Those are model-level conclusions. The deeper evidence is at the kernel level — the hardest part of pping-lang.
+
+---
+
+## Kernel Observability
+
+> Nsight is the lab microscope — pulled out occasionally, read offline, raw evidence. pping-lang is the always-on stethoscope — it runs continuously, speaks plainly, and tells you which knob to turn.
+
+Kernel-grade depth, normally reserved for Nsight Compute, made **always-on, low-overhead, with no service stop**, and conclusions attached. Enabled by default with `pping-vllm` full integration; works on the **default multi-process `vllm serve`** (PC sampling is driven inside the EngineCore process; results flow back to the dashboard across processes); both eager and cudagraph (the production default) are supported:
+
+| Capability | What you see | Method |
+|:--|:--|:--|
+| Per-kernel time share + operator class | how much GPU time goes to GEMM / attention / elementwise / comm, and who the hotspots are | always-on PC sampling (fixed-period; samples ∝ GPU time) |
+| Deep Evidence, "why is it slow" | warp-cycle tri-state (issued / stalled / scheduler slack), global stall breakdown, drill-down to raw PerfWorks reasons | same |
+| Source-level hotspots (dual-track) | Triton kernels resolved to the Python source line + the code text; closed-source libraries get SASS instruction hotspots + kernel-name decoding (`cutlass wmma_bf16 16x16` → tile / dtype / target arch) | source lines need lineinfo (Triton / self-compiled); closed-source takes the SASS track |
+| Launch origin | even a closed-source GEMM is attributed to the host code that launched it (e.g. `nn.Linear`) | DRIVER_API launch callback, backtrace on first sight |
+| Launch configs | grid / block / registers / shared memory per kernel | always-on launch-hook, measured to coexist with PCS; per-launch overhead nanoseconds |
+| Deep Profile | theoretical occupancy + limiter badge (registers / smem / grid) + wave quantization + concrete advice (`__launch_bounds__` / shrink tile / round grid to SM count) | pure computation (launch configs + device attributes); pause_ms=0, no service stop |
+| Per-kernel roofline | per family (marlin / cutlass / gemv / flash): arithmetic intensity, achieved bandwidth, verdict — compute-bound / memory-bound / **memory-latency-bound (raise concurrency, don't touch the kernel)** | software estimate, occupies no counters; AI / verdict high-confidence, achieved low-confidence and labeled |
+| L2 / DRAM measured | per-family L2 hit rate and DRAM GB/s († badge) | offline ncu calibration (once per model × GPU, ~20 min maintenance window) → online lookup |
+| Snapshot A/B | "before / after" per-kernel diff of stall mix and rates, with load-drift detection — warns when the load changed, so your change isn't blamed | client-side localStorage |
+| Comm breakdown | separate shares for allreduce / all_gather / reduce_scatter (multi-GPU; auto-hidden on single GPU) | same PCS |
+
+**Why this works without stopping the service**: on a single GPU, all hardware-counter paths are mutually exclusive — a measured conclusion, not an assumption: enabling Activity records while PCS is live returns `CUPTI_ERROR_NOT_COMPATIBLE`; a sidecar process probing PM Sampling counters gets `HARDWARE_BUSY` outright. Kernel observability is therefore split into three routes: **always-on PC sampling** (diagnostic evidence) + a **launch-hook** (measured to coexist with PCS; captures launch configs) + **software estimation / offline calibration lookup** (roofline and L2 / DRAM; occupies no counters). A "true-value" deep window (stop PCS → Profiling API → restart) remains an explicit, separate decision and is off by default.
+
+**Honest boundaries**: PCS numbers are statistical estimates, not exact microseconds; theoretical occupancy and achieved bandwidth are estimates, labeled per-item in the UI (estimate vs measured †, confidence high / low); under CUDA-graph steady state, launch configs reflect capture-time values. Requires Linux, unlocked performance counters, and a locally compilable `.so` (no g++ / CUPTI headers → automatic fallback to basic integration; no failure mode ever affects vLLM itself).
 
 ---
 
@@ -123,7 +152,7 @@ A single-page application, a single HTML file, with no frontend build tooling re
 | Tab | Contents |
 |:--|:--|
 | Live | 12 KPIs (TTFT / TPOT / throughput / KV cache / queue status / MFU / GPU utilization / VRAM / Prefix cache / Padding / preemption rate); Roofline scatter + automatic verdict; TTFT / TPOT / E2E time series. Each KPI supports hover to see the formula and interpretation |
-| Kernel | Per-GPU-kernel share of GPU time + operator classification (GEMM / Attention / …) + dominant stall; **source-level hotspots** (Triton kernels are located directly to the Python source line + the original text of that line; closed-source libraries get SASS instruction hotspots + kernel name decoding); **launch origin** (even a closed-source GEMM can be attributed to the host code that called it, e.g. nn.Linear); macro positioning via Roofline; Deep Evidence "why is it slow" (warp cycle tri-state / global stall breakdown / PerfWorks reason drill-down). Requires `pping-vllm` full integration; both eager and cudagraph (the production default) modes are supported |
+| Kernel | Nsight-grade depth, always-on, no service stop — time share / stall attribution / source-level hotspots / launch configs / Deep Profile / snapshot compare; see [Kernel Observability](#kernel-observability). Requires `pping-vllm` full integration; both eager and cudagraph (the production default) are supported |
 | Rules | Read-only view of the fact rules in effect (fact name / severity / decision condition + the threshold after config resolution / preconditions and regime gates); a centralized SLA + threshold editor where saving hot-reloads into the running engine without restarting vLLM; custom rules can be added and removed, evaluated by the same engine as the curated rules |
 | Bench | A built-in OpenAI-protocol static load tester; configure endpoint / call name / concurrency / duration / prompt source, and it outputs client-side TTFT / TPOT / E2E distributions and SLO validation |
 
