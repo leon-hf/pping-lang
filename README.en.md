@@ -4,7 +4,7 @@
 
 # pping-lang
 
-**A vLLM performance diagnosis plugin — always-on kernel-level observability, rule-based diagnosis, sandboxed auto-tuning**
+**A vLLM performance diagnosis plugin — always-on kernel-level observability, real-time metrics, sandboxed auto-tuning**
 
 [![PyPI](https://img.shields.io/pypi/v/pping-lang?color=4c8bf5&label=PyPI)](https://pypi.org/project/pping-lang/)
 [![Python](https://img.shields.io/badge/python-3.10%20|%203.11%20|%203.12-4c8bf5)](https://pypi.org/project/pping-lang/)

@@ -4,7 +4,7 @@
 
 # pping-lang
 
-**vLLM 性能诊断插件 —— 常驻 Kernel 级观测、规则化诊断、沙盒自动调参**
+**vLLM 性能诊断插件 —— 常驻 Kernel 级观测、实时指标显示、沙盒自动调参**
 
 [![PyPI](https://img.shields.io/pypi/v/pping-lang?color=4c8bf5&label=PyPI)](https://pypi.org/project/pping-lang/)
 [![Python](https://img.shields.io/badge/python-3.10%20|%203.11%20|%203.12-4c8bf5)](https://pypi.org/project/pping-lang/)
