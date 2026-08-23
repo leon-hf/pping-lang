@@ -34,31 +34,15 @@ When a vLLM service is slow, what you actually want to know is: which kernel is 
 1. **Using them interrupts the service.** You need a dedicated capture session: ncu runs the target under the profiler (even replaying kernels multiple times to collect every metric), torch profiler adds significant overhead during its window — normal serving is disturbed, and you only capture that one window
 2. **You get raw evidence, not conclusions.** SASS instructions, stall reasons, and occupancy laid out in front of you — turning that data into "which knob to turn, which kernel to fix" takes a microarchitecture expert; and they only see the GPU, with no notion of vLLM concepts (TTFT / TPOT / KV cache / `max_num_seqs`), leaving you to align the two worlds yourself
 
-pping-lang turns Nsight-grade depth into an always-on stethoscope for vLLM: plain `vllm serve` after `pip install` gets you model-level diagnoses (see below); swap in `pping-vllm serve` to add always-on kernel-level evidence — no service stop, conclusions attached. Example output:
+pping-lang turns Nsight-grade depth into an always-on stethoscope for vLLM: plain `vllm serve` after `pip install` gets you model-level diagnoses (see below); swap in `pping-vllm serve` to add always-on kernel-level evidence — no service stop, conclusions attached.
 
-```text
-[pping-lang] WARNING  GPU 利用率偏低
-  GPU 平均利用率 3% 持续低于 50% 已 30s
-  建议：检查 batch 是否退化为 1，或开启连续 batching
+Diagnoses (rule name = the measured fact; prescriptions are listed separately as attributed inference):
 
-[pping-lang] WARNING  batch 退化
-  并发请求数 1.0 ≤ 1.0 已 30s
-  建议：增加客户端并发，或检查上游路由是否串行化
-```
+[![Diagnosis example — GPU utilization low / batch degeneration](_promo/diag-cards-en.png)](https://leon-hf.github.io/pping-lang/)
 
-The Roofline view comes with an automatic verdict:
+The Roofline view comes with an automatic verdict and optimization paths:
 
-```text
-当前结论  Memory-bound（decode 阶段的典型状态）
-  算力利用    1%   （0.40 / 33 TFLOPS）
-  带宽利用   52%   （132 / 256 GB/s）
-
-优化路径
-  · 增大 batch 直至 KV cache 占用接近 80%
-  · 启用 speculative decoding
-  · 权重量化 (AWQ / GPTQ)
-  · 升级带宽更高的 GPU
-```
+[![Roofline view — Memory-bound verdict + compute/bandwidth utilization + optimization paths](_promo/roofline-panel-en.png)](https://leon-hf.github.io/pping-lang/)
 
 Those are model-level conclusions. The deeper evidence is at the kernel level — the hardest part of pping-lang.
 

@@ -34,31 +34,15 @@ vLLM 服务慢的时候，真正想知道的是：哪个 kernel 慢、为什么�
 1. **用起来要先停一下**。得专门开一个采集会话：ncu 要把服务跑在 profiler 下面（甚至重放 kernel 多遍来采齐指标），torch profiler 开窗期间开销显著 —— 正常服务被打断，采到的也只是那一小段窗口
 2. **给的是原始证据，不是结论**。SASS 指令、stall reason、occupancy 摆在面前，从数据到「该调哪个参数、该改哪个 kernel」需要微架构专家来读；而且它们只看 GPU，不认识 vLLM 的概念（TTFT / TPOT / KV cache / `max_num_seqs`），两个世界要自己对齐
 
-pping-lang 把 Nsight 级的深度做成 vLLM 的常驻听诊器：`pip install` 后照常 `vllm serve` 就有模型级诊断（示例见下），换成 `pping-vllm serve` 再加常驻的 kernel 级证据 —— 全程不停服务、自带结论。示例输出：
+pping-lang 把 Nsight 级的深度做成 vLLM 的常驻听诊器：`pip install` 后照常 `vllm serve` 就有模型级诊断（示例见下），换成 `pping-vllm serve` 再加常驻的 kernel 级证据 —— 全程不停服务、自带结论。
 
-```text
-[pping-lang] WARNING  GPU 利用率偏低
-  GPU 平均利用率 3% 持续低于 50% 已 30s
-  建议：检查 batch 是否退化为 1，或开启连续 batching
+诊断结论（规则名 = 测出来的事实，处方作为署名推断单列）：
 
-[pping-lang] WARNING  batch 退化
-  并发请求数 1.0 ≤ 1.0 已 30s
-  建议：增加客户端并发，或检查上游路由是否串行化
-```
+[![诊断结论示例 —— GPU 利用率偏低 / batch 退化](_promo/diag-cards-zh.png)](https://leon-hf.github.io/pping-lang/)
 
-Roofline 视图附带自动结论：
+Roofline 视图附带自动结论与优化路径：
 
-```text
-当前结论  Memory-bound（decode 阶段的典型状态）
-  算力利用    1%   （0.40 / 33 TFLOPS）
-  带宽利用   52%   （132 / 256 GB/s）
-
-优化路径
-  · 增大 batch 直至 KV cache 占用接近 80%
-  · 启用 speculative decoding
-  · 权重量化 (AWQ / GPTQ)
-  · 升级带宽更高的 GPU
-```
+[![Roofline 视图 —— Memory-bound 自动结论 + 算力/带宽利用 + 优化路径](_promo/roofline-panel-zh.png)](https://leon-hf.github.io/pping-lang/)
 
 以上是模型级结论。更深的证据在 Kernel 级 —— 这是 pping-lang 最硬的部分。
 

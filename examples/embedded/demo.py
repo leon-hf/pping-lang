@@ -222,16 +222,16 @@ def main() -> int:
         # Force-flush any pending data, then stop bg threads
         if plugin._sink is not None:
             plugin._sink._drain()
-        if plugin._rule_engine is not None:
-            plugin._rule_engine.stop()
+        if plugin._diag_engine is not None:
+            plugin._diag_engine.stop()
         if plugin._sink is not None:
             plugin._sink.close()
 
     print(f"\n{'=' * 70}")
     print(f"Demo done. {step} synthetic steps pushed in {DEMO_DURATION_S}s.")
-    if plugin._rule_engine is not None:
-        print(f"Rule eval ran {plugin._rule_engine.eval_count} times, "
-              f"fired {plugin._rule_engine.fire_count} times.")
+    if plugin._diag_engine is not None:
+        print(f"Rule eval ran {plugin._diag_engine.eval_count} times, "
+              f"fired {plugin._diag_engine.fire_count} times.")
     print(f"Inspect data: duckdb {DEMO_DB} -c 'SELECT * FROM diagnoses;'")
     print("=" * 70)
     return 0
