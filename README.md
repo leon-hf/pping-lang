@@ -25,27 +25,6 @@
 
 ---
 
-## Latest News
-
-- **2026-07** —— `v0.1.0` 正式版发布：跳出 alpha。Autopilot 达到 M0+M1（真流式 Agent 调用、6 种业务负载形态、session 结构化摘要、中英双语、随时可中断），PC Sampling 稳定性修复，GitHub Pages 双语展示站上线，测试数增至 612
-- **2026-07** —— Autopilot 真机加固与验证：九个真实调优 session 打磨出的一批修复 —— Agent 可在参数值域内自选跨度（证据支持时一步到位，压测判决兜底）；准入闸绑定守卫（waiting 队列是决定性证据，负载喂不满时诚实说"瓶颈在负载"）；median-of-3 压测去噪（p99 在 SLA 边界不再翻转判定）；LLM 调用失败自动兜底并在 UI 显著标记；调优期间主面板端口由 host 侧 bridge 接管，**刷新页面不再打不开**，结束后自动切回；7B-AWQ 上首次真机命中带宽墙 regime 并诚实收敛
-- **2026-07** —— Autopilot M0：诊断驱动的自动调优 Agent 已接入 dashboard 和 host-side 沙盒编排；runw 真机 session 跑出 `986 → 6,094 tok/s（×6.18）`，每轮只改一个 vLLM 参数，bench 验证后才 kept，生产上线仍是人工 promote
-
-<details>
-<summary>更早的更新（2026-05 ~ 2026-06）</summary>
-
-- **2026-06** —— 事实规则诊断引擎：诊断从扁平 if-else 升级为「事实 + 署名推断」两层 —— 规则名即客观事实（测出来的），根因与处方作为署名推断单列；阈值集中到一份 SLA 配置，可在仪表盘里热加载进运行中的引擎，并支持增删自定义规则
-- **2026-06** —— 指标持久化去 DuckDB：进程内 DuckDB 改为顺序追加 JSONL（AppendLog），消除每迭代 INSERT 与 colocated serving 抢 GIL/IO；保留窗口改为时间制（`PPING_LANG_RETENTION_SECONDS`，默认 2h），按卷滚动、磁盘有界
-- **2026-06** —— Dual-path 实时读取架构：实时面板从 DuckDB SQL 路径迁移至内存 ring buffer，bench 启动后 KPI 可见性延迟由 20s 降至 2s
-- **2026-06** —— Roofline analytical fallback：在缺失 `perf_stats` 的 vLLM 版本上，依据 `FLOPS ≈ 2·params·tokens` 从 iter 级 token 计数和模型参数量推算 arithmetic intensity 与 throughput，并附区域着色 + 自动结论卡（memory-bound / compute-bound 判定及对应优化路径）
-- **2026-06** —— 延迟指标改为多统计量并报：TTFT / TPOT 同时披露 p50 / p95 / p99 / avg 及请求数，避免单一百分位对偏态分布的失真
-- **2026-05** —— 内置 bench 模块：dashboard 直接发起静态压测，含三个标准 prompt 数据集（短问答 / 长文档 / 代码）
-- **2026-05** —— `v0.1.0a1` 发布至 PyPI
-
-</details>
-
----
-
 ## 概述
 
 vLLM 通过 `stat_logger_plugins` 入口暴露完整的运行时指标（SchedulerStats、IterationStats、cudagraph / perf 派生量），其消费方式通常为 Prometheus 抓取 + Grafana 可视化。该方案能展示指标但不输出决策结论，存在两个具体问题：

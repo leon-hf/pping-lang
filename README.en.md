@@ -25,27 +25,6 @@
 
 ---
 
-## Latest News
-
-- **2026-07** — `v0.1.0` released: out of alpha. Autopilot reaches M0+M1 (real streaming agent calls, six workload shapes, structured session summaries, EN/ZH i18n, interruptible stop), PC Sampling stability fixes, the bilingual GitHub Pages showcase went live, test count is up to 612
-- **2026-07** — Autopilot hardened and validated on real hardware: a batch of fixes distilled from nine real tuning sessions — the agent can pick its own step size within a knob's range (jumping straight to a value when the evidence supports it, with the benchmark verdict as the backstop); an admission-gate binding guard (the waiting queue is the decisive evidence — when offered load can't fill the batch, it honestly says "the bottleneck is the load"); median-of-3 benchmark de-noising (p99 latency no longer flips the verdict right at an SLA boundary); failed LLM calls now fall back automatically with a visible UI badge; during tuning, the main dashboard's port is taken over by the host-side bridge so **a page refresh no longer breaks**, then switches back automatically when the session ends; first real-hardware session to hit the bandwidth-wall regime on 7B-AWQ and converge honestly
-- **2026-07** — Autopilot M0: the diagnosis-driven auto-tuning agent is wired into the dashboard and host-side sandbox orchestration; a true runw session reached `986 → 6,094 tok/s (×6.18)`, changing one vLLM knob per round and keeping only benchmark-verified wins, while production promotion remains manual
-
-<details>
-<summary>Earlier updates (2026-05 – 2026-06)</summary>
-
-- **2026-06** — Fact-rule diagnosis engine: diagnosis is upgraded from a flat if-else into two layers, "facts + attributed inference" — the rule name is the objective fact (what was measured), while root causes and prescriptions are listed separately as attributed inference; thresholds are centralized into a single SLA config that can be hot-reloaded into the running engine from the dashboard, with support for adding and removing custom rules
-- **2026-06** — Metric persistence drops DuckDB: the in-process DuckDB is replaced with sequential append-only JSONL (AppendLog), eliminating the per-iteration INSERT and its contention for the GIL/IO with colocated serving; the retention window becomes time-based (`PPING_LANG_RETENTION_SECONDS`, default 2h), rolling by volume with bounded disk usage
-- **2026-06** — Dual-path real-time read architecture: the live panel migrates from the DuckDB SQL path to an in-memory ring buffer, cutting KPI visibility latency after a bench starts from 20s down to 2s
-- **2026-06** — Roofline analytical fallback: on vLLM versions that lack `perf_stats`, arithmetic intensity and throughput are derived from iter-level token counts and model parameter count via `FLOPS ≈ 2·params·tokens`, with region shading + an automatic verdict card (memory-bound / compute-bound determination and the corresponding optimization path)
-- **2026-06** — Latency metrics now report multiple statistics: TTFT / TPOT disclose p50 / p95 / p99 / avg together with request count, avoiding the distortion a single percentile causes on a skewed distribution
-- **2026-05** — Built-in bench module: the dashboard launches a static load test directly, with three standard prompt datasets (short Q&A / long document / code)
-- **2026-05** — `v0.1.0a1` released to PyPI
-
-</details>
-
----
-
 ## Overview
 
 vLLM exposes the full set of runtime metrics (SchedulerStats, IterationStats, cudagraph / perf derived quantities) through the `stat_logger_plugins` entry point, and the usual way to consume them is Prometheus scraping + Grafana visualization. That approach can display metrics but does not produce decision-level conclusions, which leaves two concrete problems:
