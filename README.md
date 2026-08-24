@@ -4,7 +4,7 @@
 
 # pping-lang
 
-**vLLM 性能诊断插件 —— 常驻 Kernel 级观测、实时指标显示、沙盒自动调参**
+**vLLM 性能诊断插件，常驻 Kernel 级观测、实时指标显示、沙盒自动调参**
 
 [![PyPI](https://img.shields.io/pypi/v/pping-lang?color=4c8bf5&label=PyPI)](https://pypi.org/project/pping-lang/)
 [![Python](https://img.shields.io/badge/python-3.10%20|%203.11%20|%203.12-4c8bf5)](https://pypi.org/project/pping-lang/)
@@ -13,11 +13,11 @@
 [![Tests](https://img.shields.io/badge/tests-612%20passing-43a047)](tests/)
 [![Live Demo](https://img.shields.io/badge/%F0%9F%8C%90%20Live%20Demo-online-5b5bd6)](https://leon-hf.github.io/pping-lang/)
 
-**[🌐 在线演示 Live Demo →](https://leon-hf.github.io/pping-lang/)** —— 浏览器直接看真机采到的仪表盘（实时 / Kernel / 规则 / 压测 / Autopilot，中英双语）
+**[🌐 在线演示 Live Demo →](https://leon-hf.github.io/pping-lang/)**，浏览器直接看真机采到的仪表盘（实时 / Kernel / 规则 / 压测 / Autopilot，中英双语）
 
-[![pping-lang dashboard —— 压测页：TTFT / TPOT / E2E 分布与 SLO 校验](_promo/bench-zh-crop.png)](https://leon-hf.github.io/pping-lang/)
+[![pping-lang dashboard，压测页：TTFT / TPOT / E2E 分布与 SLO 校验](_promo/bench-zh-crop.png)](https://leon-hf.github.io/pping-lang/)
 
-> 🔬 **核心能力是 Kernel 级观测**：把通常要开 Nsight Compute 才拿得到的深度 —— 每 kernel 时间占比、warp stall 归因、Python 源码行 / SASS 热点、launch 配置、per-kernel roofline —— 做成**常驻、低开销、不停服务**，并自带结论。详见 [Kernel 观测](#kernel-观测)。
+> 🔬 **核心能力是 Kernel 级观测**：把通常要开 Nsight Compute 才拿得到的深度，每 kernel 时间占比、warp stall 归因、Python 源码行 / SASS 热点、launch 配置、per-kernel roofline，做成**常驻、低开销、不停服务**，并自带结论。详见 [Kernel 观测](#kernel-观测)。
 
 > 🤖 **Autopilot 已跑通真机闭环**：沙盒里按「诊断 → 只改一个参数 → 压测 → 留下/回滚」迭代，`max_num_seqs` 逐级 4 → 64，吞吐 **986 → 6,094 tok/s（×6.18）**；破 SLA 就回滚，不编造收益。详见 [Autopilot](#autopilot)。
 
@@ -29,43 +29,43 @@
 
 ## 概述
 
-vLLM 服务慢的时候，真正想知道的是：哪个 kernel 慢、为什么慢、该改哪里。监控曲线回答不了 —— GPU 利用率 85% 看着一切健康，其实 decode 阶段瓶颈常在显存带宽（利用率稳定在 70–90% 而真实算力利用率可能不足 5%，GPU 在等数据，不是在算）。要拿到真答案就得下到 kernel 级 —— 而这通常意味着 Nsight Compute 或 torch profiler。它们的问题：
+vLLM 服务慢的时候，真正想知道的是：哪个 kernel 慢、为什么慢、该改哪里。监控曲线回答不了，GPU 利用率 85% 看着一切健康，其实 decode 阶段瓶颈常在显存带宽（利用率稳定在 70–90% 而真实算力利用率可能不足 5%，GPU 在等数据，不是在算）。要拿到真答案就得下到 kernel 级，而这通常意味着 Nsight Compute 或 torch profiler。它们的问题：
 
-1. **用起来要先停一下**。得专门开一个采集会话：ncu 要把服务跑在 profiler 下面（甚至重放 kernel 多遍来采齐指标），torch profiler 开窗期间开销显著 —— 正常服务被打断，采到的也只是那一小段窗口
+1. **用起来要先停一下**。得专门开一个采集会话：ncu 要把服务跑在 profiler 下面（甚至重放 kernel 多遍来采齐指标），torch profiler 开窗期间开销显著，正常服务被打断，采到的也只是那一小段窗口
 2. **给的是原始证据，不是结论**。SASS 指令、stall reason、occupancy 摆在面前，从数据到「该调哪个参数、该改哪个 kernel」需要微架构专家来读；而且它们只看 GPU，不认识 vLLM 的概念（TTFT / TPOT / KV cache / `max_num_seqs`），两个世界要自己对齐
 
-pping-lang 把 Nsight 级的深度做成 vLLM 的常驻听诊器：`pip install` 后照常 `vllm serve` 就有模型级诊断（示例见下），换成 `pping-vllm serve` 再加常驻的 kernel 级证据 —— 全程不停服务、自带结论。
+pping-lang 把 Nsight 级的深度做成 vLLM 的常驻听诊器：`pip install` 后照常 `vllm serve` 就有模型级诊断（示例见下），换成 `pping-vllm serve` 再加常驻的 kernel 级证据，全程不停服务、自带结论。
 
-诊断结论（规则名 = 测出来的事实 —— 双低 / 带宽 / 算力 / 容量四类瓶颈之一，每类多条跨层手段交叉互证，处方作为署名推断单列）：
+诊断结论（规则名 = 测出来的事实，双低 / 带宽 / 算力 / 容量四类瓶颈之一，每类多条跨层手段交叉互证，处方作为署名推断单列）：
 
-[![诊断结论示例 —— 带宽瓶颈 / 双低（四类瓶颈之二）](_promo/diag-cards-zh.png)](https://leon-hf.github.io/pping-lang/)
+[![诊断结论示例，带宽瓶颈 / 双低（四类瓶颈之二）](_promo/diag-cards-zh.png)](https://leon-hf.github.io/pping-lang/)
 
 Roofline 视图附带自动结论与优化路径：
 
-[![Roofline 视图 —— Memory-bound 自动结论 + 算力/带宽利用 + 优化路径](_promo/roofline-panel-zh.png)](https://leon-hf.github.io/pping-lang/)
+[![Roofline 视图，Memory-bound 自动结论 + 算力/带宽利用 + 优化路径](_promo/roofline-panel-zh.png)](https://leon-hf.github.io/pping-lang/)
 
-以上是模型级结论。更深的证据在 Kernel 级 —— 这是 pping-lang 最硬的部分。
+以上是模型级结论。更深的证据在 Kernel 级，这是 pping-lang 最硬的部分。
 
 ---
 
 ## Kernel 观测
 
-> Nsight 是实验室显微镜 —— 偶尔抓一段、离线看、给原始证据；pping-lang 是常驻听诊器 —— 一直跑、说人话、告诉你该调哪里。
+> Nsight 是实验室显微镜，偶尔抓一段、离线看、给原始证据；pping-lang 是常驻听诊器，一直跑、说人话、告诉你该调哪里。
 
 把通常要开 Nsight Compute 才拿得到的 kernel 级深度，做成**常驻、低开销、不停服务**，并自带结论。`pping-vllm` 完整接入后默认开启（默认多进程 `vllm serve` 即可工作，eager / cudagraph 均支持）。下两图均为 runw RTX 5060 Ti 实采、单窗 826 万样本：
 
-[![Kernel 热点 —— 时间占比 / 算子分类 / SASS 级最深热点](_promo/ker-hot-zh.png)](https://leon-hf.github.io/pping-lang/)
+[![Kernel 热点，时间占比 / 算子分类 / SASS 级最深热点](_promo/ker-hot-zh.png)](https://leon-hf.github.io/pping-lang/)
 
-[![启动来源归因（闭源 GEMM → nn.Linear 调用链）+ Deep Evidence「为什么慢」—— stall 分解 + kernel 名解码即结论](_promo/ker-deep-zh.png)](https://leon-hf.github.io/pping-lang/)
+[![启动来源归因（闭源 GEMM → nn.Linear 调用链）+ Deep Evidence「为什么慢」，stall 分解 + kernel 名解码即结论](_promo/ker-deep-zh.png)](https://leon-hf.github.io/pping-lang/)
 
 同一采集还常驻提供：
 
-- **Launch 配置** —— 每个 kernel 的 grid / block / 寄存器 / shared memory
-- **Deep Profile** —— 理论 occupancy + 受限资源 + wave 量化 + 修改建议（纯计算，零停顿）
-- **Per-kernel roofline** —— 按家族（marlin / cutlass / gemv / flash）判型；memory-latency-bound 会直接说「该加并发，不是改 kernel」
+- **Launch 配置**，每个 kernel 的 grid / block / 寄存器 / shared memory
+- **Deep Profile**，理论 occupancy + 受限资源 + wave 量化 + 修改建议（纯计算，零停顿）
+- **Per-kernel roofline**，按家族（marlin / cutlass / gemv / flash）判型；memory-latency-bound 会直接说「该加并发，不是改 kernel」
 - **L2 / DRAM 实测**（ncu 离线标定 † 查表）· **快照 A/B 对比**（带负载漂移检测）· **通信细分**（多卡 allreduce / all_gather / reduce_scatter）
 
-**为什么能不停服务**：实测发现单卡上硬件计数器路径两两互斥（PCS + Activity = `CUPTI_ERROR_NOT_COMPATIBLE`），故拆三路 —— 常驻 PC Sampling + launch-hook（与 PCS 共存，增量纳秒级）+ 软件估算 / 离线标定查表，全程不停服务。
+**为什么能不停服务**：实测发现单卡上硬件计数器路径两两互斥（PCS + Activity = `CUPTI_ERROR_NOT_COMPATIBLE`），故拆三路，常驻 PC Sampling + launch-hook（与 PCS 共存，增量纳秒级）+ 软件估算 / 离线标定查表，全程不停服务。
 
 **诚实边界**：PCS 是统计估算而非精确微秒，估算 / 实测（†）UI 逐项标注；「翻到 .py 源码行」仅 Triton / 自编译路径，闭源库到 SASS 偏移级 + kernel 名解码；需 Linux + 性能计数器解锁 + 本机可编译 `.so`（失败自动降级，不影响 vLLM）。
 
@@ -84,7 +84,7 @@ python -m examples.embedded.demo
 
 ### 接入 vLLM
 
-**基础接入** —— KPI / Roofline / NVML / 诊断,自动加载,不改任何参数：
+**基础接入**，KPI / Roofline / NVML / 诊断，自动加载，不改任何参数：
 
 ```bash
 pip install pping-lang
@@ -93,7 +93,7 @@ vllm serve <model>
 
 vLLM 启动日志将输出 dashboard 地址 `[pping-lang] dashboard → http://localhost:8765`。
 
-**完整接入** —— 再加 Kernel 级 PC Sampling（Deep Evidence「为什么慢」）：
+**完整接入**，再加 Kernel 级 PC Sampling（Deep Evidence「为什么慢」）：
 
 ```bash
 pip install pping-lang
@@ -105,7 +105,7 @@ pping-vllm serve <model>      # 等价于 vllm serve,额外开启 Kernel 级采�
 （透传所有参数）。编不出 `.so`（无 g++ / 无 CUPTI）则**自动降级**为基础接入。
 
 > Kernel 级采集通过 `vllm.general_plugins` 入口在 **EngineCore 进程**驱动 PC sampling、结果跨
-> 进程回流前端 dashboard —— 在**默认多进程 `vllm serve`** 上即可工作,无需单进程。
+> 进程回流前端 dashboard，在**默认多进程 `vllm serve`** 上即可工作,无需单进程。
 
 ---
 
@@ -114,7 +114,7 @@ pping-vllm serve <model>      # 等价于 vllm serve,额外开启 Kernel 级采�
 不止诊断，还在沙盒里自动调：按「诊断 → 只改一个参数 → 压测 → 留下/回滚」迭代，**生产 promote 永远人工确认**。真机（runw，RTX 5060 Ti、vLLM 0.21、Qwen2.5-0.5B）上验证过的三种收敛形态：
 
 - **真机 ×6.18**：Agent 依据「准入闸过低」诊断把 `max_num_seqs` 逐级 4 → 64，每轮 bench 验证后才保留，吞吐 986 → 6,094 tok/s（×6.18），最终给出人工 promote 的 `vllm serve` 推荐命令
-- **敢回滚**：另一次 session（2026-07-07）一步把 `max_num_seqs` 4 → 32 拿到 ×5.1，但实测 TPOT p99 82 ms 破 50 ms SLA —— 判负回滚，收敛到该 SLA 下的诚实最优。提议可以大胆，判决只认数据
+- **敢回滚**：另一次 session（2026-07-07）一步把 `max_num_seqs` 4 → 32 拿到 ×5.1，但实测 TPOT p99 82 ms 破 50 ms SLA，判负回滚，收敛到该 SLA 下的诚实最优。提议可以大胆，判决只认数据
 - **会认账**：7B-AWQ 上诊断命中带宽墙后，Agent 论证「无对症参数」诚实收敛，不编造收益
 
 快速上手见 [Autopilot 真机调优 Quickstart](docs/autopilot-quickstart.md)。
@@ -128,7 +128,7 @@ pping-vllm serve <model>      # 等价于 vllm serve,额外开启 Kernel 级采�
 | 标签页 | 内容 |
 |:--|:--|
 | 实时 | 12 项 KPI（TTFT / TPOT / 吞吐 / KV cache / 队列状态 / MFU / GPU 利用 / 显存 / Prefix cache / Padding / 抢占率）；Roofline 散点 + 自动结论；TTFT / TPOT / E2E 时序图。每项 KPI 支持 hover 查看公式与解读 |
-| Kernel | Nsight 级深度、常驻采集、不停服务 —— 时间占比 / stall 归因 / 源码级热点 / launch 配置 / Deep Profile / 快照对比，详见 [Kernel 观测](#kernel-观测)。需 `pping-vllm` 完整接入，eager 与 cudagraph（生产默认）均支持 |
+| Kernel | Nsight 级深度、常驻采集、不停服务，时间占比 / stall 归因 / 源码级热点 / launch 配置 / Deep Profile / 快照对比，详见 [Kernel 观测](#kernel-观测)。需 `pping-vllm` 完整接入，eager 与 cudagraph（生产默认）均支持 |
 | 规则 | 只读展示生效中的事实规则（事实名 / 严重度 / 判定条件 + 配置解析后的阈值 / 前置与 regime 门）；中心化 SLA + 阈值编辑器，保存即热加载进运行中的引擎，不重启 vLLM；可增删自定义规则，与策展规则同一引擎评估 |
 | 压测 | 内置 OpenAI 协议静态压测器，配置 endpoint / 调用名 / 并发 / 时长 / prompt 来源，输出 client-side TTFT / TPOT / E2E 分布及 SLO 校验 |
 
@@ -224,12 +224,12 @@ NVML 100ms ─────┤   /api/snapshot    /api/roofline        ≤60s
 
 ### 关键源文件
 
-- [`src/pping_lang/sink/base.py`](src/pping_lang/sink/base.py) —— 双路径 Sink 抽象与 ring buffer 定义
-- [`src/pping_lang/sink/local.py`](src/pping_lang/sink/local.py) —— JSONL 顺序追加持久化（AppendLog 写端 / JsonlStore 读端，定义见 [`sink/metric_log.py`](src/pping_lang/sink/metric_log.py)）
-- [`src/pping_lang/collector/vllm_stats.py`](src/pping_lang/collector/vllm_stats.py) —— vLLM IterationStats → MetricPoint 适配
-- [`src/pping_lang/rules/diagnosis_runtime.py`](src/pping_lang/rules/diagnosis_runtime.py) —— 事实规则诊断引擎（评估循环，默认 1s）；纯求值核见 [`diagnosis_engine.py`](src/pping_lang/rules/diagnosis_engine.py)，规则定义见 [`diagnosis_rules.py`](src/pping_lang/rules/diagnosis_rules.py)，中心配置见 [`diagnosis_config.py`](src/pping_lang/rules/diagnosis_config.py)
-- [`src/pping_lang/api/routes.py`](src/pping_lang/api/routes.py) —— FastAPI endpoints
-- [`src/pping_lang/ui/index.html`](src/pping_lang/ui/index.html) —— Alpine.js + Chart.js dashboard
+- [`src/pping_lang/sink/base.py`](src/pping_lang/sink/base.py)，双路径 Sink 抽象与 ring buffer 定义
+- [`src/pping_lang/sink/local.py`](src/pping_lang/sink/local.py)，JSONL 顺序追加持久化（AppendLog 写端 / JsonlStore 读端，定义见 [`sink/metric_log.py`](src/pping_lang/sink/metric_log.py)）
+- [`src/pping_lang/collector/vllm_stats.py`](src/pping_lang/collector/vllm_stats.py)，vLLM IterationStats → MetricPoint 适配
+- [`src/pping_lang/rules/diagnosis_runtime.py`](src/pping_lang/rules/diagnosis_runtime.py)，事实规则诊断引擎（评估循环，默认 1s）；纯求值核见 [`diagnosis_engine.py`](src/pping_lang/rules/diagnosis_engine.py)，规则定义见 [`diagnosis_rules.py`](src/pping_lang/rules/diagnosis_rules.py)，中心配置见 [`diagnosis_config.py`](src/pping_lang/rules/diagnosis_config.py)
+- [`src/pping_lang/api/routes.py`](src/pping_lang/api/routes.py)，FastAPI endpoints
+- [`src/pping_lang/ui/index.html`](src/pping_lang/ui/index.html)，Alpine.js + Chart.js dashboard
 
 ---
 
@@ -289,9 +289,9 @@ ruff check src/ tests/
 
 ## Acknowledgments
 
-- [vLLM](https://github.com/vllm-project/vllm) —— `stat_logger_plugins` 入口
-- [DuckDB](https://duckdb.org/) —— bench 结果的嵌入式存储
-- [NVIDIA NVML](https://docs.nvidia.com/deploy/nvml-api/) —— GPU 物理层采样
+- [vLLM](https://github.com/vllm-project/vllm)，`stat_logger_plugins` 入口
+- [DuckDB](https://duckdb.org/)，bench 结果的嵌入式存储
+- [NVIDIA NVML](https://docs.nvidia.com/deploy/nvml-api/)，GPU 物理层采样
 - 性能模型参考：Williams et al., *Roofline: An Insightful Visual Performance Model* (CACM 2009)；Kaplan et al., *Scaling Laws for Neural Language Models* (2020)
 
 ---

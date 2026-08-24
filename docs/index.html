@@ -662,13 +662,13 @@ footer{border-top:1px solid var(--border);padding:48px 0 60px;margin-top:40px}
         </div>
 
         <h4 style="font-size:14px;font-weight:700;color:var(--text-strong);margin:28px 0 4px" data-i18n="diag.h">诊断结论 · 事实 + 署名推断</h4>
-        <div class="ph-sub" style="font-size:12px;color:var(--muted-2);margin-bottom:6px" data-i18n="diag.sub">内置 4 类瓶颈（双低 / 带宽 / 算力 / 容量），每类多条跨层检测手段（L1 实测 / L2 内核 stall / L3 调度态 / L5 NVML）—— 任一命中即触发，多条命中即交叉互证。下例展示规则被触发时的输出形态（本次压测系统健康，无告警）。</div>
+        <div class="ph-sub" style="font-size:12px;color:var(--muted-2);margin-bottom:6px" data-i18n="diag.sub">内置 4 类瓶颈（双低 / 带宽 / 算力 / 容量），每类多条跨层检测手段（L1 实测 / L2 内核 stall / L3 调度态 / L5 NVML），任一命中即触发，多条命中即交叉互证。下例展示规则被触发时的输出形态（本次压测系统健康，无告警）。</div>
         <div class="diag-list">
           <div class="diag warning">
             <div class="sev"></div>
             <div class="body">
               <div class="top"><span class="ttl" data-i18n="diag.e1.t">带宽瓶颈（逼近显存带宽上限）</span><span class="lvl">warning</span></div>
-              <div class="fact" data-i18n="diag.e1.f">HBM 控制器占用 <code>92%</code>（阈值 85%，L5 NVML）· 内核访存管线 throttle <code>38%</code>（阈值 25%，L2 CUPTI）—— 2/3 条手段交叉命中</div>
+              <div class="fact" data-i18n="diag.e1.f">HBM 控制器占用 <code>92%</code>（阈值 85%，L5 NVML）· 内核访存管线 throttle <code>38%</code>（阈值 25%，L2 CUPTI），2/3 条手段交叉命中</div>
               <div class="rx"><b data-i18n="diag.infer">署名推断 →</b> <span data-i18n="diag.e1.r">投机解码（关注接受率，避免转为计算受限）／ KV 量化（FP8）／ 升级更高带宽 GPU</span></div>
             </div>
           </div>
@@ -676,7 +676,7 @@ footer{border-top:1px solid var(--border);padding:48px 0 60px;margin-top:40px}
             <div class="sev"></div>
             <div class="body">
               <div class="top"><span class="ttl" data-i18n="diag.e2.t">双低（算力、带宽均有余量）</span><span class="lvl">info</span></div>
-              <div class="fact" data-i18n="diag.e2.f">在途请求 <code>8</code>（空载守卫通过）· MFU <code>5%</code>（阈值 20%）· HBM 占用 <code>12%</code>（阈值 50%）—— 算力、带宽均有余量</div>
+              <div class="fact" data-i18n="diag.e2.f">在途请求 <code>8</code>（空载守卫通过）· MFU <code>5%</code>（阈值 20%）· HBM 占用 <code>12%</code>（阈值 50%），算力、带宽均有余量</div>
               <div class="rx"><b data-i18n="diag.infer">署名推断 →</b> <span data-i18n="diag.e2.r">提高 max-num-seqs（并发未填满）／ 确认 CUDA Graph、chunked-prefill 未被 enforce-eager 关闭</span></div>
             </div>
           </div>

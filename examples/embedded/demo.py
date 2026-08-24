@@ -8,7 +8,7 @@
       [推断] 显存无法容纳 KV → 并发受限 → 触发抢占。V1 抢占为纯重算(丢弃 KV、从头 re-prefill), …
       [建议] KV 量化(FP8)/ 降低 max-model-len / KV offload / 降低 max-num-seqs。
 
-(命中 D 规则的两条 L3 调度态手段：KV 池 94% ≥ 90% + 已发生抢占 —— 该层不依赖
+(命中 D 规则的两条 L3 调度态手段：KV 池 94% ≥ 90% + 已发生抢占，该层不依赖
 NVML/CUPTI，所以无 GPU 机器也能演示。A/B/C 需要 L1 实测或 L2 内核 stall，见 README。)
 
 完成后查看落盘数据（jsonl，与 demo DB 同目录）：
