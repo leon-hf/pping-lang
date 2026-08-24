@@ -662,22 +662,22 @@ footer{border-top:1px solid var(--border);padding:48px 0 60px;margin-top:40px}
         </div>
 
         <h4 style="font-size:14px;font-weight:700;color:var(--text-strong);margin:28px 0 4px" data-i18n="diag.h">诊断结论 · 事实 + 署名推断</h4>
-        <div class="ph-sub" style="font-size:12px;color:var(--muted-2);margin-bottom:6px" data-i18n="diag.sub">规则引擎默认每 1s 评估一次。下例展示规则被触发时的输出形态（本次压测系统健康，无告警）。</div>
+        <div class="ph-sub" style="font-size:12px;color:var(--muted-2);margin-bottom:6px" data-i18n="diag.sub">内置 4 类瓶颈（双低 / 带宽 / 算力 / 容量），每类多条跨层检测手段（L1 实测 / L2 内核 stall / L3 调度态 / L5 NVML）—— 任一命中即触发，多条命中即交叉互证。下例展示规则被触发时的输出形态（本次压测系统健康，无告警）。</div>
         <div class="diag-list">
           <div class="diag warning">
             <div class="sev"></div>
             <div class="body">
-              <div class="top"><span class="ttl" data-i18n="diag.e1.t">GPU 利用率偏低</span><span class="lvl">warning</span></div>
-              <div class="fact" data-i18n="diag.e1.f">GPU 平均利用率 <code>3%</code> 持续低于 50% 已 30s</div>
-              <div class="rx"><b data-i18n="diag.infer">署名推断 →</b> <span data-i18n="diag.e1.r">检查 batch 是否退化为 1，或开启连续 batching</span></div>
+              <div class="top"><span class="ttl" data-i18n="diag.e1.t">带宽瓶颈（逼近显存带宽上限）</span><span class="lvl">warning</span></div>
+              <div class="fact" data-i18n="diag.e1.f">HBM 控制器占用 <code>92%</code>（阈值 85%，L5 NVML）· 内核访存管线 throttle <code>38%</code>（阈值 25%，L2 CUPTI）—— 2/3 条手段交叉命中</div>
+              <div class="rx"><b data-i18n="diag.infer">署名推断 →</b> <span data-i18n="diag.e1.r">投机解码（关注接受率，避免转为计算受限）／ KV 量化（FP8）／ 升级更高带宽 GPU</span></div>
             </div>
           </div>
-          <div class="diag warning">
+          <div class="diag info">
             <div class="sev"></div>
             <div class="body">
-              <div class="top"><span class="ttl" data-i18n="diag.e2.t">batch 退化</span><span class="lvl">warning</span></div>
-              <div class="fact" data-i18n="diag.e2.f">并发请求数 <code>1.0</code> ≤ 1.0 已 30s</div>
-              <div class="rx"><b data-i18n="diag.infer">署名推断 →</b> <span data-i18n="diag.e2.r">增加客户端并发，或检查上游路由是否串行化</span></div>
+              <div class="top"><span class="ttl" data-i18n="diag.e2.t">双低（算力、带宽均有余量）</span><span class="lvl">info</span></div>
+              <div class="fact" data-i18n="diag.e2.f">在途请求 <code>8</code>（空载守卫通过）· MFU <code>5%</code>（阈值 20%）· HBM 占用 <code>12%</code>（阈值 50%）—— 算力、带宽均有余量</div>
+              <div class="rx"><b data-i18n="diag.infer">署名推断 →</b> <span data-i18n="diag.e2.r">提高 max-num-seqs（并发未填满）／ 确认 CUDA Graph、chunked-prefill 未被 enforce-eager 关闭</span></div>
             </div>
           </div>
         </div>
@@ -1211,10 +1211,10 @@ const I18N_EN = {
   "lat.h":"Latency over time · TTFT / TPOT","lat.sub":"p50 / p99 trend, bucketed (4s/bucket) over the bench window",
   "lat.note":'This host follows the production-default CUDA graph path; diagnostics keep <code style="font-family:var(--mono)">--enable-mfu-metrics</code>, so MFU / bandwidth / Roofline can come directly from vLLM runtime metrics.',
   "diag.h":"Diagnoses · fact + signed inference",
-  "diag.sub":"The rule engine evaluates every 1s by default. The examples below show the output shape when a rule fires (this bench was healthy — no alerts).",
+  "diag.sub":"Built-in diagnoses cover 4 bottlenecks (under-utilized / bandwidth / compute / capacity), each with multiple cross-layer detectors (L1 measured / L2 kernel stall / L3 scheduler state / L5 NVML) — any one hit fires the rule; several hits cross-confirm. The examples below show the output shape when a rule fires (this bench was healthy — no alerts).",
   "diag.infer":"signed inference →",
-  "diag.e1.t":"GPU utilization low","diag.e1.f":'GPU average utilization <code>3%</code> has stayed below 50% for 30s',"diag.e1.r":"Check whether batch degenerated to 1, or enable continuous batching",
-  "diag.e2.t":"Batch degeneration","diag.e2.f":'Concurrent requests <code>1.0</code> ≤ 1.0 for 30s',"diag.e2.r":"Increase client concurrency, or check whether upstream routing serializes",
+  "diag.e1.t":"Bandwidth bottleneck (hugging the HBM bandwidth roof)","diag.e1.f":'HBM controller at <code>92%</code> (threshold 85%, L5 NVML) · kernel memory-pipe throttle <code>38%</code> (threshold 25%, L2 CUPTI) — 2/3 detectors cross-confirm',"diag.e1.r":"Speculative decoding (watch acceptance rate) / KV quantization (FP8) / move to a higher-bandwidth GPU",
+  "diag.e2.t":"Under-utilized (compute & bandwidth both idle)","diag.e2.f":'Running requests <code>8</code> (idle guard passed) · MFU <code>5%</code> (threshold 20%) · HBM utilization <code>12%</code> (threshold 50%)',"diag.e2.r":"Raise max-num-seqs (batch not filled) / confirm CUDA Graph & chunked-prefill aren\'t disabled (enforce-eager)",
   "ker.note":'<b>This is exactly what you\'d open Nsight Compute for — but always-on, in your dashboard, with a conclusion attached.</b> Kernel-level capture needs the full integration (<code style="font-family:var(--mono)">pping-vllm serve</code>, PC Sampling via CUPTI injection). Below are <b>real hotspots captured live on runw\'s RTX 5060 Ti (Blackwell)</b> — 8.26M samples in one window.',
   "ker.h":"GPU kernel time share · top hotspots + operator class",
   "ker.sub":"descending by GPU time · each kernel expands to a dual-track \"deepest hotspot\" (source line / SASS offset)",

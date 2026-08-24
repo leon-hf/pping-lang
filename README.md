@@ -36,9 +36,9 @@ vLLM 服务慢的时候，真正想知道的是：哪个 kernel 慢、为什么�
 
 pping-lang 把 Nsight 级的深度做成 vLLM 的常驻听诊器：`pip install` 后照常 `vllm serve` 就有模型级诊断（示例见下），换成 `pping-vllm serve` 再加常驻的 kernel 级证据 —— 全程不停服务、自带结论。
 
-诊断结论（规则名 = 测出来的事实，处方作为署名推断单列）：
+诊断结论（规则名 = 测出来的事实 —— 双低 / 带宽 / 算力 / 容量四类瓶颈之一，每类多条跨层手段交叉互证，处方作为署名推断单列）：
 
-[![诊断结论示例 —— GPU 利用率偏低 / batch 退化](_promo/diag-cards-zh.png)](https://leon-hf.github.io/pping-lang/)
+[![诊断结论示例 —— 带宽瓶颈 / 双低（四类瓶颈之二）](_promo/diag-cards-zh.png)](https://leon-hf.github.io/pping-lang/)
 
 Roofline 视图附带自动结论与优化路径：
 

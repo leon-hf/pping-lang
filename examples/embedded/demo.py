@@ -1,19 +1,19 @@
-"""端到端 demo — 不需要真 vLLM/GPU，喂合成 stats 触发 marquee 诊断规则。
+"""端到端 demo — 不需要真 vLLM/GPU，喂合成 stats 触发诊断规则。
 
 跑法：
     python examples/embedded/demo.py
 
-预期输出（约 8 秒后开始出现）：
-    [pping-lang] [!] WARNING: CUDA graph padding 过高
-      CUDA graph padding 比例 70%, 约 70% 的 GPU 算力浪费在补 0
-      -> 调小 max_num_seqs 或开启更细粒度的 cudagraph capture（PIECEWISE 模式）
+预期输出（flush 1s + 评估 1s 后即出现）：
+    [pping-lang] [X] CRITICAL: 容量瓶颈(KV 耗尽并触发抢占)
+      [推断] 显存无法容纳 KV → 并发受限 → 触发抢占。V1 抢占为纯重算(丢弃 KV、从头 re-prefill), …
+      [建议] KV 量化(FP8)/ 降低 max-model-len / KV offload / 降低 max-num-seqs。
 
-    [pping-lang] [!] WARNING: MFU 偏低（计算资源浪费）
-      MFU = 5% < 20%（理论峰值的小部分都没跑到）
-      -> 检查 padding ratio / batch 大小 / dtype（应为 bf16/fp16）
+(命中 D 规则的两条 L3 调度态手段：KV 池 94% ≥ 90% + 已发生抢占 —— 该层不依赖
+NVML/CUPTI，所以无 GPU 机器也能演示。A/B/C 需要 L1 实测或 L2 内核 stall，见 README。)
 
-完成后查询 DuckDB 看完整数据：
-    duckdb ./demo.duckdb -c "SELECT rule_id, severity, message FROM diagnoses;"
+完成后查看落盘数据（jsonl，与 demo DB 同目录）：
+    cat "$TMPDIR/diagnoses.jsonl"    # 诊断（rule_id / severity / message / context）
+    head -2 "$TMPDIR/metrics.jsonl"  # 指标洪流
 """
 from __future__ import annotations
 
@@ -52,7 +52,7 @@ DEMO_GPU_PEAK = GPUPeak(bf16_tflops=989.0, mem_bw_gbs=3350.0)
 
 
 def make_unhealthy_scheduler_stats(step: int) -> SimpleNamespace:
-    """合成 SchedulerStats: 高 padding (~70%) + 低 MFU (~5%)。"""
+    """合成 SchedulerStats: KV 池 94%(≥90% 压力线) + 低 MFU (~5%)。"""
     # cudagraph: 1000 padded tokens, 300 unpadded → 70% padding ratio
     cudagraph = SimpleNamespace(
         num_unpadded_tokens=300,
@@ -60,7 +60,7 @@ def make_unhealthy_scheduler_stats(step: int) -> SimpleNamespace:
         num_paddings=10,
         runtime_mode="PIECEWISE",
     )
-    # perf: ~5% MFU 假设 step 间隔 ~100ms
+    # perf: ~5% MFU 假设 step 间隔 ~100ms(被抢占反复打断的 decode,算力自然跑不满)
     #   target: flops / (peak_flops * dt) ≈ 0.05
     #   peak_flops = 989e12, dt = 0.1s → flops_per_step = 0.05 * 989e12 * 0.1 ≈ 4.9e12
     perf = SimpleNamespace(
@@ -74,7 +74,7 @@ def make_unhealthy_scheduler_stats(step: int) -> SimpleNamespace:
         num_waiting_reqs=2,
         num_skipped_waiting_reqs=0,
         current_wave=step // 10,
-        kv_cache_usage=0.45,
+        kv_cache_usage=0.94,
         prefix_cache_stats=SimpleNamespace(queries=100, hits=15),
         kv_cache_eviction_events=[],
         spec_decoding_stats=None,
@@ -91,7 +91,7 @@ def make_iteration_stats(step: int) -> SimpleNamespace:
         prompt_token_stats=SimpleNamespace(
             total=200, local_cache_hit=30, external_kv_transfer=0,
         ),
-        num_preempted_reqs=0,
+        num_preempted_reqs=1 + step % 3,   # 每步都有抢占(重算式) → D 规则第二条手段
         num_corrupted_reqs=0,
         time_to_first_tokens_iter=[0.15, 0.18],
         inter_token_latencies_iter=[0.025, 0.026],
@@ -191,11 +191,11 @@ def _seed_demo_bench_runs(db_path: Path) -> None:
 
 def main() -> int:
     print("=" * 70)
-    print("pping-lang demo — synthetic vLLM stats with high padding + low MFU")
+    print("pping-lang demo — synthetic vLLM stats with KV pressure + preemption")
     print("=" * 70)
     print(f"DB:       {DEMO_DB}")
     print(f"Duration: {DEMO_DURATION_S}s, step every 100ms")
-    print("Expecting marquee rules to fire after ~6-8s of accumulated data...\n")
+    print("Expecting rule D (容量瓶颈) to fire after ~2-4s (flush 1s + eval 1s)...\n")
 
     plugin = PpingLangStatLogger(vllm_config=None, engine_index=0)
     plugin.log_engine_initialized()
@@ -232,7 +232,7 @@ def main() -> int:
     if plugin._diag_engine is not None:
         print(f"Rule eval ran {plugin._diag_engine.eval_count} times, "
               f"fired {plugin._diag_engine.fire_count} times.")
-    print(f"Inspect data: duckdb {DEMO_DB} -c 'SELECT * FROM diagnoses;'")
+    print(f"Inspect data: {DEMO_DB.parent / 'diagnoses.jsonl'} (metrics.jsonl alongside)")
     print("=" * 70)
     return 0
 

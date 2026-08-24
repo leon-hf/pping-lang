@@ -36,9 +36,9 @@ When a vLLM service is slow, what you actually want to know is: which kernel is 
 
 pping-lang turns Nsight-grade depth into an always-on stethoscope for vLLM: plain `vllm serve` after `pip install` gets you model-level diagnoses (see below); swap in `pping-vllm serve` to add always-on kernel-level evidence — no service stop, conclusions attached.
 
-Diagnoses (rule name = the measured fact; prescriptions are listed separately as attributed inference):
+Diagnoses (rule name = the measured fact — one of four bottlenecks: under-utilized / bandwidth / compute / capacity, each cross-confirmed by multiple cross-layer detectors; prescriptions are listed separately as attributed inference):
 
-[![Diagnosis example — GPU utilization low / batch degeneration](_promo/diag-cards-en.png)](https://leon-hf.github.io/pping-lang/)
+[![Diagnosis example — bandwidth bottleneck / under-utilized (2 of the 4 bottlenecks)](_promo/diag-cards-en.png)](https://leon-hf.github.io/pping-lang/)
 
 The Roofline view comes with an automatic verdict and optimization paths:
 
