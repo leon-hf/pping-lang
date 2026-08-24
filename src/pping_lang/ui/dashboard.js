@@ -1269,6 +1269,8 @@ function _applyRooflineData(chart, data) {
 function _createMiniLatencyChart(canvasId, color) {
   const ctx = document.getElementById(canvasId);
   if (!ctx) return null;
+  // 幂等：canvas 上已有 chart 时先销毁，避免重复 init 抛 "Canvas is already in use"
+  Chart.getChart(ctx)?.destroy();
   return new Chart(ctx.getContext('2d'), {
     type: 'line',
     data: {
@@ -3274,9 +3276,10 @@ function dashboard() {
     },
 
     init() {
-      const ctx = document.getElementById('gpu-chart').getContext('2d');
-
-      _chart = _makeRooflineChart(ctx);
+      const cv = document.getElementById('gpu-chart');
+      // 幂等：重复 init 时先销毁旧实例，避免 "Canvas is already in use" 报错
+      Chart.getChart(cv)?.destroy();
+      _chart = _makeRooflineChart(cv.getContext('2d'));
       // Mini latency-trend charts (TTFT / TPOT / E2E)
       _ttftChart = _createMiniLatencyChart('ttft-chart', '#d8483f');
       _tpotChart = _createMiniLatencyChart('tpot-chart', '#5b5bd6');

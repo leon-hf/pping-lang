@@ -518,14 +518,14 @@
     <!-- ===== Kernel tab (CUPTI 阶段 1a) ===== -->
     <div x-show="tab === 'kernel'">
       <div class="section-head" style="margin-top: 0;">
-        <h2 x-text="t('kern.profileTitle')"><span class="hint" style="margin-left: 10px;" x-text="t('kern.profileHint')"></span></h2>
+        <h2><span x-text="t('kern.profileTitle')"></span><span class="hint" style="margin-left: 10px;" x-text="t('kern.profileHint')"></span></h2>
       </div>
 
       <!-- Roofline(模型级,与 Overview 同数据)— 宏观定位：整模型在屋脊线哪、离峰值多远 -->
       <div class="chart-card" style="margin-bottom: 18px;">
         <div class="head">
           <div>
-            <h3 x-text="t('kern.rooflineTitle')"><span style="color: var(--muted-2); font-weight: 400; font-size: 12px;" x-text="t('kern.rooflineSubtitle')"></span></h3>
+            <h3><span x-text="t('kern.rooflineTitle')"></span> <span style="color: var(--muted-2); font-weight: 400; font-size: 12px;" x-text="t('kern.rooflineSubtitle')"></span></h3>
             <div style="margin-top: 4px; font-size: 11.5px; color: var(--muted-2);" x-text="t('kern.rooflineHint')"></div>
           </div>
           <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap; font-size: 11px; color: var(--muted);">
@@ -558,7 +558,7 @@
             <span x-show="scalingSweep.running" x-text="'⏳ ' + (scalingSweep.progress || t('kern.scalingSweepInProgress'))"></span>
           </button>
           <span x-show="scalingSweep.running" style="font-size: 11.5px; color: var(--muted-2);" x-text="t('kern.scalingSweepNote')"></span>
-          <span x-show="scalingSweep.error" style="font-size: 12px; color: var(--rose);" x-text="t('kern.scalingSweepError', {err: scalingSweep.error})"></span>
+          <template x-if="scalingSweep.error"><span style="font-size: 12px; color: var(--rose);" x-text="t('kern.scalingSweepError', {err: scalingSweep.error})"></span></template>
         </div>
         <template x-if="scalingSweep.verdict">
           <div style="margin-top: 10px; padding: 12px 14px; border-radius: 8px; border: 1px solid var(--border-strong); border-left: 3px solid var(--teal); background: var(--surface-tint); font-size: 12px; color: var(--text); line-height: 1.8;">
@@ -601,7 +601,7 @@
         <div class="chart-card">
           <div class="head">
             <div>
-              <h3 x-text="t('kern.kernelTimePct')"><span style="color: var(--muted-2); font-weight: 400; font-size: 13px; margin-left: 8px;" x-text="t('kern.kernelSampling')"></span></h3>
+              <h3><span x-text="t('kern.kernelTimePct')"></span><span style="color: var(--muted-2); font-weight: 400; font-size: 13px; margin-left: 8px;" x-text="t('kern.kernelSampling')"></span></h3>
               <div style="margin-top: 4px; font-size: 11.5px; color: var(--muted-2);" x-text="t('kern.kernelHint', {n: fmt(deep.result.sample_total, 0)})"></div>
             </div>
             <button class="btn" :disabled="deep.running" @click="runDeepEvidence(5)">
@@ -768,7 +768,7 @@
                         <!-- P3 最深热点：双轨(源码行 / SASS 偏移 + kernel 名解码)-->
                         <template x-if="kernelHotspot(k)">
                           <div style="margin-top: 11px;">
-                            <div style="font-size: 11px; font-weight: 600; color: var(--muted); margin-bottom: 7px; text-transform: uppercase; letter-spacing: 0.04em;" x-text="t('kern.kernelDeepHotspot')"><span style="font-weight: 400; text-transform: none; color: var(--muted-2);">· <span x-text="t('kern.kernelHotspotDesc')"></span></span></div>
+                            <div style="font-size: 11px; font-weight: 600; color: var(--muted); margin-bottom: 7px; text-transform: uppercase; letter-spacing: 0.04em;"><span x-text="t('kern.kernelDeepHotspot')"></span><span style="font-weight: 400; text-transform: none; color: var(--muted-2);"> · <span x-text="t('kern.kernelHotspotDesc')"></span></span></div>
                             <!-- 轨一：可映射 → Python 源码行(行号 + 占比条 + 该行代码原文)-->
                             <template x-if="kernelHotspot(k).mappable && kernelHotspot(k).lines.length">
                               <div style="display: flex; flex-direction: column; gap: 9px; max-width: 640px;">
@@ -877,7 +877,7 @@
           <!-- 概览卡片行 -->
           <div class="kpis" style="margin-bottom: 18px;">
             <div class="kpi teal">
-              <div class="label" x-text="t('kern.gpuBusy')"><span class="kpi-sub-label" x-text="t('kern.wallClockShare')"></span></div>
+              <div class="label"><span x-text="t('kern.gpuBusy')"></span> <span class="kpi-sub-label" x-text="t('kern.wallClockShare')"></span></div>
               <div class="value"><span x-text="fmt(kernels.gpu_busy_pct, 1)"></span><span class="unit">%</span></div>
             </div>
             <div class="kpi indigo">
@@ -906,7 +906,7 @@
           <div style="display: grid; grid-template-columns: 3fr 2fr; gap: 16px; margin-bottom: 18px;">
             <div class="chart-card">
               <div class="head"><div>
-                <h3 x-text="t('kern.classTrend')"><span style="color: var(--muted-2); font-weight: 400; font-size: 12px;" x-text="t('kern.last3Min')"></span></h3>
+                <h3><span x-text="t('kern.classTrend')"></span> <span style="color: var(--muted-2); font-weight: 400; font-size: 12px;" x-text="t('kern.last3Min')"></span></h3>
                 <div style="margin-top: 4px; font-size: 11.5px; color: var(--muted-2);" x-text="t('kern.stackedArea')"></div>
               </div></div>
               <div class="chart-wrap" style="height: 180px; margin-top: 10px;"><canvas id="k-class-chart"></canvas></div>
@@ -930,7 +930,7 @@
             <div class="chart-card" style="margin-bottom: 18px;">
               <div class="head">
                 <div>
-                  <h3 x-text="t('kern.timeline')"><span style="color: var(--muted-2); font-weight: 400; font-size: 12px;" x-text="t('kern.timelineSpan', {n: timelineView().total, span: timelineView().spanMs.toFixed(1)})"></span></h3>
+                  <h3><span x-text="t('kern.timeline')"></span> <span style="color: var(--muted-2); font-weight: 400; font-size: 12px;" x-text="t('kern.timelineSpan', {n: timelineView().total, span: timelineView().spanMs.toFixed(1)})"></span></h3>
                   <div style="margin-top: 4px; font-size: 11.5px; color: var(--muted-2);" x-text="t('kern.timelineHint')"></div>
                 </div>
                 <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap; font-size: 11px; color: var(--muted);">
@@ -1006,7 +1006,7 @@
           <!-- 原始 per-kernel 明细表(未洗) -->
           <div class="chart-card">
             <div class="head">
-              <div><h3 x-text="t('kern.rawKernelDetail')"><span style="color: var(--muted-2); font-weight: 400; font-size: 13px;" :title="t('kern.kernelNameNote')" x-text="t('kern.unique', {n: kernels.top_kernels.length})"></span></h3>
+              <div><h3><span x-text="t('kern.rawKernelDetail')"></span> <span style="color: var(--muted-2); font-weight: 400; font-size: 13px;" :title="t('kern.kernelNameNote')" x-text="t('kern.unique', {n: kernels.top_kernels.length})"></span></h3>
                 <div style="margin-top: 4px; font-size: 11.5px; color: var(--muted-2);">
                   <span x-text="t('cleanup.rawKernelPre')"></span> (<code>end−start</code>)<span x-text="t('cleanup.rawKernelPost')"></span> ·
                   <strong x-text="t('kern.allValuesWindow', {w: fmt(kernels.rollup_window_s, 0)})"></strong>
@@ -1064,7 +1064,7 @@
       <div class="chart-card" style="margin-top: 18px;">
         <div class="head" style="display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;">
           <div>
-            <h3 x-text="t('kern.deepEvidence')"><span style="color: var(--muted-2); font-weight: 400; font-size: 12px;" x-text="t('kern.deepEvidenceSub')"></span></h3>
+            <h3><span x-text="t('kern.deepEvidence')"></span> <span style="color: var(--muted-2); font-weight: 400; font-size: 12px;" x-text="t('kern.deepEvidenceSub')"></span></h3>
             <div style="margin-top: 4px; font-size: 11.5px; color: var(--muted-2);" x-text="t('kern.deepHint')"></div>
           </div>
           <div style="display: flex; gap: 8px; align-items: center;">
@@ -1110,7 +1110,7 @@
             <!-- #1 Warp 周期三态：发指令 / 就绪未选中(余量) / 真 stall -->
             <template x-if="warpSplit()">
               <div style="margin-bottom: 18px;">
-                <div style="font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 8px;" x-text="t('kern.warpCycleDirection')"><span style="font-weight: 400; text-transform: none;" x-text="t('kern.allSamples', {n: fmt(deep.result.sample_total, 0)})"></span></div>
+                <div style="font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 8px;"><span x-text="t('kern.warpCycleDirection')"></span> <span style="font-weight: 400; text-transform: none;" x-text="'· ' + t('kern.allSamples', {n: fmt(deep.result.sample_total, 0)})"></span></div>
                 <div style="display: flex; height: 18px; border-radius: 5px; overflow: hidden; background: #e9ebee;">
                   <div :style="`width:${warpSplit().issued}%;background:#0d8b80`" :title="t('cleanup.warpIssuedTitle', {pct: fmt(warpSplit().issued,1)})"></div>
                   <div :style="`width:${warpSplit().slack}%;background:#9bb04f`" :title="t('cleanup.warpSlackTitle', {pct: fmt(warpSplit().slack,1)})"></div>
@@ -1126,7 +1126,7 @@
             </template>
 
             <!-- #2 全局 stall 构成(点行展开 → #4 原始 PerfWorks reason)-->
-            <div style="font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 8px;" x-text="t('kern.stallBreakdown')"><span style="font-weight: 400; text-transform: none;" x-text="t('kern.stallBreakdownSub')"></span></div>
+            <div style="font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 8px;"><span x-text="t('kern.stallBreakdown')"></span> <span style="font-weight: 400; text-transform: none;" x-text="t('kern.stallBreakdownSub')"></span></div>
             <div style="display: flex; flex-direction: column; gap: 9px;">
               <template x-for="s in deep.result.stall_shares.filter(x => x.pct >= 0.5)" :key="s.cls">
                 <div>
