@@ -52,24 +52,22 @@ Those are model-level conclusions. The deeper evidence is at the kernel level �
 
 > Nsight is the lab microscope — pulled out occasionally, read offline, raw evidence. pping-lang is the always-on stethoscope — it runs continuously, speaks plainly, and tells you which knob to turn.
 
-Kernel-grade depth, normally reserved for Nsight Compute, made **always-on, low-overhead, with no service stop**, and conclusions attached. Enabled by default with `pping-vllm` full integration; works on the **default multi-process `vllm serve`** (PC sampling is driven inside the EngineCore process; results flow back to the dashboard across processes); both eager and cudagraph (the production default) are supported:
+Kernel-grade depth, normally reserved for Nsight Compute, made **always-on, low-overhead, with no service stop**, and conclusions attached. Enabled by default with `pping-vllm` full integration; works on the default multi-process `vllm serve` (eager and cudagraph both supported). Both shots below are real captures from runw (RTX 5060 Ti, 8.26M samples in one window):
 
-| Capability | What you see | Method |
-|:--|:--|:--|
-| Per-kernel time share + operator class | how much GPU time goes to GEMM / attention / elementwise / comm, and who the hotspots are | always-on PC sampling (fixed-period; samples ∝ GPU time) |
-| Deep Evidence, "why is it slow" | warp-cycle tri-state (issued / stalled / scheduler slack), global stall breakdown, drill-down to raw PerfWorks reasons | same |
-| Source-level hotspots (dual-track) | Triton kernels resolved to the Python source line + the code text; closed-source libraries get SASS instruction hotspots + kernel-name decoding (`cutlass wmma_bf16 16x16` → tile / dtype / target arch) | source lines need lineinfo (Triton / self-compiled); closed-source takes the SASS track |
-| Launch origin | even a closed-source GEMM is attributed to the host code that launched it (e.g. `nn.Linear`) | DRIVER_API launch callback, backtrace on first sight |
-| Launch configs | grid / block / registers / shared memory per kernel | always-on launch-hook, measured to coexist with PCS; per-launch overhead nanoseconds |
-| Deep Profile | theoretical occupancy + limiter badge (registers / smem / grid) + wave quantization + concrete advice (`__launch_bounds__` / shrink tile / round grid to SM count) | pure computation (launch configs + device attributes); pause_ms=0, no service stop |
-| Per-kernel roofline | per family (marlin / cutlass / gemv / flash): arithmetic intensity, achieved bandwidth, verdict — compute-bound / memory-bound / **memory-latency-bound (raise concurrency, don't touch the kernel)** | software estimate, occupies no counters; AI / verdict high-confidence, achieved low-confidence and labeled |
-| L2 / DRAM measured | per-family L2 hit rate and DRAM GB/s († badge) | offline ncu calibration (once per model × GPU, ~20 min maintenance window) → online lookup |
-| Snapshot A/B | "before / after" per-kernel diff of stall mix and rates, with load-drift detection — warns when the load changed, so your change isn't blamed | client-side localStorage |
-| Comm breakdown | separate shares for allreduce / all_gather / reduce_scatter (multi-GPU; auto-hidden on single GPU) | same PCS |
+[![Kernel hotspots — time share / operator class / deepest SASS hotspot](_promo/ker-hot-en.png)](https://leon-hf.github.io/pping-lang/)
 
-**Why this works without stopping the service**: on a single GPU, all hardware-counter paths are mutually exclusive — a measured conclusion, not an assumption: enabling Activity records while PCS is live returns `CUPTI_ERROR_NOT_COMPATIBLE`; a sidecar process probing PM Sampling counters gets `HARDWARE_BUSY` outright. Kernel observability is therefore split into three routes: **always-on PC sampling** (diagnostic evidence) + a **launch-hook** (measured to coexist with PCS; captures launch configs) + **software estimation / offline calibration lookup** (roofline and L2 / DRAM; occupies no counters). A "true-value" deep window (stop PCS → Profiling API → restart) remains an explicit, separate decision and is off by default.
+[![Launch-origin attribution (closed-source GEMM → nn.Linear call chain) + Deep Evidence "why is it slow" — stall breakdown + kernel-name decoding as the conclusion](_promo/ker-deep-en.png)](https://leon-hf.github.io/pping-lang/)
 
-**Honest boundaries**: PCS numbers are statistical estimates, not exact microseconds; theoretical occupancy and achieved bandwidth are estimates, labeled per-item in the UI (estimate vs measured †, confidence high / low); under CUDA-graph steady state, launch configs reflect capture-time values. Requires Linux, unlocked performance counters, and a locally compilable `.so` (no g++ / CUPTI headers → automatic fallback to basic integration; no failure mode ever affects vLLM itself).
+The same capture also provides, always-on:
+
+- **Launch configs** — grid / block / registers / shared memory per kernel
+- **Deep Profile** — theoretical occupancy + limiting resource + wave quantization + concrete advice (pure computation, zero pause)
+- **Per-kernel roofline** — verdict per family (marlin / cutlass / gemv / flash); memory-latency-bound says outright "raise concurrency, don't touch the kernel"
+- **L2 / DRAM measured** (offline ncu calibration, † lookup) · **snapshot A/B** (with load-drift detection) · **comm breakdown** (multi-GPU allreduce / all_gather / reduce_scatter)
+
+**Why it never stops the service**: measured on a single GPU, hardware-counter paths are mutually exclusive (PCS + Activity = `CUPTI_ERROR_NOT_COMPATIBLE`), so the design takes three routes — always-on PC sampling + a launch-hook (coexists with PCS, nanosecond-level increments) + software estimation / offline calibration lookup. No stop anywhere.
+
+**Honest boundaries**: PCS numbers are statistical estimates, not exact microseconds; estimate vs measured (†) is labeled per-item in the UI; "resolve to a .py source line" works only for Triton / self-compiled kernels — closed-source libraries go to SASS-offset level + kernel-name decoding. Requires Linux, unlocked performance counters, and a locally compilable `.so` (automatic fallback on failure; vLLM itself is never affected).
 
 ---
 

@@ -52,24 +52,22 @@ Roofline 视图附带自动结论与优化路径：
 
 > Nsight 是实验室显微镜 —— 偶尔抓一段、离线看、给原始证据；pping-lang 是常驻听诊器 —— 一直跑、说人话、告诉你该调哪里。
 
-把通常要开 Nsight Compute 才拿得到的 kernel 级深度，做成**常驻、低开销、不停服务**，并自带结论。`pping-vllm` 完整接入后默认开启，在**默认多进程 `vllm serve`** 上即可工作（PC Sampling 在 EngineCore 进程内驱动，结果跨进程回流 dashboard），eager 与 cudagraph（生产默认）均支持：
+把通常要开 Nsight Compute 才拿得到的 kernel 级深度，做成**常驻、低开销、不停服务**，并自带结论。`pping-vllm` 完整接入后默认开启（默认多进程 `vllm serve` 即可工作，eager / cudagraph 均支持）。下两图均为 runw RTX 5060 Ti 实采、单窗 826 万样本：
 
-| 能力 | 你看到的 | 口径 |
-|:--|:--|:--|
-| 每 kernel 时间占比 + 算子分类 | GEMM / Attention / elementwise / comm 各占多少 GPU 时间，热点是谁 | PC Sampling 常驻（固定周期采样，样本数 ∝ GPU 时间） |
-| Deep Evidence「为什么慢」 | warp 周期三态（发射 / 停滞 / 调度空转）、全局 stall 分解，可下钻到 PerfWorks 原始 reason | 同上 |
-| 源码级热点（双轨） | Triton kernel 定位到 Python 源码行 + 该行代码原文；闭源库给 SASS 指令热点 + kernel 名解码（`cutlass wmma_bf16 16x16` → tile / 精度 / 目标架构） | 源码行需 lineinfo（Triton / 自编译），闭源走 SASS 轨 |
-| 启动来源 | 闭源 GEMM 也归因到调用它的 host 代码链（如 `nn.Linear`） | DRIVER_API launch 回调，首次出现时抓 backtrace |
-| Launch 配置 | 每个 kernel 的 grid / block / 寄存器 / shared memory | launch-hook 常驻，实测与 PCS 共存，增量开销纳秒级 |
-| Deep Profile | 理论 occupancy + 受限资源徽标（寄存器 / smem / grid）+ wave 量化 + 修改建议（`__launch_bounds__` / 缩 tile / grid 对齐 SM 数） | 纯计算（由 launch 配置 + 设备属性推出），pause_ms=0 不停服务 |
-| Per-kernel roofline | 按家族（marlin / cutlass / gemv / flash）的算术强度、achieved 带宽与判型：compute-bound / memory-bound / **memory-latency-bound（该加并发，不是改 kernel）** | 软件估算，不占计数器；AI / 判型高置信，achieved 低置信并标注 |
-| L2 / DRAM 实测 | 每家族的 L2 命中率与 DRAM GB/s（† 徽标） | ncu 离线标定（每 model × GPU 一次，约 20 分钟维护窗）→ 在线查表 |
-| 快照 A/B 对比 | 「改动前 / 改动后」逐 kernel 对比 stall 构成与速率；带负载漂移检测 —— 负载变了会警告，不冤枉你的改动 | 前端 localStorage |
-| 通信细分 | allreduce / all_gather / reduce_scatter 各自占比（多卡场景；单卡自动隐藏） | 同 PCS |
+[![Kernel 热点 —— 时间占比 / 算子分类 / SASS 级最深热点](_promo/ker-hot-zh.png)](https://leon-hf.github.io/pping-lang/)
 
-**为什么能做到不停服务**：单卡上所有硬件计数器路径两两互斥 —— 这是实测结论，不是推断：PCS 活跃时开启 Activity 记录返回 `CUPTI_ERROR_NOT_COMPATIBLE`，侧车进程查询 PM Sampling 计数器直接 `HARDWARE_BUSY`。因此 Kernel 观测拆成三路：**常驻 PC Sampling**（诊断证据）+ **launch-hook**（实测可与 PCS 共存，拿 launch 配置）+ **软件估算 / 离线标定查表**（roofline 与 L2 / DRAM，不占计数器）。需要"真值"的深窗采集（停 PCS → Profiling API → 重启）留作独立决策，默认不做。
+[![启动来源归因（闭源 GEMM → nn.Linear 调用链）+ Deep Evidence「为什么慢」—— stall 分解 + kernel 名解码即结论](_promo/ker-deep-zh.png)](https://leon-hf.github.io/pping-lang/)
 
-**诚实边界**：PCS 数字是统计估算而非精确微秒；理论 occupancy 与 achieved 带宽是估算值，UI 逐项标注估算 / 实测（†）与置信度；CUDA graph 稳态下 launch 配置是捕获时值。要求 Linux + 性能计数器解锁 + 本机可编译 `.so`（缺 g++ / CUPTI 头文件则自动降级为基础接入，任何失败都不影响 vLLM 本身）。
+同一采集还常驻提供：
+
+- **Launch 配置** —— 每个 kernel 的 grid / block / 寄存器 / shared memory
+- **Deep Profile** —— 理论 occupancy + 受限资源 + wave 量化 + 修改建议（纯计算，零停顿）
+- **Per-kernel roofline** —— 按家族（marlin / cutlass / gemv / flash）判型；memory-latency-bound 会直接说「该加并发，不是改 kernel」
+- **L2 / DRAM 实测**（ncu 离线标定 † 查表）· **快照 A/B 对比**（带负载漂移检测）· **通信细分**（多卡 allreduce / all_gather / reduce_scatter）
+
+**为什么能不停服务**：实测发现单卡上硬件计数器路径两两互斥（PCS + Activity = `CUPTI_ERROR_NOT_COMPATIBLE`），故拆三路 —— 常驻 PC Sampling + launch-hook（与 PCS 共存，增量纳秒级）+ 软件估算 / 离线标定查表，全程不停服务。
+
+**诚实边界**：PCS 是统计估算而非精确微秒，估算 / 实测（†）UI 逐项标注；「翻到 .py 源码行」仅 Triton / 自编译路径，闭源库到 SASS 偏移级 + kernel 名解码；需 Linux + 性能计数器解锁 + 本机可编译 `.so`（失败自动降级，不影响 vLLM）。
 
 ---
 
